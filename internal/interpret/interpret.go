@@ -80,7 +80,7 @@ func categorize(s signals) string {
 	case s.unsigned && s.listener && s.persistence:
 		return "backdoor"
 	case permissive && corroborated:
-		return "spyware-generic"
+		return "surveillance-capable"
 	case permissive:
 		return "permission-grant" // neutral: a single, uncorroborated privacy grant
 	case s.persistence:
