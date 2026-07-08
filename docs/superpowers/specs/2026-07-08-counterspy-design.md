@@ -191,6 +191,30 @@ sudo counterspy restore <manifest>    # undo a prior quarantine
 story** (ancestry chain, signature verdict, TCC grants, listener) with its score and
 the **exact `Actions`** quarantine would take, then asks per item.
 
+## 8.1 Synthesis & recommendations (never a raw evidence dump)
+
+CounterSpy must not merely list everything it collected — it must **repackage** the
+scored, correlated findings into something a human can act on. A pure `interpret` step
+(no I/O; annotates `Finding`s) sits between `score` and `report`:
+
+- **Verdict** — one plain-language sentence composed from the subject's combined
+  signals, e.g. "unsigned binary holding Input Monitoring + Accessibility, launched by
+  a hidden LaunchAgent, listening on :4444."
+- **Category** — a heuristic label from the signal mix: `keylogger` (Input Monitoring
+  + Accessibility), `backdoor` (unsigned + listener + persistence), `spyware-generic`,
+  `persistence-only`, `unknown`.
+- **Recommendation** — an enum derived from tier + tripwire + mix:
+  `Quarantine` (tripwire, or high tier with an actionable target) · `Investigate`
+  (mid band) · `Monitor` (low/single weak signal). Allowlisted subjects are suppressed,
+  never shown.
+
+The report leads with an **executive summary** (counts per recommendation tier) and
+then the ranked findings, each as its verdict + recommendation + the evidence story
+that supports it — highest-priority first, low-signal noise omitted. This synthesis is
+**rule-based/deterministic** (Rule 6 — code, not the model, so verdicts are
+reproducible and auditable by the §11 ABORT gate) and lives in the core so the CLI and
+any future TUI/WebUI render the *same* recommendations (the §12 decoupling invariant).
+
 ## 9. Error handling & safety (Rule 13 — fail loud, never fail dangerous)
 
 - A collector that errors (e.g. `lsof` denied) is reported as a **gap in the report**

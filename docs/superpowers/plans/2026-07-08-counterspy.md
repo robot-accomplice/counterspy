@@ -1284,7 +1284,25 @@ git add -A && git commit -m "feat: TCC privacy-grant collector"
 
 ---
 
-### Task 10: Report (human + JSON)
+### Task 10: Interpret + Report (synthesis, not a raw dump)
+
+> **[design update — user directive]** Before formatting, add a **pure `internal/interpret`
+> package** that turns each `model.Finding` into a `model.Assessment{Finding; Verdict,
+> Category, Recommendation string}`:
+> - **Verdict**: one composed sentence from the subject's signals (mix of unsigned /
+>   persistence / TCC grants / listener + ancestry).
+> - **Category**: `keylogger` (Input Monitoring + Accessibility), `backdoor` (unsigned +
+>   listener + persistence), `spyware-generic`, `persistence-only`, `unknown`.
+> - **Recommendation**: `Quarantine` (tripwire OR score ≥ high tier with an actionable
+>   target), `Investigate` (mid band), `Monitor` (low). Rule-based/deterministic (Rule 6).
+> `report.Render` then leads with an **executive summary** (counts per recommendation) and
+> renders ranked `Assessment`s (verdict + recommendation + supporting evidence story),
+> omitting low-signal noise. `RenderJSON` emits `[]Assessment`. Tests: keylogger-shape →
+> Category=keylogger + Recommendation=Quarantine; a single Monitor-tier item is summarized,
+> not front-paged. Add `HighTier` constant to score/weights.go. This synthesis lives in the
+> core so the future TUI/WebUI reuse it (spec §8.1, §12 invariant).
+
+The base human+JSON rendering below still applies, now over `[]model.Assessment`:
 
 **Files:**
 - Create: `internal/report/report.go`

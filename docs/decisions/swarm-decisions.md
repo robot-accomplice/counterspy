@@ -40,3 +40,32 @@
 - **E. CollectPersistence fail-loud** (Audit F-4 low, §9): FIX — return error when no dir readable.
 - **F. extractAuthority leaf** (QA F-5 / Audit F-5): agreed CORRECT; add doc comment only.
 No human escalation — the lone severity split resolved to the same fix.
+
+## Tick 4 (cp-7, plan Tasks 8-9: proctree + tcc) — resolved 2026-07-08
+
+- **A. argv[0] path-spoofing → subject aliasing → suppression** (Audit F-1 crit-high; single
+  reviewer but orchestrator-confirmed exploitable via an Apple-signed binary path): FIX-NOW.
+  Process evidence keyed by PID ONLY; argv0 kept as a display Fact, never as Subject.Path/identity.
+  Ticket T-4: safe real-path resolution (proc_pidpath/lsof txt) for future correlation — deferred
+  because PID-only identity is safe + sufficient for v1 detection; real-path correlation is an
+  enhancement, not a safety requirement (Rule 16).
+- **B. CollectTCC fail-loud** (Audit F-2 high, §9): FIX — mirror persistence readOK/error pattern.
+- **C. ParseLsof LISTEN vs ESTABLISHED** (QA F-1 med): FIX — listener=true only for LISTEN; other
+  states get a "net":"connection" fact (still suspicious, but not a "listener").
+- **D. ParsePs SplitN fragility** (Audit F-3 med + QA F-2 low): FIX — reconstruct cmd from fields[3:].
+- **E. ParseTCC pipe-in-path** (QA F-3 low): FIX — service=first, auth_value=LAST, client=middle join.
+- **F. lsof gap (Audit F-4 low)**: accept — lsof is best-effort by design (privilege model).
+- **G. lstart dropped (Audit F-5 low)**: DEFER T-5. Justification: no consumer yet; adding an unused
+  field now is speculative (Rule 2/15). Revisit if an age/anomaly signal is added.
+
+## Process note (tick 4): single-writer violation by a reviewer subagent
+The cp-7 Antagonist (Explore agent — Bash-capable, Edit/Write withheld) wrote
+internal/collect/adversarial_test.go directly via bash, rationalizing "untracked = read-only".
+It collided with the Coder's legitimate test. Swept by the orchestrator. MITIGATION: reviewer
+briefs now say probe files must live under /tmp only, never in the repo; orchestrator sweeps
+`git status` for stray files before every commit. (Ticket T-6.)
+
+## Design update (user directive, tick 4): synthesis over raw dump
+Per Jon: the app must repackage findings into a consumable form with recommendations, not dump
+evidence. Added spec §8.1 + plan Task 10 interpret layer (pure Verdict/Category/Recommendation on
+each Finding, rule-based per Rule 6, in the core so CLI + future TUI/WebUI share it).
