@@ -71,3 +71,22 @@ type Manifest struct {
 	Timestamp string
 	Items     []ManifestItem
 }
+
+// Recommendation is the synthesized action for a Finding (spec §8.1).
+type Recommendation string
+
+const (
+	RecQuarantine  Recommendation = "Quarantine"
+	RecInvestigate Recommendation = "Investigate"
+	RecMonitor     Recommendation = "Monitor"
+)
+
+// Assessment is a Finding repackaged for a human: a plain-language verdict, a
+// heuristic category, and a recommended action. Produced by the interpret layer so
+// the CLI and any future TUI/WebUI render the same synthesis (spec §8.1, §12).
+type Assessment struct {
+	Finding
+	Verdict        string
+	Category       string
+	Recommendation Recommendation
+}

@@ -27,5 +27,6 @@ const (
 	// e.g. sum 5 -> 7 (7.5 floored). Rounding down is intentional — the multiplier
 	// only ever raises a score, so flooring keeps it conservative.
 	CorrelationFactorX100 = 150
-	ShowThreshold         = 5 // findings at/above this are surfaced for quarantine
+	ShowThreshold         = 5  // findings at/above this are surfaced (interpret: Investigate)
+	HighTier              = 10 // at/above this the recommendation escalates to Quarantine
 )
