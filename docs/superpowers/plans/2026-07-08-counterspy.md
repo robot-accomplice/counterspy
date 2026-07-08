@@ -74,7 +74,7 @@ import "testing"
 
 func TestSubjectKey_PrefersPath(t *testing.T) {
 	s := Subject{Path: "/tmp/evil", PID: 42}
-	if got := s.Key(); got != "/tmp/evil" {
+	if got := s.Key(); got != "path:/tmp/evil" { // [swarm cp-2: namespaced key]
 		t.Fatalf("want path key, got %q", got)
 	}
 }
@@ -117,10 +117,12 @@ type Subject struct {
 	Label string
 }
 
-// Key groups evidence about the same thing: on-disk path if known, else PID.
+// Key is the correlation identity; namespaces are tagged ("path:" vs "pid:") so a
+// captured path can never alias a synthetic PID key. Precedence: Path present drops
+// PID from the key. [swarm cp-2: namespacing added to fix QA/Audit F-1 collision.]
 func (s Subject) Key() string {
 	if s.Path != "" {
-		return s.Path
+		return "path:" + s.Path
 	}
 	return fmt.Sprintf("pid:%d", s.PID)
 }
@@ -1412,6 +1414,11 @@ git add -A && git commit -m "feat: human + JSON reporting"
 ---
 
 ### Task 11: Actor — quarantine + restore (sandbox round-trip)
+
+> **[swarm ticket T-2]** While implementing this task, introduce `type ActionKind string`
+> with consts `ActionBootout`/`ActionMove` in `model` and change `Action.Kind` to it (deferred
+> from tick 1, Audit F-3 — do it here alongside its only consumer). Update the string literals
+> `"move"`/`"bootout"` in this task's and main.go's code to the typed consts.
 
 **Files:**
 - Create: `internal/act/quarantine.go`, `internal/act/restore.go`
