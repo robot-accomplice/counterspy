@@ -2,6 +2,8 @@ package collect
 
 import (
 	"encoding/xml"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,37 +45,65 @@ func ParsePersistencePlist(xmlBytes []byte, path string) ([]model.Evidence, erro
 	return ev, nil
 }
 
-// extractLabelAndTarget tolerantly scans the xml1 dict for Label and the first
-// ProgramArguments entry.
+// extractLabelAndTarget scans the xml1 dict for Label and the persistence target.
+// It distinguishes <key> from <string> elements (so a string VALUE equal to "Label"
+// cannot poison key detection — cp-5 F-3), and picks the target as the last
+// absolute-path ProgramArguments entry so interpreter wrappers like
+// `/usr/bin/env <payload>` resolve to the real payload, not the wrapper (cp-5 F-1).
 func extractLabelAndTarget(b []byte) (label, target string) {
 	dec := xml.NewDecoder(strings.NewReader(string(b)))
-	var lastKey string
+	var curElem, pendingKey string
 	var inArgs bool
+	var args []string
 	for {
 		tok, err := dec.Token()
 		if err != nil {
 			break
 		}
 		switch t := tok.(type) {
+		case xml.StartElement:
+			curElem = t.Name.Local
+			if curElem == "array" && pendingKey == "ProgramArguments" {
+				inArgs = true
+			}
+		case xml.EndElement:
+			if t.Name.Local == "array" {
+				inArgs = false
+			}
+			curElem = ""
 		case xml.CharData:
 			s := strings.TrimSpace(string(t))
 			if s == "" {
 				continue
 			}
-			if lastKey == "Label" && label == "" {
-				label = s
-			}
-			if inArgs && target == "" {
-				target = s
-			}
-			lastKey = s
-		case xml.StartElement:
-			if t.Name.Local == "array" {
-				inArgs = lastKey == "ProgramArguments"
+			switch curElem {
+			case "key":
+				pendingKey = s
+			case "string":
+				if pendingKey == "Label" && label == "" {
+					label = s
+				}
+				if inArgs {
+					args = append(args, s)
+				}
 			}
 		}
 	}
-	return label, target
+	return label, pickTarget(args)
+}
+
+// pickTarget returns the last absolute-path argument (defeating interpreter
+// wrappers such as `/usr/bin/env /real/payload`), falling back to the first arg.
+func pickTarget(args []string) string {
+	for i := len(args) - 1; i >= 0; i-- {
+		if strings.HasPrefix(args[i], "/") {
+			return args[i]
+		}
+	}
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
 }
 
 func statExists(p string) bool {
@@ -87,16 +117,23 @@ func statExists(p string) bool {
 // CollectPersistence walks the launchd search paths and returns evidence.
 // I/O edge — exercised via integration, not unit tests.
 func CollectPersistence() ([]model.Evidence, error) {
+	// /System/Library is OBSERVED for visibility (§6); the actor still never ACTS
+	// on it (§9). Observing != acting.
 	dirs := []string{
 		expand("~/Library/LaunchAgents"),
 		"/Library/LaunchAgents", "/Library/LaunchDaemons",
+		"/System/Library/LaunchAgents", "/System/Library/LaunchDaemons",
 	}
 	var all []model.Evidence
+	var errs []error
+	readOK := 0
 	for _, d := range dirs {
 		entries, err := os.ReadDir(d)
 		if err != nil {
-			continue // reported as a gap by the caller if the whole phase fails
+			errs = append(errs, err)
+			continue
 		}
+		readOK++
 		for _, e := range entries {
 			p := filepath.Join(d, e.Name())
 			xmlBytes, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", p).Output()
@@ -106,6 +143,10 @@ func CollectPersistence() ([]model.Evidence, error) {
 			ev, _ := ParsePersistencePlist(xmlBytes, p)
 			all = append(all, ev...)
 		}
+	}
+	// §9 fail-loud: if NOT ONE directory was readable, that's a gap, not "clean".
+	if readOK == 0 {
+		return all, fmt.Errorf("no launchd directory readable: %w", errors.Join(errs...))
 	}
 	return all, nil
 }
