@@ -33,7 +33,9 @@ func ParsePs(b []byte) map[int]*Proc {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		cmd := strings.TrimSpace(strings.SplitN(ln, fields[2], 2)[1])
+		// Reconstruct the command from the 4th field onward — robust against a
+		// username that recurs elsewhere in the line (cp-7 F-3/F-2).
+		cmd := strings.Join(fields[3:], " ")
 		out[pid] = &Proc{PID: pid, PPID: ppid, User: fields[2], Cmd: cmd}
 	}
 	return out
@@ -78,8 +80,13 @@ func ancestry(procs map[int]*Proc, pid int) string {
 	return strings.Join(chain, " -> ")
 }
 
-// BuildProcessEvidence emits evidence for processes that hold listeners,
-// attributing each to its full ancestry and argv.
+// BuildProcessEvidence emits evidence for processes holding a socket, attributing
+// each to its full ancestry and argv.
+//
+// Identity is PID-ONLY. argv[0] is attacker-controlled (a process can exec with any
+// argv[0]), so using it as Subject.Path would let a malicious listener alias its key
+// onto an allowlisted app and be suppressed (cp-7 Audit F-1). argv[0] is kept as a
+// display Fact. Safe real-path resolution is ticket T-4.
 func BuildProcessEvidence(procs map[int]*Proc, listeners map[int][]string) []model.Evidence {
 	var ev []model.Evidence
 	for pid, descs := range listeners {
@@ -87,16 +94,29 @@ func BuildProcessEvidence(procs map[int]*Proc, listeners map[int][]string) []mod
 		if p == nil {
 			continue
 		}
+		listening := false
+		for _, d := range descs {
+			if strings.Contains(d, "LISTEN") {
+				listening = true
+			}
+		}
 		facts := map[string]string{
-			"listener": "true",
 			"argv":     p.Cmd,
+			"argv0":    firstField(p.Cmd),
 			"ancestry": ancestry(procs, pid),
 			"ports":    strings.Join(descs, ", "),
 		}
+		summary := "process has an active network connection"
+		if listening {
+			facts["listener"] = "true" // only a real LISTEN socket (cp-7 QA F-1)
+			summary = "process holds a network listener"
+		} else {
+			facts["net"] = "connection"
+		}
 		ev = append(ev, model.Evidence{
-			Subject: model.Subject{PID: pid, Path: execPath(p.Cmd)},
+			Subject: model.Subject{PID: pid},
 			Kind:    model.KindProcess,
-			Summary: "process holds a network listener",
+			Summary: summary,
 			Weight:  wListener,
 			Facts:   facts,
 		})
@@ -104,17 +124,11 @@ func BuildProcessEvidence(procs map[int]*Proc, listeners map[int][]string) []mod
 	return ev
 }
 
-// execPath best-effort extracts the on-disk binary path from argv so process
-// evidence can correlate with codesign/persistence evidence by Path.
-func execPath(cmd string) string {
-	fields := strings.Fields(cmd)
-	if len(fields) == 0 {
-		return ""
+func firstField(cmd string) string {
+	if f := strings.Fields(cmd); len(f) > 0 {
+		return f[0]
 	}
-	if strings.HasPrefix(fields[0], "/") {
-		return fields[0]
-	}
-	return "" // interpreter without absolute path — correlate by PID only
+	return ""
 }
 
 // CollectProcesses runs ps + lsof (I/O edge).

@@ -29,3 +29,33 @@ func TestBuildProcessEvidence_AttributesListenerToAncestry(t *testing.T) {
 		t.Fatal("expected listener evidence for pid 777 with ancestry+argv")
 	}
 }
+
+// cp-7 Audit F-1 (crit): argv[0] is attacker-controlled, so it must NOT become the
+// subject identity — else a listener could alias onto an allowlisted app and be suppressed.
+func TestBuildProcessEvidence_KeysByPIDNotArgv0(t *testing.T) {
+	procs := map[int]*Proc{999: {PID: 999, PPID: 1, Cmd: "/System/Library/CoreServices/legit /tmp/payload"}}
+	listeners := map[int][]string{999: {"*:4444 (LISTEN)"}}
+	ev := BuildProcessEvidence(procs, listeners)
+	if len(ev) != 1 {
+		t.Fatalf("want 1 evidence, got %d", len(ev))
+	}
+	if ev[0].Subject.Path != "" {
+		t.Fatalf("process subject must be PID-only (argv0 is spoofable), got Path=%q", ev[0].Subject.Path)
+	}
+	if ev[0].Subject.PID != 999 {
+		t.Fatalf("want PID identity, got %d", ev[0].Subject.PID)
+	}
+}
+
+// cp-7 QA F-1: an ESTABLISHED (outbound) socket is not a listener.
+func TestBuildProcessEvidence_EstablishedIsNotListener(t *testing.T) {
+	procs := map[int]*Proc{5: {PID: 5, PPID: 1, Cmd: "/x"}}
+	listeners := map[int][]string{5: {"1.2.3.4:443 ESTABLISHED"}}
+	ev := BuildProcessEvidence(procs, listeners)
+	if ev[0].Facts["listener"] == "true" {
+		t.Fatal("ESTABLISHED must not be labeled a listener")
+	}
+	if ev[0].Facts["net"] != "connection" {
+		t.Errorf("want net=connection for a non-LISTEN socket, got %q", ev[0].Facts["net"])
+	}
+}
