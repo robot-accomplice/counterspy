@@ -35,6 +35,18 @@ func (s Subject) Key() string {
 	return fmt.Sprintf("pid:%d", s.PID)
 }
 
+// Display is a human-facing name: label, else path, else the correlation key.
+// (Key() is the internal grouping id and leaks "path:"/"pid:" prefixes — not for display.)
+func (s Subject) Display() string {
+	if s.Label != "" {
+		return s.Label
+	}
+	if s.Path != "" {
+		return s.Path
+	}
+	return s.Key()
+}
+
 // Evidence is one observation from one collector about one subject.
 type Evidence struct {
 	Subject Subject

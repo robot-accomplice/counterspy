@@ -49,10 +49,7 @@ func Render(assessments []model.Assessment) string {
 			continue // summarized above, not detailed
 		}
 		n++
-		id := a.Subject.Label
-		if id == "" {
-			id = a.Subject.Key()
-		}
+		id := a.Subject.Display()
 		fmt.Fprintf(&b, "\n[%d] %s  —  %s  (%s, score %d)\n", n, id, a.Recommendation, a.Category, a.Score)
 		fmt.Fprintf(&b, "    %s\n", a.Verdict)
 		if a.Tripwire != "" {

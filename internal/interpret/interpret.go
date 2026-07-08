@@ -107,10 +107,7 @@ func verdict(f model.Finding, s signals) string {
 	} else if s.connection {
 		parts = append(parts, "making outbound network connections")
 	}
-	who := f.Subject.Label
-	if who == "" {
-		who = f.Subject.Key()
-	}
+	who := f.Subject.Display()
 	if len(parts) == 0 {
 		return fmt.Sprintf("%s shows weak, isolated signals.", who)
 	}
