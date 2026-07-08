@@ -94,3 +94,19 @@ Applied in v2:
   Fira Code/Cascadia, readable otherwise). Spec §12 records the TUI ligature requirement + the
   don't-split-digraphs-across-color-runs discipline + --glyphs=ascii|unicode escape hatch.
 OPEN for Jon: category name "spyware-generic" (design F-3/UX F-3 flag it as vague/scary).
+
+## Tick 6 (cp-11, plan Task 11: actor) — resolved 2026-07-08  [SAFETY-CRITICAL]
+Both reviewers unanimous. All fix-now (no vote). This is the destructive path; hardened hard.
+- **A. Quarantine basename clobber** (QA F-1 crit + Audit F-2a): dest now recreates the full source
+  path tree under the quarantine root (collision-proof + provenance) + Stat-before-move guard.
+- **B. Restore clobber** (QA F-2 crit + Audit F-2b): Restore refuses to overwrite an occupied From.
+- **C. Restore robustness** (QA F-3 high): preflight-ish — skip+aggregate errors, don't halt silently.
+- **D. Path canonicalization** (Audit F-4 + QA F-4/F-6): filepath.Clean + case-insensitive isProtected;
+  ".." resolved by Clean so it can't bypass the backstop.
+- **E. Allowlist refusal in act** (Audit F-1 crit): Quarantine refuses a finding whose evidence carries
+  an allowlisted authority (defense-in-depth vs the scorer's upstream suppression; §9 two-clause refusal).
+- **F. Self-writing manifest** (Audit F-3 high): Quarantine appends the manifest itself (incl. partial on
+  error) so completed moves are always recoverable — removes the caller footgun.
+- **G. Timestamp default** (Audit F-5 med): manifest stamps time.Now().UTC() when blank.
+- F-6(Audit)/F-7(QA) bootout-outcome + full-rollback: accepted low; the always-written manifest makes
+  partial state recoverable, which satisfies §9 reversibility without complex rollback.
