@@ -303,6 +303,25 @@ dimension (select → quarantine with confirm → restore) is CounterSpy-specifi
 no btm analog. Every action routes through the same `interpret`/`act` core the CLI
 uses — the TUI adds interaction, never analysis.
 
+**Ligature support (TUI requirement).** The TUI must render well when the user's
+terminal font has programming ligatures (Fira Code, Cascadia Code, JetBrains Mono,
+Monaspace, …) and remain fully readable when it doesn't. Terminals do not expose font
+capabilities to the app, so this is achieved by *composition, not detection*:
+- Compose text from **ASCII digraphs that ligate** — `->` for ancestry/flow arrows
+  (not a hardcoded `→`), `>=`/`<=`/`!=`/`=>` where a comparison or mapping is shown —
+  so a ligature font beautifies them and a plain mono still reads them literally.
+- **Never split a digraph across two color runs.** ANSI color escapes inserted between
+  the `-` and `>` prevent the font from forming the ligature, so the styling layer must
+  color whole tokens; a digraph is always emitted inside a single styled span. This is
+  the "style accordingly" discipline — a constraint on where color boundaries fall.
+- Box-drawing (panel borders) uses Unicode box chars, which ligature fonts render fine;
+  that is orthogonal to digraph ligatures.
+- Provide `--glyphs=ascii|unicode` (default `ascii` digraphs) as an escape hatch for
+  users who want to force real Unicode glyphs or plain ASCII.
+The HTML mockup opts into ligatures via `font-feature-settings:"calt","liga"` and uses
+`->` digraphs to demonstrate the intent (it can't bundle a ligature font — CSP blocks
+font CDNs — so it ligates only where the viewer's own mono does).
+
 ## 13. Success criteria
 
 1. `sudo counterspy scan` produces a ranked, correlated report on a real Mac without

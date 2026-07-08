@@ -76,3 +76,21 @@ each Finding, rule-based per Rule 6, in the core so CLI + future TUI/WebUI share
   Directly serves Jon's anti-alarm-fatigue directive.
 - **B. RenderJSON category gating** (Audit F-2 low): documented the gate-on-Recommendation contract.
 - QA: 30+ adversarial probes, no confirmed failures; tree kept clean (T-6 mitigation held).
+
+## Mockup review (tick 5b): TUI triage mockup v1 -> v2
+Two read-only reviewers (UX haiku + design/fidelity sonnet) critiqued docs/mockups/counterspy-tui.html.
+Applied in v2:
+- HONESTY (design F-4/UX F-5): pid:8821 was falsely "backdoor" + "kill". Real system: a PID-only process
+  has no on-disk artifact, so it CANNOT be quarantined and kill is irreversible. v2 shows it as
+  Investigate/unknown with an explicit "no quarantine action — terminate manually, not reversible" panel.
+- FAIL-LOUD (design F-2, §9): added a collector-gap banner ("TCC signal partial ... a gap, not clean").
+- SCOPE (design F-1): added "mockup · v1 CLI · TUI post-v1" note; the act layer it depicts is in progress.
+- REVERSIBILITY (UX F-2): moved the move-not-delete/restore callout to the TOP of the confirm modal.
+- AUDITABILITY (design F-5, §8.1): added a per-finding score breakdown so the number is checkable in-UI.
+- HEDGING (design F-8): non-tripwire Quarantine verdicts now hedge ("matches the pattern of"); tripwire
+  ones stay firm ("hard rule, high confidence"). 
+- UX F-4: implemented / filter and ? help (were dead keys). UX F-6: shortened Monitor toggle copy.
+- LIGATURES (Jon directive): CSS opts into calt/liga; ancestry uses the `->` digraph (ligates on
+  Fira Code/Cascadia, readable otherwise). Spec §12 records the TUI ligature requirement + the
+  don't-split-digraphs-across-color-runs discipline + --glyphs=ascii|unicode escape hatch.
+OPEN for Jon: category name "spyware-generic" (design F-3/UX F-3 flag it as vague/scary).
