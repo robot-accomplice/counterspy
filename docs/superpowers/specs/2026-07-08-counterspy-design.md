@@ -286,9 +286,22 @@ justification). Not started in v1.*
 
 **Design invariant that keeps this cheap:** presentation logic must never leak into
 `score` or `collect`. The scorer stays a pure `[]Evidence → []Finding`; every UI
-(CLI, TUI, WebUI) is an outer-ring consumer that renders `model.Finding` / the `--json`
-form and depends inward only. Adding a UI later must require **zero** changes to the
-core. The swarm's Audit role enforces this boundary.
+(CLI, TUI, WebUI) is an outer-ring consumer that renders `model.Assessment` / the
+`--json` form and depends inward only. Adding a UI later must require **zero** changes
+to the core. The swarm's Audit role enforces this boundary.
+
+**TUI design direction (post-v1).** Model it as an **interactive triage view**, not a
+monitoring dashboard. `btm`/`bottom` is the reference for *interaction* quality —
+master–detail layout, at-a-glance summary header, color that encodes meaning,
+sortable table, keyboard-driven — but NOT for *metaphor*: CounterSpy is snapshot+act,
+not a live resource monitor, so we deliberately DROP btm's sparkline time-series and
+resource panels (they'd be decoration masquerading as signal — the opposite of §8.1).
+Layout: left = the ranked `Assessment` table (sortable, colored by `Recommendation`,
+Monitor-tier collapsed by default); right = the selected finding's verdict + evidence
+story + the *exact* planned quarantine actions; footer = keybindings. The action
+dimension (select → quarantine with confirm → restore) is CounterSpy-specific and has
+no btm analog. Every action routes through the same `interpret`/`act` core the CLI
+uses — the TUI adds interaction, never analysis.
 
 ## 13. Success criteria
 
