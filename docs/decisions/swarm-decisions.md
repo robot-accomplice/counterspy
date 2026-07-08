@@ -120,3 +120,10 @@ Result: 260 -> 2 actionable; noise absorbed by Monitor. RESIDUAL (for ABORT gate
 is common on developer machines (roboticus, Jon's own tool, is the 1 remaining Quarantine) — the
 Apple-only allowlist doesn't cover Developer-ID/user tools, so false-positive VOLUME needs a tuning pass
 (expand allowlist to Gatekeeper-accepted, or require more correlation for Investigate) before public release.
+
+## Tick 9 (cp-15) UX pass — 2026-07-08
+Jon ran the CLI and flagged it as bland/ugly with a confusing "exit status 1". RCA: not a crash
+(exit 0) — errors.Join rendered both TCC sqlite3 failures as two "exit status 1" lines dumped into
+the gap message. Fix: friendly gap note ("run with sudo") to stderr; ANSI color by tier; deduped
+evidence; Display() in prompts. Color lives in report behind a `color bool` from the tty (pure core
+untouched). Verdict: dramatic improvement; TUI-grade richness deferred to the post-v1 TUI.
