@@ -1,0 +1,26 @@
+{
+  "currentReleaseId": "initial-architext-buildout",
+  "releases": [
+    {
+      "id": "initial-architext-buildout",
+      "version": "0.1.0",
+      "name": "Initial Architext build-out",
+      "status": "planned",
+      "posture": "at-risk",
+      "targetWindow": "Before claiming architecture documentation is current",
+      "lastUpdated": "2026-07-08T15:49:50.894Z",
+      "summary": "Replace starter architecture and release data with project-specific facts.",
+      "counts": {
+        "features": 0,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 1,
+        "complete": 0,
+        "inProgress": 0,
+        "planned": 1,
+        "stretch": 0
+      },
+      "file": "initial-architext-buildout.json"
+    }
+  ]
+}

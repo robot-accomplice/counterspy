@@ -1,0 +1,44 @@
+{
+  "decisions": [
+    {
+      "id": "dec-pure-scorer",
+      "status": "accepted",
+      "title": "The scoring engine is a pure function",
+      "context": "Scoring is the risk center; it must be testable and free of side effects so weights can be tuned with confidence.",
+      "decision": "internal/score is a pure Score([]Evidence) []Finding with no I/O — collectors do all I/O at the edge, so the entire brain is unit-tested from fixtures.",
+      "consequences": ["Zero-risk to run", "Fully fixture-testable", "Weights live only in weights.go (no magic numbers)"],
+      "relatedNodes": ["mod-score"],
+      "relatedFlows": ["scan-pipeline"]
+    },
+    {
+      "id": "dec-move-not-delete",
+      "status": "accepted",
+      "title": "Quarantine moves, never deletes",
+      "context": "A false positive on an irreversible delete could destroy data or brick the Mac.",
+      "decision": "Quarantine only disables and MOVES artifacts into a timestamped mirror with a manifest; restore round-trips byte-identically and refuses to clobber. Permanent deletion is a separate human step outside the tool.",
+      "consequences": ["Every action is reversible", "Manifest is the undo and the RCA trail", "Partial failures remain recoverable"],
+      "relatedNodes": ["mod-act"],
+      "relatedFlows": ["quarantine"]
+    },
+    {
+      "id": "dec-deterministic-synthesis",
+      "status": "accepted",
+      "title": "Verdicts are rule-based, not model-generated",
+      "context": "The tool recommends quarantining people's software; its recommendations must be reproducible and auditable.",
+      "decision": "internal/interpret derives verdict/category/recommendation from deterministic rules over the evidence — no LLM in the decision path — so a reviewer (or the ABORT gate) can confirm or refute every label.",
+      "consequences": ["Reproducible verdicts", "Auditable by a release gate", "Synthesis lives in the core so CLI/TUI share it"],
+      "relatedNodes": ["mod-interpret"],
+      "relatedFlows": ["scan-pipeline"]
+    },
+    {
+      "id": "dec-pid-identity",
+      "status": "accepted",
+      "title": "Process evidence is keyed by PID, not argv[0]",
+      "context": "argv[0] is attacker-controlled; using it as identity let a malicious listener alias onto an allowlisted app and be suppressed.",
+      "decision": "Process evidence uses a PID-only Subject; argv[0] is kept only as a display fact. Safe real-path resolution is deferred (ticket T-4).",
+      "consequences": ["A listener cannot hide by spoofing a trusted path", "Process/binary correlation is weaker until T-4"],
+      "relatedNodes": ["mod-collect"],
+      "relatedFlows": ["scan-pipeline"]
+    }
+  ]
+}

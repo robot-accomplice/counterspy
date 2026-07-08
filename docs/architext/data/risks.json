@@ -1,0 +1,26 @@
+{
+  "risks": [
+    {
+      "id": "risk-false-positive-volume",
+      "title": "False-positive volume on developer machines",
+      "category": "operational",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Unsigned binaries with LaunchAgents are common and legitimate on developer machines, and the Apple-only allowlist does not recognize third-party Developer-ID or self-built tools, so they surface as actionable findings.",
+      "mitigations": ["Monitor tier absorbs low-signal items (not shown in detail)", "User allowlist (~/.config/counterspy/allowlist.txt) to vet known-good tools", "Hidden-path signal down-weighted", "Primary open question for the ABORT release gate"],
+      "relatedNodes": ["mod-interpret", "counterspy-system"],
+      "relatedFlows": ["scan-pipeline"]
+    },
+    {
+      "id": "risk-signed-malware",
+      "title": "Signed / Gatekeeper-accepted malware not re-adjudicated",
+      "category": "security",
+      "severity": "medium",
+      "status": "open",
+      "summary": "CounterSpy trusts the Gatekeeper (spctl) verdict; a Developer-ID-signed, Gatekeeper-accepted supply-chain implant is treated as trusted and will not be flagged on signature grounds alone.",
+      "mitigations": ["Correlation + tripwires can still flag it on behavior (persistence/listener/TCC)", "Documented as an explicit non-goal in the threat model"],
+      "relatedNodes": ["mod-score", "counterspy-system"],
+      "relatedFlows": ["scan-pipeline"]
+    }
+  ]
+}

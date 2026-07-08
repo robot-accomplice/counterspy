@@ -1,0 +1,88 @@
+{
+  "id": "initial-architext-buildout",
+  "version": "0.1.0",
+  "name": "Initial Architext build-out",
+  "status": "planned",
+  "posture": "at-risk",
+  "summary": "Replace starter architecture and release data with project-specific facts.",
+  "targetWindow": "Before claiming architecture documentation is current",
+  "lastUpdated": "2026-07-08T15:49:50.894Z",
+  "updateSource": "architext sync starter data",
+  "scope": {
+    "required": [
+      {
+        "id": "replace-starter-architecture-data",
+        "title": "Replace starter architecture data",
+        "kind": "documentation",
+        "status": "planned",
+        "summary": "Inspect the repository and replace starter Architext JSON with source-backed project facts.",
+        "owner": "Project maintainers",
+        "workstreamId": "architecture-buildout",
+        "dependsOn": [],
+        "evidence": [
+          "architext validate"
+        ]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [],
+    "outOfScope": []
+  },
+  "workstreams": [
+    {
+      "id": "architecture-buildout",
+      "name": "Architecture build-out",
+      "owner": "Project maintainers",
+      "status": "planned",
+      "posture": "at-risk",
+      "summary": "Replace starter architecture facts, release facts, and validation evidence before relying on Architext.",
+      "progress": 0,
+      "itemIds": [
+        "replace-starter-architecture-data"
+      ],
+      "evidence": [
+        "architext validate"
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "id": "starter-data-not-replaced",
+      "title": "Starter data is not project truth",
+      "severity": "high",
+      "status": "blocked",
+      "owner": "Project maintainers",
+      "summary": "The project has validating starter data, but it has not yet been replaced with source-backed architecture and release facts.",
+      "nextAction": "Run the agent-assisted Architext build-out workflow and review the JSON diff.",
+      "itemIds": [
+        "replace-starter-architecture-data"
+      ],
+      "evidenceNeeded": [
+        "Source-backed JSON updates",
+        "architext validate"
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "starter-replaced",
+      "label": "Starter data replaced",
+      "status": "planned",
+      "targetWindow": "Initial documentation pass",
+      "order": 1,
+      "itemIds": [
+        "replace-starter-architecture-data"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "starter-validation",
+      "label": "architext validate",
+      "kind": "test",
+      "status": "planned"
+    }
+  ]
+}

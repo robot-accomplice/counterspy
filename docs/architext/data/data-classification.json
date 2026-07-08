@@ -1,0 +1,34 @@
+{
+  "classes": [
+    {
+      "id": "scan-findings",
+      "name": "Scan findings",
+      "sensitivity": "medium",
+      "handling": "Evidence and rankings about what runs on the user's machine. Stays local; emitted to the terminal and optional --json."
+    },
+    {
+      "id": "quarantine-manifest",
+      "name": "Quarantine manifest",
+      "sensitivity": "medium",
+      "handling": "Record of what was disabled and moved, with original paths. The undo record and RCA trail; stored under ~/CounterSpyQuarantine."
+    },
+    {
+      "id": "process-list",
+      "name": "Process list",
+      "sensitivity": "low",
+      "handling": "ps/lsof output — running processes, ancestry, argv, and sockets. Read-only, in-memory."
+    },
+    {
+      "id": "code-signatures",
+      "name": "Code signatures",
+      "sensitivity": "low",
+      "handling": "codesign/spctl output — signing authority and Gatekeeper verdict. Read-only, in-memory."
+    },
+    {
+      "id": "tcc-grants",
+      "name": "TCC privacy grants",
+      "sensitivity": "medium",
+      "handling": "Which apps hold Accessibility / Input Monitoring / Screen Recording / Full Disk Access. Read from the TCC databases (requires sudo)."
+    }
+  ]
+}

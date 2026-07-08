@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.5.0",
+  "project": {
+    "id": "counterspy",
+    "name": "counterspy",
+    "summary": "On-demand macOS spyware triage tool: collect four correlated signals → pure score → rule-based synthesis → reversible, consented quarantine. Single Go binary."
+  },
+  "generatedAt": "2026-07-08T15:49:50.876Z",
+  "defaultViewId": "system-map",
+  "files": {
+    "nodes": "nodes.json",
+    "flows": "flows.json",
+    "views": "views.json",
+    "dataClassification": "data-classification.json",
+    "decisions": "decisions.json",
+    "risks": "risks.json",
+    "glossary": "glossary.json",
+    "rules": "rules.json",
+    "releases": "releases/index.json"
+  },
+  "notes": [
+    "Architecture derived from source (main.go + internal/**). Keep in sync with the code; the code wins on any conflict."
+  ]
+}

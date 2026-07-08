@@ -1,0 +1,79 @@
+{
+  "views": [
+    {
+      "id": "system-map",
+      "name": "System Map",
+      "type": "system-map",
+      "summary": "CounterSpy, its operator, and the macOS tools it reads.",
+      "lanes": [
+        {"id": "people", "name": "People", "nodeIds": ["operator"]},
+        {"id": "system", "name": "System", "nodeIds": ["counterspy-system"]},
+        {"id": "external", "name": "External", "nodeIds": ["macos-tools"]}
+      ]
+    },
+    {
+      "id": "dataflow",
+      "name": "Dataflow",
+      "type": "dataflow",
+      "summary": "Evidence moves left to right: native tools → collectors → pure analysis → report/act → operator.",
+      "lanes": [
+        {"id": "collect", "name": "Collect", "nodeIds": ["macos-tools", "mod-collect"]},
+        {"id": "analyze", "name": "Analyze (pure)", "nodeIds": ["mod-score", "mod-interpret"]},
+        {"id": "present", "name": "Present / Act", "nodeIds": ["mod-report", "mod-act", "operator"]}
+      ]
+    },
+    {
+      "id": "sequence",
+      "name": "Scan Sequence",
+      "type": "sequence",
+      "summary": "Ordered participants in a scan.",
+      "lanes": [
+        {"id": "participants", "name": "Participants", "nodeIds": ["operator", "counterspy-cli", "mod-collect", "mod-score", "mod-interpret", "mod-report"]}
+      ]
+    },
+    {
+      "id": "deployment",
+      "name": "Deployment",
+      "type": "deployment",
+      "summary": "A single binary invoking Apple's native tools on the macOS host.",
+      "lanes": [
+        {"id": "host", "name": "macOS host", "nodeIds": ["counterspy-cli", "macos-tools"]}
+      ]
+    },
+    {
+      "id": "c4-context",
+      "name": "C4 Context",
+      "type": "c4-context",
+      "summary": "The operator uses CounterSpy, which reads macOS native tools.",
+      "lanes": [
+        {"id": "people", "name": "People", "nodeIds": ["operator"]},
+        {"id": "system", "name": "System", "nodeIds": ["counterspy-system"]},
+        {"id": "external", "name": "External", "nodeIds": ["macos-tools"]}
+      ]
+    },
+    {
+      "id": "c4-container",
+      "name": "C4 Container",
+      "type": "c4-container",
+      "summary": "One deployable unit — the counterspy binary — plus the external tools it shells out to.",
+      "scopeNodeId": "counterspy-system",
+      "lanes": [
+        {"id": "containers", "name": "Containers", "nodeIds": ["counterspy-cli"]},
+        {"id": "external", "name": "External", "nodeIds": ["macos-tools"]}
+      ]
+    },
+    {
+      "id": "c4-component",
+      "name": "C4 Component",
+      "type": "c4-component",
+      "summary": "The packages inside the binary: the three-phase pipeline around the shared model.",
+      "scopeNodeId": "counterspy-cli",
+      "lanes": [
+        {"id": "core", "name": "Shared model", "nodeIds": ["mod-model"]},
+        {"id": "collect", "name": "Collect", "nodeIds": ["mod-collect"]},
+        {"id": "analyze", "name": "Analyze (pure)", "nodeIds": ["mod-score", "mod-interpret"]},
+        {"id": "output", "name": "Report / Act", "nodeIds": ["mod-report", "mod-act"]}
+      ]
+    }
+  ]
+}
