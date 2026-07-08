@@ -54,3 +54,15 @@ func TestScore_CorrelationBonusForDistinctKinds(t *testing.T) {
 		t.Fatalf("B: want 9 (correlation bonus), got %d", byPath["/B"])
 	}
 }
+
+// cp-3 Audit F-3: lock the floor (truncate-toward-zero) semantics of the multiplier.
+func TestScore_CorrelationFloorsOddSum(t *testing.T) {
+	in := []model.Evidence{
+		ev("/x", model.KindCodesign, 2),
+		ev("/x", model.KindTCC, 3), // sum=5, 2 kinds → 5*1.5=7.5 → floor 7
+	}
+	out := Score(in)
+	if out[0].Score != 7 {
+		t.Fatalf("want floored 7, got %d", out[0].Score)
+	}
+}

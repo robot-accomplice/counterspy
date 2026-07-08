@@ -28,11 +28,11 @@ func Score(ev []model.Evidence) []model.Finding {
 	out := make([]model.Finding, 0, len(order))
 	for _, k := range order {
 		f := groups[k]
-		if subjectAllowlisted(*f) {
-			continue // trusted — suppress noise
-		}
 		f.Score = applyCorrelation(f.Score, len(f.Kinds))
-		f.Tripwire = tripwire(*f)
+		f.Tripwire = tripwire(*f) // computed BEFORE suppression — a tripwire always surfaces
+		if f.Tripwire == "" && subjectTrusted(*f) {
+			continue // genuinely known-good and nothing contradicting → suppress noise
+		}
 		out = append(out, *f)
 	}
 	slices.SortFunc(out, func(a, b model.Finding) int {

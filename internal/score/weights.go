@@ -21,7 +21,11 @@ const (
 // subject, multiply the summed weight by CorrelationFactor (scaled x100 to stay
 // integer-only in the scorer).
 const (
-	CorrelationMinKinds   = 2
-	CorrelationFactorX100 = 150 // 1.5x
-	ShowThreshold         = 5   // findings at/above this are surfaced for quarantine
+	CorrelationMinKinds = 2
+	// CorrelationFactorX100 scales the summed weight by 1.5x (x100 to stay
+	// integer-only). Applied as sum*150/100, which TRUNCATES toward zero (floor):
+	// e.g. sum 5 -> 7 (7.5 floored). Rounding down is intentional — the multiplier
+	// only ever raises a score, so flooring keeps it conservative.
+	CorrelationFactorX100 = 150
+	ShowThreshold         = 5 // findings at/above this are surfaced for quarantine
 )
