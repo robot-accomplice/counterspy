@@ -32,7 +32,7 @@ func sample() []model.Assessment {
 }
 
 func TestRender_LeadsWithSummaryAndVerdict(t *testing.T) {
-	out := Render(sample())
+	out := Render(sample(), nil, false)
 	// Executive summary counts by recommendation.
 	for _, want := range []string{"1 Quarantine", "1 Monitor"} {
 		if !strings.Contains(out, want) {
@@ -40,16 +40,24 @@ func TestRender_LeadsWithSummaryAndVerdict(t *testing.T) {
 		}
 	}
 	// The top finding shows its verdict + recommendation + evidence story.
-	for _, want := range []string{"com.evil", "Quarantine", "backdoor", "launchd -> python3", "TRIPWIRE"} {
+	for _, want := range []string{"com.evil", "QUARANTINE", "backdoor", "launchd -> python3", "tripwire"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q", want)
 		}
 	}
 }
 
+// A collector gap is surfaced in the summary (fail loud).
+func TestRender_SurfacesGaps(t *testing.T) {
+	out := Render(sample(), []string{"TCC privacy-grant signal unavailable"}, false)
+	if !strings.Contains(out, "TCC privacy-grant signal unavailable") {
+		t.Errorf("gap not surfaced:\n%s", out)
+	}
+}
+
 // The low-signal Monitor item is summarized, not front-paged with full evidence.
 func TestRender_OmitsMonitorNoiseFromDetail(t *testing.T) {
-	out := Render(sample())
+	out := Render(sample(), nil, false)
 	if strings.Contains(out, "pid:42 shows weak") {
 		t.Error("Monitor-tier items should be counted in the summary, not detailed")
 	}

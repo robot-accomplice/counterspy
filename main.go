@@ -50,42 +50,47 @@ func runScan(flags []string, stdout io.Writer) int {
 	dry := has(flags, "--dry") // collect nothing; used by tests
 
 	var ev []model.Evidence
+	var gaps []string
 	if !dry {
-		ev = collectAll(stdout)
+		ev, gaps = collectAll()
 	}
 	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 
 	if asJSON {
+		for _, g := range gaps { // gaps to stderr — keep --json clean
+			fmt.Fprintln(os.Stderr, "note:", g)
+		}
 		b, err := report.RenderJSON(assessments)
 		if err != nil {
-			fmt.Fprintln(stdout, "render:", err)
+			fmt.Fprintln(os.Stderr, "render:", err)
 			return 1
 		}
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	fmt.Fprint(stdout, report.Render(assessments))
+	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled()))
 	if interactive {
 		quarantineLoop(assessments, stdout)
 	}
 	return 0
 }
 
-// collectAll fans out the collectors, printing a gap line for any that fail — a
-// missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
-func collectAll(stdout io.Writer) []model.Evidence {
+// collectAll fans out the collectors and returns any signal GAPS as friendly notes —
+// a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
+func collectAll() ([]model.Evidence, []string) {
 	var ev []model.Evidence
-	add := func(name string, fn func() ([]model.Evidence, error)) {
+	var gaps []string
+	add := func(gap string, fn func() ([]model.Evidence, error)) {
 		e, err := fn()
 		if err != nil {
-			fmt.Fprintf(stdout, "! %s signal unavailable: %v\n", name, err)
+			gaps = append(gaps, gap)
 			return
 		}
 		ev = append(ev, e...)
 	}
-	add("persistence", collect.CollectPersistence)
-	add("process/network", collect.CollectProcesses)
-	add("TCC", collect.CollectTCC)
+	add("Persistence signal unavailable", collect.CollectPersistence)
+	add("Process/network signal unavailable", collect.CollectProcesses)
+	add("TCC privacy-grant signal unavailable — run with sudo to include it", collect.CollectTCC)
 	// codesign runs ONCE per unique on-disk binary surfaced by the other collectors.
 	// Skip .plist files (they aren't signed binaries — codesigning one yields a bogus
 	// "unsigned") and anything that isn't a regular existing file.
@@ -101,7 +106,17 @@ func collectAll(stdout io.Writer) []model.Evidence {
 		seen[p] = true
 		ev = append(ev, collect.CollectCodesign(p)...)
 	}
-	return ev
+	return ev, gaps
+}
+
+// colorEnabled reports whether to emit ANSI color: a real terminal on stdout and
+// NO_COLOR unset (https://no-color.org).
+func colorEnabled() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
@@ -118,7 +133,7 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
 		if len(actions) == 0 {
 			continue // e.g. a process-only finding: no artifact to move, no reversible action
 		}
-		fmt.Fprintf(stdout, "\nQuarantine %s  [%s]? [y/N/q] ", a.Subject.Key(), a.Recommendation)
+		fmt.Fprintf(stdout, "\n  Quarantine %s? %s ", a.Subject.Display(), dim("(moves, reversible) [y/N/q]"))
 		line, _ := in.ReadString('\n')
 		switch strings.TrimSpace(strings.ToLower(line)) {
 		case "q":
@@ -127,10 +142,10 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
 			f := a.Finding
 			f.Actions = actions
 			if _, err := act.Quarantine(root, ts, f); err != nil {
-				fmt.Fprintln(stdout, "  quarantine stopped (partial state recorded in manifest):", err)
+				fmt.Fprintln(stdout, "    stopped (partial state recorded in manifest):", err)
 				continue
 			}
-			fmt.Fprintln(stdout, "  quarantined ->", root)
+			fmt.Fprintln(stdout, "    ✓ quarantined ->", root)
 		}
 	}
 }
@@ -190,6 +205,13 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 		out = append(out, a)
 	}
 	return out
+}
+
+func dim(s string) string {
+	if colorEnabled() {
+		return "\x1b[38;5;244m" + s + "\x1b[0m"
+	}
+	return s
 }
 
 func has(flags []string, want string) bool {
