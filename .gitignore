@@ -3,3 +3,4 @@ CounterSpyQuarantine/
 *.test
 counterspy
 /counterspy
+.swarm/bus/

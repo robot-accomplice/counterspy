@@ -1,0 +1,29 @@
+project: counterspy
+substrate: orchestrator+subagents   # single orchestrator session spawns ephemeral reviewer subagents
+integration_branch: swarm/counterspy/work   # the single writer's branch; RCA "already-fixed" check looks here
+
+roles:
+  coding:      { model: opus,   enabled: true }   # the orchestrator itself, this session
+  antagonist:  { model: haiku,  enabled: true }   # spawned as read-only subagent each tick
+  rca:         { model: sonnet, enabled: true }   # spawned only when a confirmed failure exists
+  audit:       { model: sonnet, enabled: true }   # spawned as read-only subagent each tick
+  scribe:      { model: haiku,  enabled: true }   # reconciles docs (local files only)
+  conductor:   { model: opus,   enabled: true }   # RECONCILED: under orchestrator+subagents the Conductor
+                                                  # is also the single writer, so it runs on the strong
+                                                  # tier (this session), not the multi-terminal Haiku default.
+
+integrations:
+  linear: { enabled: false }   # RECONCILED: Linear MCP unauthenticated this session -> Scribe uses in-repo docs/ + .swarm/tickets.md
+  notion: { enabled: false }   # RECONCILED: Notion MCP unauthenticated this session -> decision log kept in-repo
+
+live_instance:
+  enabled: false               # RECONCILED: CounterSpy is a CLI/library, not a long-running service. No Prober.
+  start_cmd: ""                # The Antagonist instead builds the binary and runs `go test` / the CLI against fixtures.
+  url: ""
+
+caps:
+  max_reviewers_per_tick: 4
+  max_findings_per_reviewer: 10
+  max_message_words: 200
+  max_debate_rounds: 2
+  max_checkpoint_diff_lines: 400
