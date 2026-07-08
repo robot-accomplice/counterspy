@@ -25,3 +25,18 @@
   semantics on CorrelationFactorX100 + odd-sum test.
 - **C. Substring allowlist match** (Audit F-4, low-high): exact-match Apple authorities; document that
   `authority` must originate from a Gatekeeper-accepted verified chain. Primary hardening → Task 7 (ticket T-3).
+
+## Tick 3 (cp-5, plan Tasks 6-7: persistence + codesign) — resolved 2026-07-08
+
+- **A. extractLabelAndTarget misparse + /usr/bin/env wrapper** (Audit F-1 high + QA F-3/F-4 high):
+  FIX-NOW unanimous. Rewrite with proper <key>/<string> element tracking; select target as the LAST
+  absolute-path ProgramArguments entry to defeat interpreter-wrapper hiding. Fixtures for both.
+- **B. T-3 gate substring match** (QA F-1 crit vs Audit F-3 low — SEVERITY SPLIT, surfaced not averaged):
+  Audit ran real spctl (rejections never contain "accepted") so not reachable today = low; QA's repro used
+  a string spctl doesn't emit. RECONCILED: fix anyway — gate is security-load-bearing and free-text match
+  is fragile. Change ParseCodesign to take `accepted bool` from spctl EXIT CODE (unspoofable). Closes both.
+- **C. Switch order revoked-before-unsigned** (QA F-2 high): FIX — check revoked first (higher severity).
+- **D. Missing /System/Library observe paths** (Audit F-2 med): FIX — add the two paths (observe only; actor still never touches /System per §9).
+- **E. CollectPersistence fail-loud** (Audit F-4 low, §9): FIX — return error when no dir readable.
+- **F. extractAuthority leaf** (QA F-5 / Audit F-5): agreed CORRECT; add doc comment only.
+No human escalation — the lone severity split resolved to the same fix.
