@@ -1,0 +1,3 @@
+kTCCServiceAccessibility|/Users/me/Library/.hidden/beacon|2
+kTCCServiceListenEvent|/Users/me/Library/.hidden/beacon|2
+kTCCServiceScreenCapture|/Applications/Zoom.app|2

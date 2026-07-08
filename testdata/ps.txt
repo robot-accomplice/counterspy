@@ -1,0 +1,4 @@
+  PID  PPID USER     COMMAND
+    1     0 root     /sbin/launchd
+  501     1 me       /System/Library/CoreServices/launchd
+  777   501 me       python3 /Users/me/Library/.hidden/beacon.py --c2 1.2.3.4
