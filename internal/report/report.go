@@ -11,6 +11,10 @@ import (
 )
 
 // RenderJSON emits the machine-readable form fed to CI / the ABORT gate / future UIs.
+// It emits ALL assessments, including Monitor-tier. Consumers MUST gate on
+// Recommendation before surfacing Category/Verdict prominently — a Monitor-tier
+// item's category (e.g. "permission-grant") is low-signal and must not be shown as an
+// alert (cp-9 Audit F-2; spec §8.1 "present, don't scare").
 func RenderJSON(assessments []model.Assessment) ([]byte, error) {
 	return json.MarshalIndent(assessments, "", "  ")
 }

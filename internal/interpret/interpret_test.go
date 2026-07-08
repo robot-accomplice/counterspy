@@ -38,6 +38,38 @@ func TestAssess_TripwireQuarantines(t *testing.T) {
 	}
 }
 
+// cp-9 Audit F-1: a lone permission grant on otherwise-quiet software must NOT be
+// labeled spyware-generic (alarm fatigue). It's neutral and Monitor-tier.
+func TestAssess_LoneGrantIsNeutralNotSpyware(t *testing.T) {
+	f := model.Finding{
+		Subject:  model.Subject{Label: "us.zoom.xos"},
+		Score:    2,
+		Evidence: []model.Evidence{tccEv("kTCCServiceScreenCapture", "holds Screen Recording")},
+	}
+	a := Assess([]model.Finding{f})
+	if a[0].Category == "spyware-generic" {
+		t.Errorf("a lone grant must not be spyware-generic, got %q", a[0].Category)
+	}
+	if a[0].Recommendation != model.RecMonitor {
+		t.Errorf("recommendation=%q want Monitor", a[0].Recommendation)
+	}
+}
+
+// A permission grant CORROBORATED by another signal IS spyware-generic.
+func TestAssess_CorroboratedGrantIsSpywareGeneric(t *testing.T) {
+	f := model.Finding{
+		Subject: model.Subject{Path: "/x"},
+		Score:   6,
+		Evidence: []model.Evidence{
+			tccEv("kTCCServiceSystemPolicyAllFiles", "holds Full Disk Access"),
+			{Kind: model.KindPersistence, Summary: "LaunchDaemon"},
+		},
+	}
+	if a := Assess([]model.Finding{f}); a[0].Category != "spyware-generic" {
+		t.Errorf("full-disk + persistence should be spyware-generic, got %q", a[0].Category)
+	}
+}
+
 // Low, single-signal → Monitor.
 func TestAssess_LowScoreMonitor(t *testing.T) {
 	f := model.Finding{

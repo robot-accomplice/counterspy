@@ -69,13 +69,20 @@ func signalsOf(f model.Finding) signals {
 }
 
 func categorize(s signals) string {
+	permissive := s.screen || s.fullDisk || s.inputMon || s.accessibility
+	// A lone permission grant on otherwise-quiet (often legitimately-signed) software
+	// is NOT spyware — only call it that when corroborated by another signal, else it
+	// reads as a scary false positive and erodes trust (cp-9 Audit F-1).
+	corroborated := s.unsigned || s.persistence || s.listener || s.connection || len(dedupeGrants(s.tccGrants)) >= 2
 	switch {
 	case s.inputMon && s.accessibility:
 		return "keylogger"
 	case s.unsigned && s.listener && s.persistence:
 		return "backdoor"
-	case s.screen || s.fullDisk || s.inputMon || s.accessibility:
+	case permissive && corroborated:
 		return "spyware-generic"
+	case permissive:
+		return "permission-grant" // neutral: a single, uncorroborated privacy grant
 	case s.persistence:
 		return "persistence-only"
 	default:
