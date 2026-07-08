@@ -44,9 +44,18 @@ type Evidence struct {
 	Facts   map[string]string
 }
 
-// Action is a single reversible operation the actor will perform, in order.
+// ActionKind is the closed set of operations the actor performs (T-2: typed so a
+// typo can't compile, matching the SignalKind precedent).
+type ActionKind string
+
+const (
+	ActionBootout ActionKind = "bootout" // disable a launch item so it can't respawn
+	ActionMove    ActionKind = "move"    // move an artifact to quarantine (reversible)
+)
+
+// Action is a single operation the actor will perform, in order.
 type Action struct {
-	Kind string // "bootout" | "move"
+	Kind ActionKind
 	From string
 	To   string
 }
