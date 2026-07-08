@@ -53,7 +53,7 @@ func runScan(flags []string, stdout io.Writer) int {
 	if !dry {
 		ev = collectAll(stdout)
 	}
-	assessments := interpret.Assess(score.Score(ev))
+	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 
 	if asJSON {
 		b, err := report.RenderJSON(assessments)
@@ -155,6 +155,41 @@ func plannedActions(f model.Finding) []model.Action {
 		a = append(a, model.Action{Kind: model.ActionMove, From: f.Subject.Path})
 	}
 	return a
+}
+
+// userAllowlist reads the operator's vetted known-good subjects (one label or path
+// per line, # comments) from ~/.config/counterspy/allowlist.txt. Missing file = empty.
+func userAllowlist() map[string]bool {
+	m := map[string]bool{}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return m
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".config", "counterspy", "allowlist.txt"))
+	if err != nil {
+		return m
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" && !strings.HasPrefix(ln, "#") {
+			m[ln] = true
+		}
+	}
+	return m
+}
+
+// filterAllowed drops assessments the operator has vetted (by label or path).
+func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessment {
+	if len(allow) == 0 {
+		return as
+	}
+	out := make([]model.Assessment, 0, len(as))
+	for _, a := range as {
+		if allow[a.Subject.Label] || allow[a.Subject.Path] {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func has(flags []string, want string) bool {

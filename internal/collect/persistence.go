@@ -14,7 +14,9 @@ import (
 
 // Persistence signal weights (local to the collector so `collect` never imports `score`).
 const (
-	wHiddenPath = 2
+	// hidden-path is down-weighted: dev tools legitimately live in dot-dirs
+	// (~/.cargo, ~/go, ~/.local), so it's a noisy signal on its own (tuning tick 8).
+	wHiddenPath = 1
 	wUserAgent  = 1
 	wMissingTgt = 2
 )
