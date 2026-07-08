@@ -110,3 +110,13 @@ Both reviewers unanimous. All fix-now (no vote). This is the destructive path; h
 - **G. Timestamp default** (Audit F-5 med): manifest stamps time.Now().UTC() when blank.
 - F-6(Audit)/F-7(QA) bootout-outcome + full-rollback: accepted low; the always-written manifest makes
   partial state recoverable, which satisfies §9 reversibility without complex rollback.
+
+## Tick 7 (cp-13, plan Task 12 CLI) — real-run RCA — 2026-07-08
+Running the binary (not fixtures) exposed a false-positive explosion (327 findings, 257 Investigate):
+- codesign fanned out per-evidence -> duplicate evidence + inflated scores. Fix: dedupe per unique path.
+- codesigning .plist files -> bogus "unsigned" on legit software (Google Keystone). Fix: skip non-binaries.
+- Subject.Key() ("path:/...") leaked into the report. Fix: Subject.Display().
+Result: 260 -> 2 actionable; noise absorbed by Monitor. RESIDUAL (for ABORT gate): unsigned+persistence
+is common on developer machines (roboticus, Jon's own tool, is the 1 remaining Quarantine) — the
+Apple-only allowlist doesn't cover Developer-ID/user tools, so false-positive VOLUME needs a tuning pass
+(expand allowlist to Gatekeeper-accepted, or require more correlation for Investigate) before public release.
