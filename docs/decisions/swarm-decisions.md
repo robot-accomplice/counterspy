@@ -69,3 +69,10 @@ briefs now say probe files must live under /tmp only, never in the repo; orchest
 Per Jon: the app must repackage findings into a consumable form with recommendations, not dump
 evidence. Added spec §8.1 + plan Task 10 interpret layer (pure Verdict/Category/Recommendation on
 each Finding, rule-based per Rule 6, in the core so CLI + future TUI/WebUI share it).
+
+## Tick 5 (cp-9, plan Task 10: interpret+report synthesis) — resolved 2026-07-08
+- **A. categorize false-positive** (Audit F-1 med-high; QA no defects): FIX-NOW. Lone permissive TCC
+  grant on signed software -> neutral "permission-grant"; "spyware-generic" only when corroborated.
+  Directly serves Jon's anti-alarm-fatigue directive.
+- **B. RenderJSON category gating** (Audit F-2 low): documented the gate-on-Recommendation contract.
+- QA: 30+ adversarial probes, no confirmed failures; tree kept clean (T-6 mitigation held).
