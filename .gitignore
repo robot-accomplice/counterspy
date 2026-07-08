@@ -1,0 +1,5 @@
+CounterSpy/quarantine/
+CounterSpyQuarantine/
+*.test
+counterspy
+/counterspy
