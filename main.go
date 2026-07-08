@@ -133,19 +133,19 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
 		if len(actions) == 0 {
 			continue // e.g. a process-only finding: no artifact to move, no reversible action
 		}
-		fmt.Fprintf(stdout, "\n  Quarantine %s? %s ", a.Subject.Display(), dim("(moves, reversible) [y/N/q]"))
+		fmt.Fprintf(stdout, "\n  Quarantine %s? %s ", report.Clean(a.Subject.Display()), dim("(moves, reversible) [y/N/q]"))
 		line, _ := in.ReadString('\n')
 		switch strings.TrimSpace(strings.ToLower(line)) {
 		case "q":
 			return
 		case "y":
-			f := a.Finding
-			f.Actions = actions
-			if _, err := act.Quarantine(root, ts, f); err != nil {
+			a.Actions = actions // a.Finding.Actions (embedded)
+			if _, err := act.Quarantine(root, ts, a); err != nil {
 				fmt.Fprintln(stdout, "    stopped (partial state recorded in manifest):", err)
 				continue
 			}
 			fmt.Fprintln(stdout, "    ✓ quarantined ->", root)
+			fmt.Fprintln(stdout, dim("      undo: sudo counterspy restore "+filepath.Join(root, "manifest.json")))
 		}
 	}
 }

@@ -3,7 +3,6 @@ package collect
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"counterspy/internal/model"
@@ -58,7 +57,7 @@ func CollectTCC() ([]model.Evidence, error) {
 	var errs []error
 	readOK := 0
 	for _, db := range dbs {
-		out, err := exec.Command("sqlite3", "-separator", "|", db, q).Output()
+		out, err := execOutput("sqlite3", "-separator", "|", db, q)
 		if err != nil {
 			errs = append(errs, err)
 			continue

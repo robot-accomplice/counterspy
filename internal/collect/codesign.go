@@ -1,7 +1,6 @@
 package collect
 
 import (
-	"os/exec"
 	"strings"
 
 	"counterspy/internal/model"
@@ -45,11 +44,11 @@ func ParseCodesign(path, verifyErr string, accepted bool, authority string) []mo
 
 // CollectCodesign runs codesign/spctl for a path (I/O edge).
 func CollectCodesign(path string) []model.Evidence {
-	verify, _ := exec.Command("codesign", "--verify", "--deep", path).CombinedOutput()
+	verify, _ := execCombined("codesign", "--verify", "--deep", path)
 	// spctl's EXIT CODE is the unspoofable acceptance signal (T-3, cp-5 F-1/F-3) —
 	// exit 0 == accepted. We never parse its free-text output for the verdict.
-	accepted := exec.Command("spctl", "--assess", "--type", "execute", path).Run() == nil
-	authOut, _ := exec.Command("codesign", "-dv", "--verbose=2", path).CombinedOutput()
+	accepted := execAccepts("spctl", "--assess", "--type", "execute", path)
+	authOut, _ := execCombined("codesign", "-dv", "--verbose=2", path)
 	return ParseCodesign(path, string(verify), accepted, extractAuthority(string(authOut)))
 }
 

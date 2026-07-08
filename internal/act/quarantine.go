@@ -5,6 +5,7 @@
 package act
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,10 @@ import (
 	"counterspy/internal/model"
 	"counterspy/internal/score"
 )
+
+// launchctlTimeout bounds the actor's launchctl calls so a wedged launchd can't hang
+// a quarantine or restore (ABORT C1).
+const launchctlTimeout = 15 * time.Second
 
 // protectedPrefixes are paths CounterSpy refuses to move, even under sudo. SIP already
 // blocks /System, but we refuse explicitly so a bug can never even attempt it
@@ -37,10 +42,30 @@ func isProtected(p string) bool {
 	return false
 }
 
+// refuseUnsafe rejects a move source that is protected, is itself a symlink, or
+// resolves (via any symlinked component) into a protected path — closing the
+// stat-then-rename TOCTOU window a local attacker could race (ABORT C1).
+func refuseUnsafe(p string) error {
+	if isProtected(p) {
+		return fmt.Errorf("refusing to move protected system path: %s", p)
+	}
+	if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to move a symlink (possible TOCTOU): %s", p)
+	}
+	if real, err := filepath.EvalSymlinks(p); err == nil && isProtected(real) {
+		return fmt.Errorf("refusing: %s resolves into a protected path (%s)", p, real)
+	}
+	return nil
+}
+
 // bootout disables a launch item so it can't respawn. Best-effort and swappable in
 // tests; "already booted out" is not an error we care about, and the subsequent move
 // keeps the item from reloading regardless.
-var bootout = func(target string) { _ = exec.Command("launchctl", "bootout", target).Run() }
+var bootout = func(target string) {
+	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "launchctl", "bootout", target).Run()
+}
 
 // Quarantine performs a finding's actions in order: disable launch items, then MOVE
 // each artifact into root under its original path (collision-proof, provenance-
@@ -48,14 +73,19 @@ var bootout = func(target string) { _ = exec.Command("launchctl", "bootout", tar
 // even on a mid-way failure — so a partial quarantine is never an unrecoverable orphan
 // (cp-11 Audit F-3). Refuses allowlisted subjects and protected paths (§9 two-clause
 // refusal). On the first move failure it stops and returns the partial item + error.
-func Quarantine(root, timestamp string, f model.Finding) (model.ManifestItem, error) {
+func Quarantine(root, timestamp string, as model.Assessment) (model.ManifestItem, error) {
+	f := as.Finding
 	if a := allowlistedAuthority(f); a != "" {
 		return model.ManifestItem{}, fmt.Errorf("refusing to quarantine %s: trusted signature %q", f.Subject.Key(), a)
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return model.ManifestItem{}, err
 	}
-	item := model.ManifestItem{Subject: f.Subject, Evidence: f.Evidence}
+	item := model.ManifestItem{
+		Subject: f.Subject, Evidence: f.Evidence,
+		Score: f.Score, Tripwire: f.Tripwire,
+		Category: as.Category, Recommendation: as.Recommendation, Verdict: as.Verdict,
+	}
 	// Always persist what completed, success or failure.
 	defer func() { _ = appendManifest(root, timestamp, item) }()
 
@@ -63,8 +93,8 @@ func Quarantine(root, timestamp string, f model.Finding) (model.ManifestItem, er
 		switch a.Kind {
 		case model.ActionMove:
 			from := filepath.Clean(a.From)
-			if isProtected(from) {
-				return item, fmt.Errorf("refusing to move protected system path: %s", from)
+			if err := refuseUnsafe(from); err != nil {
+				return item, err
 			}
 			to := filepath.Join(root, strings.TrimPrefix(from, "/"))
 			if _, err := os.Stat(to); err == nil {
@@ -79,6 +109,12 @@ func Quarantine(root, timestamp string, f model.Finding) (model.ManifestItem, er
 			a.From, a.To = from, to
 			item.Actions = append(item.Actions, a)
 		case model.ActionBootout:
+			// bootout operates on a launchd label, not a path; refuse Apple system
+			// labels as defense-in-depth (ABORT C1/C2 — the protected-path check can't
+			// apply to a non-path target).
+			if strings.HasPrefix(a.From, "com.apple.") {
+				return item, fmt.Errorf("refusing to bootout an Apple system launch item: %s", a.From)
+			}
 			bootout(a.From)
 			item.Actions = append(item.Actions, a)
 		}
@@ -113,10 +149,11 @@ func appendManifest(root, timestamp string, item model.ManifestItem) error {
 		}
 		m.Timestamp = timestamp
 	}
+	m.ToolVersion = model.Version
 	m.Items = append(m.Items, item)
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o644)
+	return os.WriteFile(p, b, 0o600)
 }

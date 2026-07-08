@@ -4,6 +4,10 @@ package model
 
 import "fmt"
 
+// Version is stamped into every manifest so an incident can be traced to the exact
+// build (weights, allowlist, rules) that produced a quarantine (ABORT C4).
+const Version = "v0.1.0-rc3"
+
 type SignalKind string
 
 const (
@@ -82,15 +86,24 @@ type Finding struct {
 	Actions  []Action
 }
 
+// ManifestItem records not just WHAT moved but WHY — the score, tripwire, category,
+// recommendation, and verdict that justified the action — so a later incident is
+// root-causable from the manifest alone (ABORT C4).
 type ManifestItem struct {
-	Subject  Subject
-	Actions  []Action
-	Evidence []Evidence
+	Subject        Subject
+	Actions        []Action
+	Evidence       []Evidence
+	Score          int
+	Tripwire       string
+	Category       string
+	Recommendation Recommendation
+	Verdict        string
 }
 
 type Manifest struct {
-	Timestamp string
-	Items     []ManifestItem
+	Timestamp   string
+	ToolVersion string
+	Items       []ManifestItem
 }
 
 // Recommendation is the synthesized action for a Finding (spec §8.1).

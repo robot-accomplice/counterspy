@@ -47,6 +47,19 @@ func TestRender_LeadsWithSummaryAndVerdict(t *testing.T) {
 	}
 }
 
+// C1: a malicious plist Label with ANSI/control chars must be neutralized in output.
+func TestRender_SanitizesAttackerControlledStrings(t *testing.T) {
+	as := []model.Assessment{{
+		Finding:        model.Finding{Subject: model.Subject{Label: "evil\x1b[2K\x1b[1Afake"}, Score: 12},
+		Recommendation: model.RecQuarantine, Category: "backdoor",
+		Verdict: "line1\nline2\x1b[31m",
+	}}
+	out := Render(as, nil, false)
+	if strings.Contains(out, "\x1b") || strings.Contains(out, "\x1b[2K") {
+		t.Errorf("ANSI escape leaked into output:\n%q", out)
+	}
+}
+
 // A collector gap is surfaced in the summary (fail loud).
 func TestRender_SurfacesGaps(t *testing.T) {
 	out := Render(sample(), []string{"TCC privacy-grant signal unavailable"}, false)

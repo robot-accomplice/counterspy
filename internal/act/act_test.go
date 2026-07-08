@@ -18,11 +18,11 @@ func write(t *testing.T, p, s string) {
 	}
 }
 
-func moveFinding(path, label string) model.Finding {
-	return model.Finding{
+func moveFinding(path, label string) model.Assessment {
+	return model.Assessment{Finding: model.Finding{
 		Subject: model.Subject{Path: path, Label: label},
 		Actions: []model.Action{{Kind: model.ActionMove, From: path}},
-	}
+	}}
 }
 
 // Core guarantee (§9/#4): quarantine → restore is byte-identical.
@@ -101,7 +101,7 @@ func TestQuarantine_RefusesAllowlisted(t *testing.T) {
 			Facts: map[string]string{"authority": "Software Signing"}}},
 		Actions: []model.Action{{Kind: model.ActionMove, From: orig}},
 	}
-	if _, err := Quarantine(filepath.Join(tmp, "q"), "t", f); err == nil {
+	if _, err := Quarantine(filepath.Join(tmp, "q"), "t", model.Assessment{Finding: f}); err == nil {
 		t.Fatal("must refuse to quarantine an Apple-allowlisted subject")
 	}
 	if _, err := os.Stat(orig); err != nil {
@@ -117,9 +117,49 @@ func TestQuarantine_RefusesProtectedPaths(t *testing.T) {
 		"/Users/me/../../System/x", // .. traversal resolved by Clean
 	} {
 		f := model.Finding{Subject: model.Subject{Path: p}, Actions: []model.Action{{Kind: model.ActionMove, From: p}}}
-		if _, err := Quarantine(t.TempDir(), "t", f); err == nil {
+		if _, err := Quarantine(t.TempDir(), "t", model.Assessment{Finding: f}); err == nil {
 			t.Errorf("expected refusal for %q", p)
 		}
+	}
+}
+
+// ABORT C1: refuse to move a symlink (closes the stat→rename TOCTOU).
+func TestQuarantine_RefusesSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	write(t, real, "x")
+	link := filepath.Join(tmp, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlink unsupported")
+	}
+	f := model.Finding{Subject: model.Subject{Path: link}, Actions: []model.Action{{Kind: model.ActionMove, From: link}}}
+	if _, err := Quarantine(filepath.Join(tmp, "q"), "t", model.Assessment{Finding: f}); err == nil {
+		t.Fatal("must refuse to move a symlink (possible TOCTOU)")
+	}
+}
+
+// ABORT C2: restoring a booted-out item re-registers it with launchd (not just files back).
+func TestRestore_RebootstrapsBootedOutJob(t *testing.T) {
+	tmp := t.TempDir()
+	qRoot := filepath.Join(tmp, "q")
+	plist := filepath.Join(tmp, "Library", "LaunchAgents", "com.evil.plist")
+	write(t, plist, "<plist/>")
+	f := model.Finding{Subject: model.Subject{Label: "com.evil"}, Actions: []model.Action{
+		{Kind: model.ActionBootout, From: "gui/501/com.evil"},
+		{Kind: model.ActionMove, From: plist},
+	}}
+	if _, err := Quarantine(qRoot, "t", model.Assessment{Finding: f}); err != nil {
+		t.Fatal(err)
+	}
+	var called []string
+	old := rebootstrap
+	defer func() { rebootstrap = old }()
+	rebootstrap = func(pl string) { called = append(called, pl) }
+	if err := Restore(filepath.Join(qRoot, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	if len(called) != 1 || called[0] != plist {
+		t.Fatalf("restore should re-bootstrap the restored plist, got %v", called)
 	}
 }
 
@@ -136,7 +176,7 @@ func TestQuarantine_PartialFailureIsRecoverable(t *testing.T) {
 			{Kind: model.ActionMove, From: filepath.Join(tmp, "d", "missing")}, // will fail
 		},
 	}
-	if _, err := Quarantine(qRoot, "t", f); err == nil {
+	if _, err := Quarantine(qRoot, "t", model.Assessment{Finding: f}); err == nil {
 		t.Fatal("expected an error on the missing second move")
 	}
 	// The first move must be recorded and restorable.

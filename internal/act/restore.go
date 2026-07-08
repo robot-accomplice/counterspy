@@ -1,14 +1,31 @@
 package act
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"counterspy/internal/model"
 )
+
+// rebootstrap re-registers a restored launch item with launchd so a booted-out job
+// actually comes back to life, not just its files on disk (ABORT C2). Best-effort:
+// launchd also auto-loads user LaunchAgents at next login. Swappable in tests.
+var rebootstrap = func(plist string) {
+	domain := "gui/" + strconv.Itoa(os.Getuid())
+	if strings.Contains(plist, "/LaunchDaemons/") {
+		domain = "system"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "launchctl", "bootstrap", domain, plist).Run()
+}
 
 // Restore reverses a quarantine from its manifest: every moved artifact goes back
 // To → From. It NEVER clobbers: if something already occupies From (e.g. the malware
@@ -29,7 +46,13 @@ func Restore(manifestPath string) error {
 
 	var problems []error
 	for _, item := range m.Items {
+		hadBootout := false
+		var restoredPlists []string
 		for _, a := range item.Actions {
+			if a.Kind == model.ActionBootout {
+				hadBootout = true
+				continue
+			}
 			if a.Kind != model.ActionMove || a.To == "" {
 				continue
 			}
@@ -48,6 +71,17 @@ func Restore(manifestPath string) error {
 			}
 			if err := os.Rename(a.To, from); err != nil {
 				problems = append(problems, err)
+				continue
+			}
+			if strings.HasSuffix(from, ".plist") {
+				restoredPlists = append(restoredPlists, from)
+			}
+		}
+		// Re-enable a disabled launch item so restore is a true reversal, not just
+		// files-back-on-disk (ABORT C2).
+		if hadBootout {
+			for _, pl := range restoredPlists {
+				rebootstrap(pl)
 			}
 		}
 	}

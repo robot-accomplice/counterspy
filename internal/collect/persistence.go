@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -138,8 +137,8 @@ func CollectPersistence() ([]model.Evidence, error) {
 		readOK++
 		for _, e := range entries {
 			p := filepath.Join(d, e.Name())
-			xmlBytes, err := exec.Command("plutil", "-convert", "xml1", "-o", "-", p).Output()
-			if err != nil {
+			xmlBytes, err := execOutput("plutil", "-convert", "xml1", "-o", "-", p)
+			if err != nil || len(xmlBytes) > 2<<20 { // cap at 2 MiB — skip plist bombs (ABORT C1)
 				continue
 			}
 			ev, _ := ParsePersistencePlist(xmlBytes, p)

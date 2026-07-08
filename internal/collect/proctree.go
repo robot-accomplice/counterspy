@@ -1,7 +1,6 @@
 package collect
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -133,10 +132,10 @@ func firstField(cmd string) string {
 
 // CollectProcesses runs ps + lsof (I/O edge).
 func CollectProcesses() ([]model.Evidence, error) {
-	psb, err := exec.Command("ps", "-axo", "pid,ppid,user,command").Output()
+	psb, err := execOutput("ps", "-axo", "pid,ppid,user,command")
 	if err != nil {
 		return nil, err
 	}
-	lsb, _ := exec.Command("lsof", "-i", "-nP").Output() // may be partial without root
+	lsb, _ := execOutput("lsof", "-i", "-nP") // may be partial without root
 	return BuildProcessEvidence(ParsePs(psb), ParseLsof(lsb)), nil
 }

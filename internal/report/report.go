@@ -107,9 +107,9 @@ func Render(assessments []model.Assessment, gaps []string, color bool) string {
 		rc := recStyle(a.Recommendation)
 		fmt.Fprintf(&b, "\n  %s %s  %s\n",
 			p.s(rc, glyph(a.Recommendation)+" "+strings.ToUpper(string(a.Recommendation))),
-			p.s(sBold, a.Subject.Display()),
+			p.s(sBold, Clean(a.Subject.Display())),
 			p.s(sDim, a.Category+" · score "+itoa(a.Score)))
-		fmt.Fprintf(&b, "     %s\n", a.Verdict)
+		fmt.Fprintf(&b, "     %s\n", Clean(a.Verdict))
 		if a.Tripwire != "" {
 			fmt.Fprintf(&b, "     %s\n", p.s(sTrip, " ⚠ tripwire: "+a.Tripwire+" "))
 		}
@@ -118,16 +118,17 @@ func Render(assessments []model.Assessment, gaps []string, color bool) string {
 			if e.count > 1 {
 				suffix = p.s(sDim, fmt.Sprintf("  ×%d", e.count))
 			}
-			fmt.Fprintf(&b, "       %s %s%s\n", p.s(sMint, pad(e.kind, 12)), e.summary, suffix)
+			fmt.Fprintf(&b, "       %s %s%s\n", p.s(sMint, pad(e.kind, 12)), Clean(e.summary), suffix)
 			if e.ancestry != "" {
-				fmt.Fprintf(&b, "         %s %s\n", p.s(sDim, "↳"), p.s(sAmber, e.ancestry))
+				fmt.Fprintf(&b, "         %s %s\n", p.s(sDim, "↳"), p.s(sAmber, Clean(e.ancestry)))
 			}
 			if e.argv != "" {
-				fmt.Fprintf(&b, "         %s %s\n", p.s(sDim, "↳"), p.s(sDim, e.argv))
+				fmt.Fprintf(&b, "         %s %s\n", p.s(sDim, "↳"), p.s(sDim, Clean(e.argv)))
 			}
 		}
 	}
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "\n  %s\n", p.s(sDim,
+		"Quarantine = act now · Investigate = review (may be legitimate) · undo anything with: counterspy restore"))
 	return b.String()
 }
 
@@ -168,3 +169,20 @@ func pad(s string, n int) string {
 }
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
+
+// Clean strips control/escape characters from attacker-influenced strings (plist
+// labels, paths, argv) before they reach the terminal, so a crafted value cannot
+// inject ANSI to spoof the consent prompt or hide a finding (ABORT C1).
+func Clean(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			b.WriteRune(' ')
+		case r < 0x20 || r == 0x7f: // drop ESC, CR, LF, and other control chars
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
