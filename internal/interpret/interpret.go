@@ -17,11 +17,12 @@ func Assess(findings []model.Finding) []model.Assessment {
 	out := make([]model.Assessment, 0, len(findings))
 	for _, f := range findings {
 		s := signalsOf(f)
+		cat := categorize(s)
 		out = append(out, model.Assessment{
 			Finding:        f,
-			Category:       categorize(s),
+			Category:       cat,
 			Verdict:        verdict(f, s),
-			Recommendation: recommend(f),
+			Recommendation: recommend(f, s, cat),
 		})
 	}
 	return out
@@ -31,6 +32,7 @@ func Assess(findings []model.Finding) []model.Assessment {
 type signals struct {
 	unsigned, persistence, listener, connection bool
 	inputMon, accessibility, screen, fullDisk   bool
+	acceptedSigned                              bool // has a Gatekeeper-accepted signing authority
 	tccGrants                                   []string
 }
 
@@ -41,6 +43,9 @@ func signalsOf(f model.Finding) signals {
 		case model.KindCodesign:
 			if e.Facts["signed"] == "false" {
 				s.unsigned = true
+			}
+			if e.Facts["authority"] != "" { // set only when Gatekeeper accepted (codesign T-3)
+				s.acceptedSigned = true
 			}
 		case model.KindPersistence:
 			s.persistence = true
@@ -114,9 +119,33 @@ func verdict(f model.Finding, s signals) string {
 	return fmt.Sprintf("%s is %s.", who, joinWithAnd(parts))
 }
 
-func recommend(f model.Finding) model.Recommendation {
+// recommend maps a finding to an action. C3 hardening (ABORT v0.1.0-rc2):
+//   - a tripwire always Quarantines (and tripwires require unsigned evidence, so signed
+//     software never reaches Quarantine through this path);
+//   - Gatekeeper-accepted signed software is never auto-Quarantined — capped at
+//     Investigate — so the tool can't be weaponized to disable legit signed apps/EDR;
+//   - "weak" categories (persistence-only / permission-grant / unknown) never
+//     auto-Quarantine without a tripwire, softening the score-only escalation that
+//     flagged benign unsigned dev tools.
+func recommend(f model.Finding, s signals, cat string) model.Recommendation {
+	if f.Tripwire != "" {
+		return model.RecQuarantine
+	}
+	weak := cat == "persistence-only" || cat == "permission-grant" || cat == "unknown"
+	if s.acceptedSigned && !s.unsigned {
+		if !weak && f.Score >= score.ShowThreshold {
+			return model.RecInvestigate
+		}
+		return model.RecMonitor
+	}
+	if weak {
+		if f.Score >= score.ShowThreshold {
+			return model.RecInvestigate
+		}
+		return model.RecMonitor
+	}
 	switch {
-	case f.Tripwire != "" || f.Score >= score.HighTier:
+	case f.Score >= score.HighTier:
 		return model.RecQuarantine
 	case f.Score >= score.ShowThreshold:
 		return model.RecInvestigate
