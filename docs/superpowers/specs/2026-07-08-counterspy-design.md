@@ -248,7 +248,25 @@ judge — running it against this spec would produce the vague, evidence-free ve
 the skill itself forbids (Rule 16 justification). Recorded here as a committed exit
 criterion.*
 
-## 12. Success criteria
+## 12. Future scope (post-v1, not built now)
+
+Once the CLI engine is proven effective, likely additions — **reporting faces**, not
+new logic:
+
+- **TUI** (e.g. Bubble Tea) — interactive triage/quarantine over the same findings.
+- **WebUI** — at least a reporting dashboard consuming the `--json` output.
+
+*Deferred because the engine (collectors + pure scorer) is the risky, must-be-correct
+part; UIs are low-risk and only worth building once the core is trusted (Rule 16
+justification). Not started in v1.*
+
+**Design invariant that keeps this cheap:** presentation logic must never leak into
+`score` or `collect`. The scorer stays a pure `[]Evidence → []Finding`; every UI
+(CLI, TUI, WebUI) is an outer-ring consumer that renders `model.Finding` / the `--json`
+form and depends inward only. Adding a UI later must require **zero** changes to the
+core. The swarm's Audit role enforces this boundary.
+
+## 13. Success criteria
 
 1. `sudo counterspy scan` produces a ranked, correlated report on a real Mac without
    mutating anything.
