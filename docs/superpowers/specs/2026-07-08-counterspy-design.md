@@ -218,18 +218,35 @@ the **exact `Actions`** quarantine would take, then asks per item.
 - **Actor:** temp-sandbox dir with fake plists/binaries; **quarantine→restore must
   round-trip to a byte-identical tree**. This round-trip is the safety guarantee.
 
-## 11. Final release gate (external, user-operated)
+## 11. Final release gate — ABORT go/no-go
 
-Before any public release, the user runs their `/abort` trustworthiness &
-public-readiness review. Its mechanics are user-owned and confirmed at gate time.
-CounterSpy guarantees the inputs such a gate needs:
+Before CounterSpy is made public, run the `/abort` skill: a disciplined GO/NO-GO
+review that assumes the ship fails, red-teams it from five independent adversarial
+lenses, ranks the failure modes, and forces an explicit verdict with a confidence
+score and convertibility conditions. It is judgment layered **on top of** the
+mechanical gate (`go test ./...`, `go vet`), not a replacement for it.
 
-- a written **threat model** (what CounterSpy defends against and explicitly does not),
-- the **false-positive story** (allowlist + move-not-delete reversibility),
+**Decision under review (to pin at gate time):** "Publish `counterspy` <version> as a
+public tool that, under sudo, quarantines user-selected persistence/process items on
+third parties' Macs." Blast radius: a false positive moves a legitimate item on a
+stranger's machine — reversible via `restore`, but still disruptive. This blast
+radius is exactly what ABORT's Attacker / Worst-Case-Customer / Domain-Integrity
+lenses must hammer.
+
+**Inputs the build guarantees ABORT (so it red-teams from evidence, not plausibility):**
+- the real diff at a tagged commit + green mechanical gates (tests, vet);
+- a written **threat model** (what CounterSpy defends against and explicitly does not);
+- the **false-positive story** (allowlist + move-not-delete + `restore` round-trip test);
 - **reproducible evidence** (`--json` output + `manifest.json` schema).
 
-*Deferred to end-of-build because a readiness gate needs a finished artifact to judge
-(Rule 16 justification); recorded here so it is a committed exit criterion.*
+**Artifact:** ABORT writes its verdict to `docs/releases/<version>-abort.md` (that dir
+is created at ship time). A NO-GO lists explicit convertibility conditions; met
+conditions get appended as a `## Closure` section.
+
+*Deferred to end-of-build because ABORT needs a finished artifact and real state to
+judge — running it against this spec would produce the vague, evidence-free verdict
+the skill itself forbids (Rule 16 justification). Recorded here as a committed exit
+criterion.*
 
 ## 12. Success criteria
 
