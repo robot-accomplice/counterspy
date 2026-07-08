@@ -20,10 +20,17 @@ type Subject struct {
 	Label string
 }
 
-// Key groups evidence about the same thing: on-disk path if known, else PID.
+// Key is the correlation identity used to group evidence about the same subject.
+// The two namespaces are tagged distinctly ("path:" vs "pid:") so a captured path
+// can never alias a synthetic PID key.
+//
+// Precedence invariant: when a Path is known it is the whole identity and the PID
+// is dropped from the key — so two live processes executing the same on-disk binary
+// correlate as one subject. Collectors always emit either a real PID (>0) or a Path;
+// a Subject with neither is not produced (see ticket T-1).
 func (s Subject) Key() string {
 	if s.Path != "" {
-		return s.Path
+		return "path:" + s.Path
 	}
 	return fmt.Sprintf("pid:%d", s.PID)
 }
