@@ -101,6 +101,16 @@ func TestUpdate_RestoreEmitsCmd(t *testing.T) {
 	}
 }
 
+// cp-tui-1 QA F-1: Ctrl-C must quit from ANY mode, including filter capture.
+func TestUpdate_CtrlCQuitsFromFilter(t *testing.T) {
+	m := threeQ()
+	m, _ = update(m, tcell.KeyRune, '/') // enter filter
+	_, cmds := update(m, tcell.KeyCtrlC, 0)
+	if len(cmds) != 1 || cmds[0].Op != "quit" {
+		t.Fatalf("ctrl-c must quit even from filter mode, got %+v", cmds)
+	}
+}
+
 func TestUpdate_HelpToggle(t *testing.T) {
 	m := threeQ()
 	m, _ = update(m, tcell.KeyRune, '?')

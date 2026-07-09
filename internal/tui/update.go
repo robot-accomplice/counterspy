@@ -14,6 +14,11 @@ type Cmd struct {
 
 // update is the pure state transition: a key event → new Model + effects. No I/O.
 func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
+	// Ctrl-C quits from ANY mode — checked first so a focus overlay can't trap it
+	// (cp-tui-1 QA F-1).
+	if key == tcell.KeyCtrlC {
+		return m, []Cmd{{Op: "quit"}}
+	}
 	// Overlays capture keys until dismissed.
 	if m.Focus == focusModal {
 		switch key {
@@ -49,9 +54,6 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		return m, nil
 	}
 
-	if key == tcell.KeyCtrlC {
-		return m, []Cmd{{Op: "quit"}}
-	}
 	n := len(m.visible())
 	switch key {
 	case tcell.KeyDown:

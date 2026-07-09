@@ -7,8 +7,9 @@ import (
 )
 
 func mk(label string, rec model.Recommendation, score int) model.Assessment {
+	// distinct Path per label so Subject.Key() is unique (cp-tui-1 Audit F-2)
 	return model.Assessment{
-		Finding:        model.Finding{Subject: model.Subject{Label: label}, Score: score},
+		Finding:        model.Finding{Subject: model.Subject{Path: "/x/" + label, Label: label}, Score: score},
 		Recommendation: rec, Category: "test",
 	}
 }

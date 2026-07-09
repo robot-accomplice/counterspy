@@ -127,3 +127,10 @@ Jon ran the CLI and flagged it as bland/ugly with a confusing "exit status 1". R
 the gap message. Fix: friendly gap note ("run with sudo") to stderr; ANSI color by tier; deduped
 evidence; Display() in prompts. Color lives in report behind a `color bool` from the tty (pure core
 untouched). Verdict: dramatic improvement; TUI-grade richness deferred to the post-v1 TUI.
+
+## Tick tui-1 (cp-tui-1, TUI pure core) — resolved 2026-07-09
+- **A. Ctrl-C trapped in filter mode** (QA F-1 high): FIX-NOW — move Ctrl-C to top of update (global quit).
+- **B. Done map aliased across Model value-copies** (Audit F-1 med): FIX with Task 6 (Run) — clone-on-write.
+- **C. Test fixtures all key to pid:0** (Audit F-2 low): FIX — mk() sets a distinct Path per label.
+- **D. Reviewer .bak files** (Audit F-4): swept; T-6 reviewer-hygiene recurrence noted.
+- Confirmed clean: decoupling invariant airtight; visible() deterministic no-aliasing; state machine well-guarded.
