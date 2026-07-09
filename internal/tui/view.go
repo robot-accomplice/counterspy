@@ -76,8 +76,8 @@ func view(m Model, s tcell.Screen) {
 		drawDetail(s, split+2, listTop, w-split-3, vis[m.Selected])
 	}
 
-	drawText(s, 2, h-1, def.Foreground(colDim),
-		"j/k move · q quarantine · u restore · m monitor · s sort · / filter · ? help · Q quit")
+	drawText(s, 2, h-1, def.Foreground(colDim), truncate(
+		"j/k move · q quarantine · u restore · m monitor · s sort · / filter · ? help · Q quit", w-3))
 	if m.Toast != "" {
 		drawText(s, 2, h-2, def.Foreground(colAccent), truncate(m.Toast, w-4))
 	}

@@ -134,3 +134,11 @@ untouched). Verdict: dramatic improvement; TUI-grade richness deferred to the po
 - **C. Test fixtures all key to pid:0** (Audit F-2 low): FIX — mk() sets a distinct Path per label.
 - **D. Reviewer .bak files** (Audit F-4): swept; T-6 reviewer-hygiene recurrence noted.
 - Confirmed clean: decoupling invariant airtight; visible() deterministic no-aliasing; state machine well-guarded.
+
+## Tick tui-2 (cp-tui-2, view + Run) — resolved 2026-07-09
+Both reviewers essentially clean (no crit/high). Confirmed: view() pure; Run doesn't Init/Fini/recover/
+os.Exit (panic reaches caller's deferred Fini — terminal safe); withDone clone closes cp-tui-1 F-1;
+-race clean; no flakes (60 runs). Applied: footer truncate (QA note). Reconciled: `u` restores the whole
+SESSION manifest (cliActor reuses one root/ts → all quarantines append to one manifest.json), so clearing
+all Done is correct; help text + spec §5 say "restore this session's quarantine" (Audit F-2 was a
+false alarm from reviewing run.go without the Task-7 adapter). Actor/act signature gap = Task 7 adapter's job.
