@@ -56,6 +56,10 @@ func view(m Model, s tcell.Screen) {
 		row++
 	}
 
+	if w < 24 {
+		drawText(s, 0, row, def.Foreground(colWarn), truncate("terminal too narrow — resize", w))
+		return
+	}
 	// Panel labels + layout. Reserve the last two rows for footer (h-1) and toast (h-2).
 	split := w / 2
 	labelRow := row
@@ -246,8 +250,14 @@ func drawBox(s tcell.Screen, x0, y0, bw, bh int) tcell.Style {
 func drawModal(s tcell.Screen, a model.Assessment) {
 	w, h := s.Size()
 	bw := 64
+	if bw > w-2 {
+		bw = w - 2
+	}
 	plan := planLines(a)
 	bh := 7 + len(plan)
+	if bh > h-2 { // clamp so the box never runs off a short screen
+		bh = h - 2
+	}
 	x0, y0 := (w-bw)/2, (h-bh)/2
 	box := drawBox(s, x0, y0, bw, bh)
 	drawText(s, x0+2, y0+1, box.Bold(true), truncate("Quarantine "+a.Subject.Display()+"?", bw-4))
@@ -288,6 +298,9 @@ func drawHelp(s tcell.Screen) {
 		"/            filter by name   ·   esc clears",
 		"?            toggle this help",
 		"Q, Ctrl-C    quit",
+		"",
+		"--from <json> loads a snapshot as READ-ONLY triage",
+		"(quarantine is disabled; run a live scan to act)",
 	}
 	w, h := s.Size()
 	bw, bh := 52, len(rows)+2
@@ -305,6 +318,12 @@ func drawHelp(s tcell.Screen) {
 func truncate(s string, n int) string {
 	if n < 0 {
 		n = 0
+	}
+	// Byte-cap before materializing runes so a pathologically long field (a hostile
+	// snapshot's 100 MB verdict) can't be reallocated every redraw (ABORT-TUI Attacker #1).
+	// A rune is at most 4 bytes, so 4n+4 bytes always contains at least n runes.
+	if len(s) > 4*n+4 {
+		s = s[:4*n+4]
 	}
 	r := []rune(s)
 	if len(r) <= n {

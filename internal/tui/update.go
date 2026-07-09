@@ -54,7 +54,8 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		return m, nil
 	}
 
-	n := len(m.visible())
+	v := m.visible() // computed once per event (was 2–3× per keystroke)
+	n := len(v)
 	switch key {
 	case tcell.KeyDown:
 		return moveSel(m, +1, n), nil
@@ -76,8 +77,7 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		case '?':
 			m.Focus = focusHelp
 		case 'q':
-			v := m.visible()
-			if len(v) == 0 || m.Selected >= len(v) || v[m.Selected].Recommendation == model.RecMonitor {
+			if n == 0 || m.Selected >= n || v[m.Selected].Recommendation == model.RecMonitor {
 				break
 			}
 			if m.ReadOnly {

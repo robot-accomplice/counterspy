@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"counterspy/internal/act"
@@ -245,11 +248,23 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
 		return 1
 	}
+	// Restore the terminal on an EXTERNAL kill (SIGINT/TERM/HUP — e.g. `kill`, SSH drop)
+	// which bypasses defers. SIGKILL can never be caught (true of any TUI) (ABORT-TUI
+	// Worst-Case-Customer NO-GO).
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigCh
+		screen.Fini()
+		os.Exit(130)
+	}()
+
 	// Deferred LIFO: Fini runs first (restore the terminal), THEN recover reports a
-	// TUI-internal panic cleanly on the restored terminal (never a raw stack trace).
+	// TUI-internal panic WITH its stack to stderr (durable RCA, not one opaque line to a
+	// screen that's about to clear) (ABORT-TUI Future-Me #1).
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintln(stdout, "tui: internal error:", r)
+			fmt.Fprintf(os.Stderr, "tui: internal error: %v\n%s\n", r, debug.Stack())
 			code = 1
 		}
 	}()
@@ -257,7 +272,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
-	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts}
+	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts, readOnly: from != ""}
 	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
 	// the confirm modal without importing act (keeps internal/tui → model only).
 	for i := range assessments {
@@ -273,16 +288,28 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 }
 
 // loadSnapshot decodes a `scan --json` snapshot ([]model.Assessment) from a file or stdin ("-").
+// maxSnapshotBytes caps an untrusted --from snapshot so a hostile file can't OOM the
+// "safe to open" read-only workflow (ABORT-TUI Attacker #1).
+const maxSnapshotBytes = 16 << 20 // 16 MiB
+
 func loadSnapshot(path string) ([]model.Assessment, error) {
-	var b []byte
-	var err error
+	var rc io.Reader
 	if path == "-" {
-		b, err = io.ReadAll(os.Stdin)
+		rc = os.Stdin
 	} else {
-		b, err = os.ReadFile(path)
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		rc = f
 	}
+	b, err := io.ReadAll(io.LimitReader(rc, maxSnapshotBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(b) > maxSnapshotBytes {
+		return nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
 	}
 	var as []model.Assessment
 	return as, json.Unmarshal(b, &as)
@@ -292,21 +319,29 @@ func loadSnapshot(path string) ([]model.Assessment, error) {
 // converting the ManifestItem result to the manifest path the TUI tracks for restore.
 type cliActor struct {
 	root, ts string
+	readOnly bool
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
+	// Defense-in-depth: even if the UI's ReadOnly gate is ever bypassed, the actor
+	// boundary refuses to move files from an untrusted snapshot (ABORT-TUI Attacker/Domain #2).
+	if c.readOnly {
+		return "", fmt.Errorf("quarantine refused — snapshot is read-only; run a live scan to act")
+	}
 	if len(a.Actions) == 0 { // Actions were pre-populated by runTUI (or empty for a bare process)
 		a.Actions = plannedActions(a.Finding)
 	}
 	if len(a.Actions) == 0 {
-		// e.g. a bare-process finding: no artifact to move. Don't report false success
-		// or leave lastManifest pointing at a file that was never written (Audit F-1).
 		return "", fmt.Errorf("nothing to quarantine — no on-disk artifact for %s", a.Subject.Display())
 	}
-	if _, err := act.Quarantine(c.root, c.ts, a); err != nil {
-		return "", err
+	item, err := act.Quarantine(c.root, c.ts, a)
+	// A manifest was written iff at least one action completed — report the path only
+	// then, so the TUI never claims "recorded" for a no-op (ABORT-TUI Domain #3).
+	mp := ""
+	if len(item.Actions) > 0 {
+		mp = filepath.Join(c.root, "manifest.json")
 	}
-	return filepath.Join(c.root, "manifest.json"), nil
+	return mp, err
 }
 
 func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }

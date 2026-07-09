@@ -20,7 +20,11 @@ func Clean(s string) string {
 		switch {
 		case r == '\t':
 			b.WriteRune(' ')
-		case r < 0x20 || r == 0x7f: // drop ESC, CR, LF, and other control chars
+		case r < 0x20 || r == 0x7f: // ESC, CR, LF, other C0 controls
+		case r >= 0x202a && r <= 0x202e: // bidi embeddings/overrides (RTLO spoofing)
+		case r >= 0x2066 && r <= 0x2069: // bidi isolates
+		case r >= 0x200b && r <= 0x200f: // zero-width + LRM/RLM
+		case r == 0xfeff: // zero-width no-break space / BOM
 		default:
 			b.WriteRune(r)
 		}

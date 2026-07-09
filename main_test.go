@@ -62,6 +62,19 @@ func TestCliActor_Quarantine(t *testing.T) {
 	}
 }
 
+// ABORT-TUI Attacker/Domain #2: the actor boundary refuses a read-only (snapshot) actor,
+// so read-only isn't a single UI conditional.
+func TestCliActor_ReadOnlyRefuses(t *testing.T) {
+	ca := &cliActor{root: t.TempDir(), ts: "t", readOnly: true}
+	a := model.Assessment{Finding: model.Finding{
+		Subject: model.Subject{Path: "/tmp/x", Label: "l"},
+		Actions: []model.Action{{Kind: model.ActionMove, From: "/tmp/x"}},
+	}}
+	if _, err := ca.Quarantine(a); err == nil {
+		t.Fatal("a read-only actor must refuse to quarantine")
+	}
+}
+
 // The user allowlist suppresses a vetted known-good subject by label or path.
 func TestFilterAllowed_SuppressesVetted(t *testing.T) {
 	as := []model.Assessment{

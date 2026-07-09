@@ -36,6 +36,25 @@ func TestVisible_FilterByName(t *testing.T) {
 	}
 }
 
+// Measure visible() so the "keystroke lag" concern is grounded in numbers, not
+// plausibility (ABORT-TUI Auditor/Attacker perf note).
+func BenchmarkVisible(b *testing.B) {
+	var as []model.Assessment
+	for i := 0; i < 500; i++ {
+		rec := model.RecInvestigate
+		if i%3 == 0 {
+			rec = model.RecMonitor
+		}
+		as = append(as, mk("item"+itoa(i), rec, 500-i))
+	}
+	m := New(as, nil)
+	m.Filter = "item2"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.visible()
+	}
+}
+
 func TestCounts(t *testing.T) {
 	m := New([]model.Assessment{
 		mk("q", model.RecQuarantine, 12), mk("i", model.RecInvestigate, 6),

@@ -34,9 +34,13 @@ func Run(s tcell.Screen, m Model, actor Actor) error {
 				return nil
 			case "quarantine":
 				mp, err := actor.Quarantine(c.A)
-				if err != nil {
-					m.Toast = "stopped — partial state recorded: " + err.Error()
-				} else {
+				switch {
+				case err != nil && mp != "": // a partial manifest exists — undo is possible
+					lastManifest = mp
+					m.Toast = "stopped — partial state recorded (u to undo): " + err.Error()
+				case err != nil:
+					m.Toast = "quarantine failed (nothing changed): " + err.Error()
+				default:
 					m.Done = withDone(m.Done, c.A.Subject.Key())
 					lastManifest = mp
 					m.Toast = "quarantined " + c.A.Subject.Display()
@@ -46,10 +50,15 @@ func Run(s tcell.Screen, m Model, actor Actor) error {
 					m.Toast = "nothing quarantined this session"
 					break
 				}
-				if err := actor.Restore(lastManifest); err != nil {
-					m.Toast = "restore issue: " + err.Error()
+				err := actor.Restore(lastManifest)
+				// Clear Done on ANY result: a partial restore moved SOME items back, so
+				// keeping them marked "✓ quarantined" would misreport containment. The
+				// Actor gives no per-item outcome, so the safe default is to un-mark all
+				// and tell the operator to rescan (ABORT-TUI Domain #1).
+				m.Done = map[string]bool{}
+				if err != nil {
+					m.Toast = "restore finished with issues — rescan to confirm: " + err.Error()
 				} else {
-					m.Done = map[string]bool{}
 					m.Toast = "restored (reloads at next login)"
 				}
 			}
