@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "id": "roadmap-egress-monitor",
+      "title": "Privacy egress monitor",
+      "kind": "feature",
+      "section": "v0.4.0",
+      "status": "planned",
+      "summary": "Live tracking of what certified/legitimate apps actually send — moving CounterSpy from 'is this spyware?' to 'this app is trusted, but here's what it's exfiltrating; do you consent?'. A per-process egress observer (destination/volume tracking, consent deltas). Rationale: the v0.3.0 feedback loop measures false positives among flagged apps; the next risk surface is the apps NOT flagged — notarized/allowlisted software that over-collects. Rhymes with the egress-only invariant: watch egress because egress is where the risk lives."
+    }
+  ]
+}

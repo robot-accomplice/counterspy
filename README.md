@@ -63,6 +63,37 @@ collect (read-only) ──▶ score (pure) ──▶ interpret ──▶ report 
 - **Fails loud** — a collector that can't read reports a gap, never silence.
 - **Auditable** — deterministic, rule-based verdicts; `manifest.json` is undo + RCA trail.
 
+## Field feedback (opt-in)
+
+CounterSpy can measure its own false-positive rate from the field — but only if you
+opt in. **It is off by default and never phones home unless you turn it on.**
+
+In the TUI, press `g` to mark the selected finding a **false positive** (legitimate) or
+`b` to confirm it was **correctly flagged**. Labels are stored locally under your home
+(`~/.config/counterspy/`, resolved to the invoking user even under `sudo`).
+
+Sharing is a separate, consent-gated step controlled by `~/.config/counterspy/feedback.json`:
+
+```jsonc
+{
+  "share": "off",      // "off" (default) | "ask" (confirm each session) | "always"
+  "detail": "public",  // "public" (default) | "full" (also include private identity + path)
+  "endpoint": ""        // your push-only submission URL; empty = local export file only
+}
+```
+
+What leaves your machine is an **anonymous fingerprint**, never raw data: the signals that
+fired, a score *band*, the category, code-sign status, and a path *class* — no raw paths,
+usernames, or hostnames. An app's identity is included only when it's recognizably public
+(Apple-namespace or Gatekeeper-notarized); a private app's identity stays local unless you
+choose `detail: "full"`. Use `counterspy feedback list` to see exactly what's queued and
+`counterspy feedback submit` to send with a confirmation prompt.
+
+**Egress-only by design:** the feedback channel is push-only. It sends; it never *reads*
+from the network — no remote config, no fetched allowlists, no update checks. An
+anti-spyware tool must never be remotely steerable, so this is enforced in code
+(`TestEgressOnly`), not just promised.
+
 ## Not for
 
 Kernel/firmware implants, SIP-protected components, or signed supply-chain malware —

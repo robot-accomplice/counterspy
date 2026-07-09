@@ -16,7 +16,8 @@
     "risks": "risks.json",
     "glossary": "glossary.json",
     "rules": "rules.json",
-    "releases": "releases/index.json"
+    "releases": "releases/index.json",
+    "roadmap": "roadmap.json"
   },
   "notes": [
     "Architecture derived from source (main.go + internal/**). Keep in sync with the code; the code wins on any conflict."
