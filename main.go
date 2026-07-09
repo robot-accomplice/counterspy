@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -253,6 +254,11 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
 		return 1
 	}
+	// finiOnce guarantees the terminal is restored exactly once no matter which path
+	// (signal, panic, error, or success) triggers it first.
+	var finiOnce sync.Once
+	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
+
 	// Restore the terminal on an EXTERNAL kill (SIGINT/TERM/HUP — e.g. `kill`, SSH drop)
 	// which bypasses defers. SIGKILL can never be caught (true of any TUI) (ABORT-TUI
 	// Worst-Case-Customer NO-GO).
@@ -260,7 +266,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		<-sigCh
-		screen.Fini()
+		fini()
 		os.Exit(130)
 	}()
 
@@ -273,7 +279,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 			code = 1
 		}
 	}()
-	defer screen.Fini()
+	defer fini()
 
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
@@ -295,6 +301,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui:", err)
 		return 1
 	}
+	fini() // restore the terminal BEFORE the feedback prompt/messages (stdin cooked, stdout visible)
 	_ = submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), cfg.Share == feedback.ShareAsk, os.Stdin, stdout)
 	return 0
 }

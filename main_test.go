@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,10 +113,19 @@ func TestPlannedActions_PersistenceBootoutAndMoves(t *testing.T) {
 }
 
 func TestInvokingUserHome_PrefersSudoUser(t *testing.T) {
-	// When SUDO_USER is unset, falls back to os.UserHomeDir (non-empty).
+	// Fallback: SUDO_USER unset → non-empty home.
 	t.Setenv("SUDO_USER", "")
 	if invokingUserHome() == "" {
 		t.Fatal("expected a non-empty home fallback")
+	}
+	// Preference: SUDO_USER set to a real, lookup-able user → that user's home wins over root's.
+	cur, err := user.Current()
+	if err != nil {
+		t.Skip("cannot resolve current user")
+	}
+	t.Setenv("SUDO_USER", cur.Username)
+	if got := invokingUserHome(); got != cur.HomeDir {
+		t.Fatalf("SUDO_USER=%q should resolve to %q, got %q", cur.Username, cur.HomeDir, got)
 	}
 }
 
