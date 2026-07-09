@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,5 +130,67 @@ func TestCliActor_LabelWritesStore(t *testing.T) {
 	p, _ := st.Pending()
 	if len(p) != 1 || p[0].Label != model.LabelFalsePositive {
 		t.Fatalf("label not persisted: %+v", p)
+	}
+}
+
+type fakeTx struct {
+	sent  int
+	calls int
+}
+
+func (f *fakeTx) Send(_ context.Context, rs []model.FeedbackRecord) error {
+	f.calls++
+	f.sent += len(rs)
+	return nil
+}
+
+func seedStore(t *testing.T) (*feedback.Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "store.json")
+	st := feedback.NewStore(p)
+	if err := st.Add(feedback.Capture(model.Assessment{
+		Finding: model.Finding{Subject: model.Subject{Label: "com.apple.x"}}, Recommendation: model.RecInvestigate,
+	}, model.LabelFalsePositive, feedback.DetailPublic, "n1")); err != nil {
+		t.Fatal(err)
+	}
+	return st, p
+}
+
+func TestSubmit_OffNeverSends(t *testing.T) {
+	st, _ := seedStore(t)
+	tx := &fakeTx{}
+	err := submitFeedback(feedback.Config{Share: feedback.ShareOff}, st, tx, false, strings.NewReader(""), io.Discard)
+	if err != nil || tx.calls != 0 {
+		t.Fatalf("off must never send: calls=%d err=%v", tx.calls, err)
+	}
+}
+
+func TestSubmit_AlwaysSendsAndMarksSent(t *testing.T) {
+	st, _ := seedStore(t)
+	tx := &fakeTx{}
+	if err := submitFeedback(feedback.Config{Share: feedback.ShareAlways}, st, tx, false, strings.NewReader(""), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if tx.sent != 1 {
+		t.Fatalf("always must send pending, sent=%d", tx.sent)
+	}
+	if p, _ := st.Pending(); len(p) != 0 {
+		t.Fatalf("sent records must be marked, pending=%d", len(p))
+	}
+}
+
+func TestSubmit_AskRequiresYes(t *testing.T) {
+	st, _ := seedStore(t)
+	txNo := &fakeTx{}
+	_ = submitFeedback(feedback.Config{Share: feedback.ShareAsk}, st, txNo, true, strings.NewReader("n\n"), io.Discard)
+	if txNo.calls != 0 {
+		t.Fatal("ask + 'n' must not send")
+	}
+	st2, _ := seedStore(t)
+	txYes := &fakeTx{}
+	_ = submitFeedback(feedback.Config{Share: feedback.ShareAsk}, st2, txYes, true, strings.NewReader("y\n"), io.Discard)
+	if txYes.sent != 1 {
+		t.Fatal("ask + 'y' must send")
 	}
 }

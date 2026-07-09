@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +50,8 @@ func run(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "restored from", args[1])
 		fmt.Fprintln(stdout, dim("  disabled launch items reload at next login (or were re-enabled now)."))
 		return 0
+	case "feedback":
+		return runFeedback(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		return 2
@@ -274,7 +277,13 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
-	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts, readOnly: from != ""}
+	cfgPath, storePath := feedbackPaths()
+	cfg := feedback.LoadConfig(cfgPath)
+	store := feedback.NewStore(storePath)
+	actor := &cliActor{
+		root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts,
+		readOnly: from != "", store: store, detail: cfg.Detail,
+	}
 	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
 	// the confirm modal without importing act (keeps internal/tui → model only).
 	for i := range assessments {
@@ -286,6 +295,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui:", err)
 		return 1
 	}
+	_ = submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), cfg.Share == feedback.ShareAsk, os.Stdin, stdout)
 	return 0
 }
 
@@ -379,6 +389,79 @@ func invokingUserHome() string {
 func feedbackPaths() (configPath, storePath string) {
 	base := filepath.Join(invokingUserHome(), ".config", "counterspy")
 	return filepath.Join(base, "feedback.json"), filepath.Join(base, "feedback-store.json")
+}
+
+// submitFeedback pushes pending labels according to the consent level. off → nothing;
+// ask → show the exact records and require an explicit yes; always → best-effort send.
+// A failed send keeps the records for retry (triage never blocks on telemetry).
+func submitFeedback(cfg feedback.Config, store *feedback.Store, tx feedback.Transmitter, ask bool, in io.Reader, out io.Writer) error {
+	if cfg.Share == feedback.ShareOff {
+		return nil
+	}
+	pending, err := store.Pending()
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	if ask {
+		fmt.Fprintf(out, "\n  Share %d anonymized feedback record(s)? The exact bytes:\n", len(pending))
+		b, _ := json.MarshalIndent(pending, "  ", "  ")
+		fmt.Fprintf(out, "  %s\n  send? [y/N] ", string(b))
+		line, _ := bufio.NewReader(in).ReadString('\n')
+		if strings.TrimSpace(strings.ToLower(line)) != "y" {
+			fmt.Fprintln(out, "  not shared (kept locally).")
+			return nil
+		}
+	}
+	if err := tx.Send(context.Background(), pending); err != nil {
+		fmt.Fprintln(out, "  feedback not sent (kept for retry):", err)
+		return err
+	}
+	fmt.Fprintf(out, "  shared %d record(s). Thank you.\n", len(pending))
+	return store.MarkSent(pending)
+}
+
+// chooseTransmitter uses the configured HTTP endpoint when set, else falls back to a local
+// export file (the manual-share path) so labels are never lost when no endpoint is configured.
+func chooseTransmitter(cfg feedback.Config, storeDir string) feedback.Transmitter {
+	if cfg.Endpoint != "" {
+		return &feedback.HTTPTransmitter{URL: cfg.Endpoint}
+	}
+	return &feedback.FileTransmitter{Path: filepath.Join(storeDir, "feedback-export.jsonl")}
+}
+
+// runFeedback is the non-TUI surface: list queued labels or force a submit.
+func runFeedback(args []string, stdout io.Writer) int {
+	cfgPath, storePath := feedbackPaths()
+	cfg := feedback.LoadConfig(cfgPath)
+	store := feedback.NewStore(storePath)
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "list":
+		p, err := store.Pending()
+		if err != nil {
+			fmt.Fprintln(stdout, "feedback:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "%d pending feedback record(s); sharing is %q.\n", len(p), cfg.Share)
+		b, _ := json.MarshalIndent(p, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	case "submit":
+		if cfg.Share == feedback.ShareOff {
+			fmt.Fprintln(stdout, "sharing is off — set share to \"ask\" or \"always\" in", cfgPath)
+			return 0
+		}
+		if err := submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), true, os.Stdin, stdout); err != nil {
+			return 1
+		}
+		return 0
+	default:
+		fmt.Fprintln(stdout, "usage: counterspy feedback [list|submit]")
+		return 2
+	}
 }
 
 func flagValue(flags []string, name string) string {
