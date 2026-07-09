@@ -88,3 +88,14 @@ func TestPathClass(t *testing.T) {
 		}
 	}
 }
+
+// A private label must NOT leak into identity just because an authority fact is present:
+// only a genuinely signed-AND-accepted binary is "public". Guards the two-predicate drift
+// a review flagged.
+func TestMinimize_AuthorityWithoutSignedTrueDoesNotLeak(t *testing.T) {
+	a := asmt("/Users/jon/.tools/x", "com.private.tool", 8, model.RecInvestigate,
+		model.Evidence{Kind: model.KindCodesign, Facts: map[string]string{"signed": "revoked", "authority": "Developer ID: Someone"}})
+	if got := Minimize(a, model.LabelFalsePositive).Identity; got != "" {
+		t.Fatalf("private label must not leak when the binary is not signed-and-accepted, got %q", got)
+	}
+}

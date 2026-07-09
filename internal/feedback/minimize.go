@@ -28,6 +28,14 @@ func Minimize(a model.Assessment, label string) model.FeedbackRecord {
 	}
 }
 
+// isGatekeeperAccepted reports whether a codesign evidence represents a signed binary
+// that Gatekeeper accepted (an authority fact is recorded ONLY on acceptance). This is
+// the single definition of "recognizably public via signature" used by both the codesign
+// class and the identity gate, so the two can never drift.
+func isGatekeeperAccepted(e model.Evidence) bool {
+	return e.Kind == model.KindCodesign && e.Facts["signed"] == "true" && e.Facts["authority"] != ""
+}
+
 func scoreBand(s int) string {
 	switch {
 	case s <= 4:
@@ -96,7 +104,7 @@ func codesignClass(a model.Assessment) string {
 		case "revoked":
 			return "revoked"
 		case "true":
-			if e.Facts["authority"] != "" {
+			if isGatekeeperAccepted(e) {
 				return "notarized"
 			}
 			return "signed"
@@ -106,7 +114,7 @@ func codesignClass(a model.Assessment) string {
 }
 
 // publicIdentity returns the app identity ONLY when it is recognizably public:
-// an Apple-namespace bundle ID, or a Gatekeeper-accepted binary (authority fact present).
+// an Apple-namespace bundle ID, or a Gatekeeper-accepted binary (signed AND authority fact present).
 // Everything else returns "" — a private identifier is never published without consent.
 func publicIdentity(a model.Assessment) string {
 	label := a.Subject.Label
@@ -117,7 +125,7 @@ func publicIdentity(a model.Assessment) string {
 		return label
 	}
 	for _, e := range a.Evidence {
-		if e.Kind == model.KindCodesign && e.Facts["authority"] != "" {
+		if isGatekeeperAccepted(e) {
 			return label
 		}
 	}
