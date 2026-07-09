@@ -18,7 +18,8 @@ func (f *fakeActor) Quarantine(a model.Assessment) (string, error) {
 	f.quarantined = append(f.quarantined, a.Subject.Label)
 	return "/tmp/manifest.json", nil
 }
-func (f *fakeActor) Restore(string) error { f.restored++; return nil }
+func (f *fakeActor) Restore(string) error               { f.restored++; return nil }
+func (f *fakeActor) Label(model.Assessment, bool) error { return nil }
 
 func TestRun_QuarantineFlow(t *testing.T) {
 	s := tcell.NewSimulationScreen("")

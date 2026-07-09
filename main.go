@@ -346,6 +346,9 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 
 func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
 
+// TODO(task-9): persist to feedback store
+func (c *cliActor) Label(a model.Assessment, falsePositive bool) error { return nil }
+
 func flagValue(flags []string, name string) string {
 	for i, f := range flags {
 		if f == name && i+1 < len(flags) {
