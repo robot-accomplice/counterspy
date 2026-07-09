@@ -42,17 +42,48 @@ func isProtected(p string) bool {
 	return false
 }
 
-// refuseUnsafe rejects a move source that is protected, is itself a symlink, or
-// resolves (via any symlinked component) into a protected path — closing the
-// stat-then-rename TOCTOU window a local attacker could race (ABORT C1).
+// refuseUnsafe rejects a move source that is protected or whose path is not fully
+// canonical. Requiring the resolved path to equal the cleaned path means NO component
+// (final OR any parent directory) may be a symlink — closing the parent-directory
+// redirect and shrinking the stat→rename TOCTOU window to near-nothing (ABORT rc3 C1).
+// Residual: a same-user attacker racing a rename between this check and os.Rename is
+// only fully closed by syscall-level renameat/openat, which Go stdlib does not expose.
 func refuseUnsafe(p string) error {
+	p = filepath.Clean(p)
 	if isProtected(p) {
 		return fmt.Errorf("refusing to move protected system path: %s", p)
 	}
-	if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to move a symlink (possible TOCTOU): %s", p)
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return fmt.Errorf("refusing to move %s: cannot canonicalize (%v)", p, err)
 	}
-	if real, err := filepath.EvalSymlinks(p); err == nil && isProtected(real) {
+	if real != p {
+		return fmt.Errorf("refusing to move %s: path has a symlink component (resolves to %s) — possible TOCTOU", p, real)
+	}
+	if isProtected(real) {
+		return fmt.Errorf("refusing: %s resolves into a protected path (%s)", p, real)
+	}
+	return nil
+}
+
+// safeDest checks a RESTORE destination: it must not be protected, and its parent
+// directory (if it exists) must be canonical — so a symlinked parent can't redirect
+// the restore rename (ABORT rc3 C1). The final component is expected not to exist yet
+// (the caller already refuses an occupied destination).
+func safeDest(p string) error {
+	p = filepath.Clean(p)
+	if isProtected(p) {
+		return fmt.Errorf("refusing to restore into protected system path: %s", p)
+	}
+	parent := filepath.Dir(p)
+	real, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return nil // parent doesn't exist yet; MkdirAll will create fresh, unswappable dirs
+	}
+	if real != parent {
+		return fmt.Errorf("refusing to restore %s: parent has a symlink component (resolves to %s)", p, real)
+	}
+	if isProtected(real) {
 		return fmt.Errorf("refusing: %s resolves into a protected path (%s)", p, real)
 	}
 	return nil

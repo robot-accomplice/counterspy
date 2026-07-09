@@ -18,6 +18,15 @@ func write(t *testing.T, p, s string) {
 	}
 }
 
+func tmpDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 func moveFinding(path, label string) model.Assessment {
 	return model.Assessment{Finding: model.Finding{
 		Subject: model.Subject{Path: path, Label: label},
@@ -27,7 +36,7 @@ func moveFinding(path, label string) model.Assessment {
 
 // Core guarantee (§9/#4): quarantine → restore is byte-identical.
 func TestQuarantineRestore_RoundTrip(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	orig := filepath.Join(tmp, "orig", "beacon")
 	write(t, orig, "payload")
 	qRoot := filepath.Join(tmp, "q")
@@ -48,7 +57,7 @@ func TestQuarantineRestore_RoundTrip(t *testing.T) {
 
 // cp-11 F-1/F-2a: two subjects sharing a basename must both survive quarantine.
 func TestQuarantine_NoBasenameClobber(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	qRoot := filepath.Join(tmp, "q")
 	a := filepath.Join(tmp, "dirA", "config.plist")
 	b := filepath.Join(tmp, "dirB", "config.plist")
@@ -73,7 +82,7 @@ func TestQuarantine_NoBasenameClobber(t *testing.T) {
 
 // cp-11 F-2b: restore must not overwrite a file that reappeared at the original path.
 func TestRestore_RefusesOccupiedDestination(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	qRoot := filepath.Join(tmp, "q")
 	orig := filepath.Join(tmp, "d", "x")
 	write(t, orig, "original")
@@ -92,7 +101,7 @@ func TestRestore_RefusesOccupiedDestination(t *testing.T) {
 
 // cp-11 F-1(Audit) / §9 second refusal clause: never quarantine an allowlisted subject.
 func TestQuarantine_RefusesAllowlisted(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	orig := filepath.Join(tmp, "app", "bin")
 	write(t, orig, "apple")
 	f := model.Finding{
@@ -117,7 +126,7 @@ func TestQuarantine_RefusesProtectedPaths(t *testing.T) {
 		"/Users/me/../../System/x", // .. traversal resolved by Clean
 	} {
 		f := model.Finding{Subject: model.Subject{Path: p}, Actions: []model.Action{{Kind: model.ActionMove, From: p}}}
-		if _, err := Quarantine(t.TempDir(), "t", model.Assessment{Finding: f}); err == nil {
+		if _, err := Quarantine(tmpDir(t), "t", model.Assessment{Finding: f}); err == nil {
 			t.Errorf("expected refusal for %q", p)
 		}
 	}
@@ -125,7 +134,7 @@ func TestQuarantine_RefusesProtectedPaths(t *testing.T) {
 
 // ABORT C1: refuse to move a symlink (closes the stat→rename TOCTOU).
 func TestQuarantine_RefusesSymlink(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	real := filepath.Join(tmp, "real")
 	write(t, real, "x")
 	link := filepath.Join(tmp, "link")
@@ -138,9 +147,33 @@ func TestQuarantine_RefusesSymlink(t *testing.T) {
 	}
 }
 
+// ABORT rc3 C1: a symlinked PARENT directory must also be refused (the redirect the
+// final-component check missed).
+func TestQuarantine_RefusesSymlinkedParent(t *testing.T) {
+	tmp := tmpDir(t)
+	realDir := filepath.Join(tmp, "realdir")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(realDir, "x")
+	write(t, target, "secret")
+	linkDir := filepath.Join(tmp, "linkdir")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skip("symlink unsupported")
+	}
+	via := filepath.Join(linkDir, "x") // same file, reached via a symlinked parent
+	f := model.Finding{Subject: model.Subject{Path: via}, Actions: []model.Action{{Kind: model.ActionMove, From: via}}}
+	if _, err := Quarantine(filepath.Join(tmp, "q"), "t", model.Assessment{Finding: f}); err == nil {
+		t.Fatal("must refuse a path with a symlinked parent component (TOCTOU)")
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatal("the real file must not have been moved")
+	}
+}
+
 // ABORT C2: restoring a booted-out item re-registers it with launchd (not just files back).
 func TestRestore_RebootstrapsBootedOutJob(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	qRoot := filepath.Join(tmp, "q")
 	plist := filepath.Join(tmp, "Library", "LaunchAgents", "com.evil.plist")
 	write(t, plist, "<plist/>")
@@ -165,7 +198,7 @@ func TestRestore_RebootstrapsBootedOutJob(t *testing.T) {
 
 // cp-11 F-3(Audit): a partial quarantine still writes a manifest so completed moves restore.
 func TestQuarantine_PartialFailureIsRecoverable(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tmpDir(t)
 	qRoot := filepath.Join(tmp, "q")
 	ok := filepath.Join(tmp, "d", "ok")
 	write(t, ok, "recoverable")

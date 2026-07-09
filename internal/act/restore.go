@@ -57,6 +57,10 @@ func Restore(manifestPath string) error {
 				continue
 			}
 			from := filepath.Clean(a.From)
+			if err := safeDest(from); err != nil {
+				problems = append(problems, err)
+				continue
+			}
 			if _, err := os.Stat(a.To); err != nil {
 				problems = append(problems, fmt.Errorf("quarantined file missing, cannot restore %s", from))
 				continue

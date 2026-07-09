@@ -28,5 +28,8 @@ const (
 	// only ever raises a score, so flooring keeps it conservative.
 	CorrelationFactorX100 = 150
 	ShowThreshold         = 5  // findings at/above this are surfaced (interpret: Investigate)
-	HighTier              = 10 // at/above this the recommendation escalates to Quarantine
+	HighTier              = 10 // at/above this a strong-category finding escalates to Quarantine
+	CriticalTier          = 15 // even a "weak"-category unsigned finding Quarantines here —
+	//                            escape hatch so overwhelming accumulated signal isn't capped
+	//                            at Investigate forever (ABORT rc3 C3 false-negative fix)
 )

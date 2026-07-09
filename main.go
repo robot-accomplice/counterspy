@@ -33,10 +33,11 @@ func run(args []string, stdout io.Writer) int {
 			return 2
 		}
 		if err := act.Restore(args[1]); err != nil {
-			fmt.Fprintln(stdout, "restore:", err)
+			fmt.Fprintln(stdout, "restore:", report.Clean(err.Error()))
 			return 1
 		}
 		fmt.Fprintln(stdout, "restored from", args[1])
+		fmt.Fprintln(stdout, dim("  disabled launch items reload at next login (or were re-enabled now)."))
 		return 0
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
@@ -141,7 +142,7 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
 		case "y":
 			a.Actions = actions // a.Finding.Actions (embedded)
 			if _, err := act.Quarantine(root, ts, a); err != nil {
-				fmt.Fprintln(stdout, "    stopped (partial state recorded in manifest):", err)
+				fmt.Fprintln(stdout, "    stopped (partial state recorded in manifest):", report.Clean(err.Error()))
 				continue
 			}
 			fmt.Fprintln(stdout, "    ✓ quarantined ->", root)

@@ -139,6 +139,12 @@ func recommend(f model.Finding, s signals, cat string) model.Recommendation {
 		return model.RecMonitor
 	}
 	if weak {
+		// Escape hatch: overwhelming accumulated signal on an UNSIGNED weak-category
+		// subject still Quarantines — otherwise a high-scoring unsigned persistent
+		// infostealer would be capped at Investigate forever (ABORT rc3 C3 false-neg).
+		if f.Score >= score.CriticalTier {
+			return model.RecQuarantine
+		}
 		if f.Score >= score.ShowThreshold {
 			return model.RecInvestigate
 		}

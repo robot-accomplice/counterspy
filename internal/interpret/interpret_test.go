@@ -107,6 +107,22 @@ func TestAssess_UnsignedPersistenceOnlyCapsAtInvestigate(t *testing.T) {
 		t.Fatalf("unsigned persistence-only should cap at Investigate, got %q", a[0].Recommendation)
 	}
 }
+
+// C3 false-negative fix: overwhelming signal on an unsigned weak-category subject still
+// Quarantines (a high-scoring unsigned persistent infostealer isn't capped forever).
+func TestAssess_UnsignedWeakHighScoreStillQuarantines(t *testing.T) {
+	sub := model.Subject{Path: "/Users/me/.hidden/stealer"}
+	in := []model.Finding{{
+		Subject: sub, Score: 16, // >= CriticalTier
+		Evidence: []model.Evidence{
+			{Subject: sub, Kind: model.KindCodesign, Facts: map[string]string{"signed": "false"}},
+			{Subject: sub, Kind: model.KindPersistence, Summary: "user-level LaunchAgent"},
+		},
+	}}
+	if a := Assess(in); a[0].Recommendation != model.RecQuarantine {
+		t.Fatalf("unsigned weak-category at critical score should Quarantine, got %q", a[0].Recommendation)
+	}
+}
 func TestAssess_LowScoreMonitor(t *testing.T) {
 	f := model.Finding{
 		Subject:  model.Subject{PID: 5},
