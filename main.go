@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"counterspy/internal/act"
 	"counterspy/internal/collect"
+	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
@@ -320,6 +322,8 @@ func loadSnapshot(path string) ([]model.Assessment, error) {
 type cliActor struct {
 	root, ts string
 	readOnly bool
+	store    *feedback.Store
+	detail   feedback.Detail
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
@@ -346,8 +350,36 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 
 func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
 
-// TODO(task-9): persist to feedback store
-func (c *cliActor) Label(a model.Assessment, falsePositive bool) error { return nil }
+// Label records a TP/FP judgement to the local store (no network — submission is a
+// separate, consent-gated step). A read-only snapshot may still be labeled.
+func (c *cliActor) Label(a model.Assessment, falsePositive bool) error {
+	if c.store == nil {
+		return nil
+	}
+	label := model.LabelTruePositive
+	if falsePositive {
+		label = model.LabelFalsePositive
+	}
+	return c.store.Add(feedback.Capture(a, label, c.detail, feedback.NewNonce()))
+}
+
+// invokingUserHome resolves the HOME of the human who ran the tool, not root's — the tool
+// runs under sudo, so os.UserHomeDir() would point at /var/root. Falls back to os.UserHomeDir.
+func invokingUserHome() string {
+	if su := os.Getenv("SUDO_USER"); su != "" {
+		if u, err := user.Lookup(su); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+	}
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+// feedbackPaths returns the config and local-store paths under the invoking user's home.
+func feedbackPaths() (configPath, storePath string) {
+	base := filepath.Join(invokingUserHome(), ".config", "counterspy")
+	return filepath.Join(base, "feedback.json"), filepath.Join(base, "feedback-store.json")
+}
 
 func flagValue(flags []string, name string) string {
 	for i, f := range flags {

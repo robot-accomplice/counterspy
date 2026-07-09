@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"counterspy/internal/feedback"
 	"counterspy/internal/model"
 )
 
@@ -105,5 +106,27 @@ func TestPlannedActions_PersistenceBootoutAndMoves(t *testing.T) {
 	}
 	if boot != 1 || moves != 2 {
 		t.Fatalf("want 1 bootout + 2 moves, got %d/%d (%+v)", boot, moves, a)
+	}
+}
+
+func TestInvokingUserHome_PrefersSudoUser(t *testing.T) {
+	// When SUDO_USER is unset, falls back to os.UserHomeDir (non-empty).
+	t.Setenv("SUDO_USER", "")
+	if invokingUserHome() == "" {
+		t.Fatal("expected a non-empty home fallback")
+	}
+}
+
+func TestCliActor_LabelWritesStore(t *testing.T) {
+	dir := t.TempDir()
+	st := feedback.NewStore(filepath.Join(dir, "feedback.json"))
+	ca := &cliActor{store: st, detail: feedback.DetailPublic}
+	a := model.Assessment{Finding: model.Finding{Subject: model.Subject{Label: "com.apple.x", Path: "/x"}}, Recommendation: model.RecInvestigate}
+	if err := ca.Label(a, true); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := st.Pending()
+	if len(p) != 1 || p[0].Label != model.LabelFalsePositive {
+		t.Fatalf("label not persisted: %+v", p)
 	}
 }
