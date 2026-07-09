@@ -28,6 +28,10 @@ var (
 	colInvestigate = tcell.NewRGBColor(255, 180, 84)  // amber
 	colMonitor     = tcell.NewRGBColor(124, 142, 160) // gray
 	colText        = tcell.NewRGBColor(196, 208, 220)
+	colWarn        = tcell.NewRGBColor(255, 204, 102) // read-only badge / narrow warnings
+	colSelBg       = tcell.NewRGBColor(18, 40, 58)    // selected-row background
+	colSelBar      = tcell.NewRGBColor(58, 160, 255)  // selected-row accent bar
+	colDivider     = tcell.NewRGBColor(30, 40, 52)    // panel divider
 )
 
 // Model is the pure UI state. No I/O touches it.
@@ -81,6 +85,17 @@ func (m Model) visible() []model.Assessment {
 		return out[i].Score > out[j].Score
 	})
 	return out
+}
+
+// doneCount is how many findings of a tier have been quarantined this session.
+func (m Model) doneCount(rec model.Recommendation) int {
+	n := 0
+	for _, a := range m.Assessments {
+		if a.Recommendation == rec && m.Done[a.Subject.Key()] {
+			n++
+		}
+	}
+	return n
 }
 
 func (m Model) counts() (q, inv, mon int) {

@@ -2,11 +2,31 @@
 // outside the standard library's fmt.
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Version is stamped into every manifest so an incident can be traced to the exact
 // build (weights, allowlist, rules) that produced a quarantine (ABORT C4).
 const Version = "v0.1.0-rc3"
+
+// Clean strips control/escape characters from attacker-influenced strings (labels,
+// paths, argv) before they reach a terminal — so a crafted value can't inject ANSI or
+// newlines that spoof a prompt, corrupt a tcell buffer, or hide a finding.
+func Clean(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			b.WriteRune(' ')
+		case r < 0x20 || r == 0x7f: // drop ESC, CR, LF, and other control chars
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 type SignalKind string
 

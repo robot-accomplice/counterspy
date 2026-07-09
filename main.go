@@ -258,6 +258,11 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
 	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts}
+	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
+	// the confirm modal without importing act (keeps internal/tui → model only).
+	for i := range assessments {
+		assessments[i].Actions = plannedActions(assessments[i].Finding)
+	}
 	m := tui.New(assessments, gaps)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 	if err := tui.Run(screen, m, actor); err != nil {
@@ -290,7 +295,9 @@ type cliActor struct {
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
-	a.Actions = plannedActions(a.Finding)
+	if len(a.Actions) == 0 { // Actions were pre-populated by runTUI (or empty for a bare process)
+		a.Actions = plannedActions(a.Finding)
+	}
 	if len(a.Actions) == 0 {
 		// e.g. a bare-process finding: no artifact to move. Don't report false success
 		// or leave lastManifest pointing at a file that was never written (Audit F-1).

@@ -170,19 +170,6 @@ func pad(s string, n int) string {
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
-// Clean strips control/escape characters from attacker-influenced strings (plist
-// labels, paths, argv) before they reach the terminal, so a crafted value cannot
-// inject ANSI to spoof the consent prompt or hide a finding (ABORT C1).
-func Clean(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\t':
-			b.WriteRune(' ')
-		case r < 0x20 || r == 0x7f: // drop ESC, CR, LF, and other control chars
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+// Clean strips control/escape characters from attacker-influenced strings before they
+// reach the terminal (ABORT C1). Delegates to model.Clean so the CLI and TUI share it.
+func Clean(s string) string { return model.Clean(s) }
