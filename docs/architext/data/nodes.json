@@ -67,7 +67,7 @@
       "sourcePaths": ["main.go"],
       "runtime": "Go binary",
       "interfaces": ["run(args, stdout)"],
-      "dependencies": ["mod-collect", "mod-score", "mod-interpret", "mod-report", "mod-act", "mod-model"],
+      "dependencies": ["mod-collect", "mod-score", "mod-interpret", "mod-report", "mod-act", "mod-model", "mod-tui"],
       "dataHandled": ["scan-findings"],
       "security": ["Applies user allowlist", "Only phase that reads stdin for consent"],
       "observability": ["stdout report", "gap lines"],
@@ -189,6 +189,25 @@
       "relatedDecisions": ["dec-move-not-delete"],
       "knownRisks": [],
       "verification": ["go test ./internal/act/"]
+    },
+    {
+      "id": "mod-tui",
+      "type": "module",
+      "name": "internal/tui",
+      "summary": "Interactive tcell triage face over []Assessment: a pure Model + update(key)→[]Cmd, tcell only at the view/Run edge, acting through the Actor interface. No analysis.",
+      "responsibilities": ["Render master-detail triage (findings + evidence)", "Navigate/filter/sort, quarantine with confirm, restore", "Stay a thin face — no score/collect/interpret import"],
+      "owner": "Project maintainers",
+      "sourcePaths": ["internal/tui/model.go", "internal/tui/update.go", "internal/tui/view.go", "internal/tui/run.go"],
+      "runtime": "in-process (tcell terminal)",
+      "interfaces": ["Run(screen, Model, Actor)", "New"],
+      "dependencies": ["mod-model", "mod-act"],
+      "dataHandled": ["scan-findings", "quarantine-manifest"],
+      "security": ["Sanitizes attacker strings before drawing (via report.Clean at the CLI edge)", "Acts only through the Actor interface (its guards apply)"],
+      "observability": ["on-screen toast"],
+      "relatedFlows": ["scan-pipeline", "quarantine"],
+      "relatedDecisions": ["dec-move-not-delete"],
+      "knownRisks": ["risk-false-positive-volume"],
+      "verification": ["go test ./internal/tui/"]
     }
   ]
 }

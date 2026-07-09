@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"counterspy/internal/model"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
+	"counterspy/internal/tui"
+	"github.com/gdamore/tcell/v2"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
@@ -27,6 +30,8 @@ func run(args []string, stdout io.Writer) int {
 	switch args[0] {
 	case "scan":
 		return runScan(args[1:], stdout)
+	case "tui":
+		return runTUI(args[1:], stdout)
 	case "restore":
 		if len(args) < 2 {
 			fmt.Fprintln(stdout, "usage: counterspy restore <manifest.json>")
@@ -206,6 +211,95 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 		out = append(out, a)
 	}
 	return out
+}
+
+func runTUI(flags []string, stdout io.Writer) int {
+	from := flagValue(flags, "--from")
+	var assessments []model.Assessment
+	var gaps []string
+	if from != "" {
+		as, err := loadSnapshot(from)
+		if err != nil {
+			fmt.Fprintln(stdout, "tui: cannot read snapshot:", err)
+			return 1
+		}
+		assessments = as
+	} else {
+		ev, g := collectAll()
+		assessments = filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
+		gaps = g
+	}
+
+	// The TUI needs a real terminal; refuse (and guide) when piped.
+	fi, err := os.Stdout.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		fmt.Fprintln(stdout, "TUI needs a terminal — use `counterspy scan` (or `--json`).")
+		return 2
+	}
+	screen, err := tcell.NewScreen()
+	if err != nil {
+		fmt.Fprintln(stdout, "tui: cannot open screen:", err)
+		return 1
+	}
+	if err := screen.Init(); err != nil {
+		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
+		return 1
+	}
+	defer screen.Fini() // ALWAYS restore the terminal, even on panic
+
+	home, _ := os.UserHomeDir()
+	ts := time.Now().UTC().Format("2006-01-02T150405Z")
+	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts}
+	if err := tui.Run(screen, tui.New(assessments, gaps), actor); err != nil {
+		screen.Fini()
+		fmt.Fprintln(stdout, "tui:", err)
+		return 1
+	}
+	return 0
+}
+
+// loadSnapshot decodes a `scan --json` snapshot ([]model.Assessment) from a file or stdin ("-").
+func loadSnapshot(path string) ([]model.Assessment, error) {
+	var b []byte
+	var err error
+	if path == "-" {
+		b, err = io.ReadAll(os.Stdin)
+	} else {
+		b, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var as []model.Assessment
+	return as, json.Unmarshal(b, &as)
+}
+
+// cliActor adapts internal/act to the tui.Actor interface, capturing the run root+ts and
+// converting the ManifestItem result to the manifest path the TUI tracks for restore.
+type cliActor struct {
+	root, ts string
+}
+
+func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
+	a.Actions = plannedActions(a.Finding)
+	if _, err := act.Quarantine(c.root, c.ts, a); err != nil {
+		return "", err
+	}
+	return filepath.Join(c.root, "manifest.json"), nil
+}
+
+func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
+
+func flagValue(flags []string, name string) string {
+	for i, f := range flags {
+		if f == name && i+1 < len(flags) {
+			return flags[i+1]
+		}
+		if strings.HasPrefix(f, name+"=") {
+			return strings.TrimPrefix(f, name+"=")
+		}
+	}
+	return ""
 }
 
 func dim(s string) string {

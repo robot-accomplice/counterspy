@@ -24,7 +24,14 @@ sudo ./counterspy scan                # ranked report (READ-ONLY, never mutates)
 sudo ./counterspy scan --json         # machine-readable []Assessment (feeds CI / the ABORT gate)
 sudo ./counterspy scan --interactive  # walk findings top-down: quarantine per item (y/N/q)
 sudo ./counterspy restore <manifest>  # undo a prior quarantine
+
+sudo ./counterspy tui                 # interactive triage TUI (navigate, quarantine, restore)
+./counterspy tui --from scan.json     # drive the TUI from a `scan --json` snapshot (no sudo)
 ```
+
+The **TUI** is a master-detail triage view (tcell): `j/k` navigate, `q` quarantine (with a
+confirm + reversibility prompt), `u` restore this session, `m`/`s`/`/` toggle Monitor/sort/
+filter, `?` help, `Q` quit. It needs a real terminal; piped, it tells you to use `scan`.
 
 Run under `sudo` for full visibility — without it, the TCC (privacy-grant) signal is
 unavailable and the report says so (it never silently reads as "clean").

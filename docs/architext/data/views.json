@@ -72,7 +72,8 @@
         {"id": "core", "name": "Shared model", "nodeIds": ["mod-model"]},
         {"id": "collect", "name": "Collect", "nodeIds": ["mod-collect"]},
         {"id": "analyze", "name": "Analyze (pure)", "nodeIds": ["mod-score", "mod-interpret"]},
-        {"id": "output", "name": "Report / Act", "nodeIds": ["mod-report", "mod-act"]}
+        {"id": "output", "name": "Report / Act", "nodeIds": ["mod-report", "mod-act"]},
+        {"id": "faces", "name": "Faces", "nodeIds": ["mod-tui"]}
       ]
     }
   ]

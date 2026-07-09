@@ -1,0 +1,13 @@
+[
+  {
+    "Subject": {"Path": "/Users/me/Library/.hidden/beacon", "PID": 0, "Label": "com.evil.updater"},
+    "Score": 14, "Tripwire": "unsigned binary with persistence and a live network listener",
+    "Kinds": ["persistence", "codesign", "process"],
+    "Evidence": [
+      {"Subject": {"Label": "com.evil.updater"}, "Kind": "persistence", "Summary": "user-level LaunchAgent", "Weight": 1, "Facts": {"plist": "/Users/me/Library/LaunchAgents/com.evil.updater.plist"}},
+      {"Subject": {"Label": "com.evil.updater"}, "Kind": "codesign", "Summary": "binary is unsigned", "Weight": 3, "Facts": {"signed": "false"}}
+    ],
+    "Verdict": "com.evil.updater is an unsigned binary, installed for persistence, and listening for inbound connections.",
+    "Category": "backdoor", "Recommendation": "Quarantine"
+  }
+]

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,6 +26,39 @@ func TestPlannedActions_ProcessOnlyHasNone(t *testing.T) {
 	f := model.Finding{Subject: model.Subject{PID: 8821}}
 	if got := plannedActions(f); len(got) != 0 {
 		t.Fatalf("process-only finding should have no actions, got %+v", got)
+	}
+}
+
+func TestLoadSnapshot(t *testing.T) {
+	as, err := loadSnapshot("testdata/tui_snapshot.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(as) != 1 || as[0].Subject.Label != "com.evil.updater" || as[0].Recommendation != model.RecQuarantine {
+		t.Fatalf("snapshot decode wrong: %+v", as)
+	}
+}
+
+func TestCliActor_Quarantine(t *testing.T) {
+	tmp := t.TempDir()
+	orig := filepath.Join(tmp, "beacon")
+	os.WriteFile(orig, []byte("x"), 0o644)
+	real, _ := filepath.EvalSymlinks(orig) // actor requires a canonical path (macOS /var symlink)
+	a := model.Assessment{Finding: model.Finding{
+		Subject:  model.Subject{Path: real, Label: "com.evil"},
+		Evidence: []model.Evidence{{Kind: model.KindPersistence, Facts: map[string]string{"plist": real}}},
+	}}
+	realRoot, _ := filepath.EvalSymlinks(tmp)
+	ca := &cliActor{root: filepath.Join(realRoot, "q"), ts: "t"}
+	mp, err := ca.Quarantine(a)
+	if err != nil {
+		t.Fatalf("cliActor.Quarantine: %v", err)
+	}
+	if _, err := os.Stat(real); !os.IsNotExist(err) {
+		t.Fatal("file should have moved to quarantine")
+	}
+	if mp == "" {
+		t.Fatal("expected a manifest path")
 	}
 }
 
