@@ -3,23 +3,20 @@ package feedback
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
 
-// TestEgressOnly enforces the push-only invariant as CI, not memory: no file in the
-// feedback package may decode an HTTP response body into program state, and the only
-// place a response is touched is the drain-and-discard in http.go. Any future refactor
-// that reads resp.Body back into a value fails here (Egress-Only Invariant, layer 2/3).
+// TestEgressOnly enforces the push-only invariant as CI, not memory: the feedback
+// package's ONLY legitimate handling of an HTTP response body is the discard drain in
+// http.go. Any non-test file that both reads a response body AND decodes something is
+// letting the network speak back into program state. This keys on the dangerous
+// COMBINATION rather than a specific decode spelling, so it catches both the one-line
+// NewDecoder(resp.Body).Decode(...) chain and the two-step io.ReadAll(resp.Body) +
+// json.Unmarshal(data, &x) idiom regardless of the intermediate variable's name
+// (Egress-Only Invariant, layers 2/3).
 func TestEgressOnly(t *testing.T) {
 	files, _ := filepath.Glob("*.go")
-	// Patterns that would mean "the network spoke back into the program".
-	forbidden := []*regexp.Regexp{
-		regexp.MustCompile(`Decode\(\s*&?\w*[rR]esp`),           // json.NewDecoder(resp.Body).Decode(&x)
-		regexp.MustCompile(`Unmarshal\([^)]*[rR]esp`),           // json.Unmarshal(respBody, &x)
-		regexp.MustCompile(`NewDecoder\(\s*\w*[rR]esp\.Body\s*\)\.Decode`),
-	}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -29,18 +26,21 @@ func TestEgressOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 		src := string(b)
-		for _, re := range forbidden {
-			if re.MatchString(src) {
-				t.Errorf("%s decodes an HTTP response — egress-only invariant forbids reading a reply into program state", f)
-			}
+		touchesResponseBody := strings.Contains(src, "resp.Body") || strings.Contains(src, "Response.Body")
+		decodes := strings.Contains(src, "json.Unmarshal(") ||
+			strings.Contains(src, "NewDecoder(") ||
+			strings.Contains(src, ".Decode(")
+		if touchesResponseBody && decodes {
+			t.Errorf("%s reads an HTTP response body AND decodes — egress-only forbids reading a reply into program state", f)
 		}
 	}
-	// Positive assertion: the http transmitter drains-and-discards.
+	// Positive assertion: http.go actually drains the body to io.Discard — the exact call,
+	// not merely the words appearing in a comment.
 	b, err := os.ReadFile("http.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "io.Discard") {
-		t.Error("http.go must drain the response body to io.Discard (egress-only)")
+	if !strings.Contains(string(b), "io.Copy(io.Discard, resp.Body)") {
+		t.Error("http.go must drain the response body via io.Copy(io.Discard, resp.Body) (egress-only)")
 	}
 }
