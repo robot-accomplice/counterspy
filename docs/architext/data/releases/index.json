@@ -1,26 +1,47 @@
 {
-  "currentReleaseId": "initial-architext-buildout",
+  "currentReleaseId": "v0-2-0-tui",
   "releases": [
     {
       "id": "initial-architext-buildout",
       "version": "0.1.0",
       "name": "Initial Architext build-out",
-      "status": "planned",
-      "posture": "at-risk",
-      "targetWindow": "Before claiming architecture documentation is current",
-      "lastUpdated": "2026-07-08T15:49:50.894Z",
-      "summary": "Replace starter architecture and release data with project-specific facts.",
+      "status": "complete",
+      "posture": "on-track",
+      "targetWindow": "Delivered with the CLI",
+      "lastUpdated": "2026-07-09T00:00:00.000Z",
+      "summary": "Architecture and release data replaced with source-backed project facts; the CLI shipped ABORT-gated.",
       "counts": {
         "features": 0,
         "bugFixes": 0,
         "workstreams": 1,
-        "blockers": 1,
-        "complete": 0,
+        "blockers": 0,
+        "complete": 1,
         "inProgress": 0,
-        "planned": 1,
+        "planned": 0,
         "stretch": 0
       },
       "file": "initial-architext-buildout.json"
+    },
+    {
+      "id": "v0-2-0-tui",
+      "version": "0.2.0",
+      "name": "Interactive TUI triage face",
+      "status": "in-progress",
+      "posture": "on-track",
+      "targetWindow": "Personal/beta now; public publish gated on field false-positive measurement",
+      "lastUpdated": "2026-07-09T00:00:00.000Z",
+      "summary": "Add an interactive tcell TUI over the existing three-phase pipeline: live scan or read-only --from snapshot, master-detail triage, consented quarantine and restore through the same hardened act path. ABORT-gated at rc3.",
+      "counts": {
+        "features": 4,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 1,
+        "complete": 2,
+        "inProgress": 0,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-2-0-tui.json"
     }
   ]
 }

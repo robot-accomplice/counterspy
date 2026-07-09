@@ -2,20 +2,20 @@
   "id": "initial-architext-buildout",
   "version": "0.1.0",
   "name": "Initial Architext build-out",
-  "status": "planned",
-  "posture": "at-risk",
-  "summary": "Replace starter architecture and release data with project-specific facts.",
-  "targetWindow": "Before claiming architecture documentation is current",
-  "lastUpdated": "2026-07-08T15:49:50.894Z",
-  "updateSource": "architext sync starter data",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Architecture and release data replaced with source-backed project facts; the CLI shipped ABORT-gated.",
+  "targetWindow": "Delivered with the CLI",
+  "lastUpdated": "2026-07-09T00:00:00.000Z",
+  "updateSource": "CLI v0.1.0 ABORT closure",
   "scope": {
     "required": [
       {
         "id": "replace-starter-architecture-data",
         "title": "Replace starter architecture data",
         "kind": "documentation",
-        "status": "planned",
-        "summary": "Inspect the repository and replace starter Architext JSON with source-backed project facts.",
+        "status": "complete",
+        "summary": "Inspected the repository and replaced starter Architext JSON with source-backed project facts (model/collect/score/interpret/report/act/tui nodes).",
         "owner": "Project maintainers",
         "workstreamId": "architecture-buildout",
         "dependsOn": [],
@@ -34,10 +34,10 @@
       "id": "architecture-buildout",
       "name": "Architecture build-out",
       "owner": "Project maintainers",
-      "status": "planned",
-      "posture": "at-risk",
-      "summary": "Replace starter architecture facts, release facts, and validation evidence before relying on Architext.",
-      "progress": 0,
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "Replaced starter architecture facts, release facts, and validation evidence with source-backed project truth.",
+      "progress": 100,
       "itemIds": [
         "replace-starter-architecture-data"
       ],
@@ -46,29 +46,12 @@
       ]
     }
   ],
-  "blockers": [
-    {
-      "id": "starter-data-not-replaced",
-      "title": "Starter data is not project truth",
-      "severity": "high",
-      "status": "blocked",
-      "owner": "Project maintainers",
-      "summary": "The project has validating starter data, but it has not yet been replaced with source-backed architecture and release facts.",
-      "nextAction": "Run the agent-assisted Architext build-out workflow and review the JSON diff.",
-      "itemIds": [
-        "replace-starter-architecture-data"
-      ],
-      "evidenceNeeded": [
-        "Source-backed JSON updates",
-        "architext validate"
-      ]
-    }
-  ],
+  "blockers": [],
   "milestones": [
     {
       "id": "starter-replaced",
       "label": "Starter data replaced",
-      "status": "planned",
+      "status": "complete",
       "targetWindow": "Initial documentation pass",
       "order": 1,
       "itemIds": [
@@ -82,7 +65,7 @@
       "id": "starter-validation",
       "label": "architext validate",
       "kind": "test",
-      "status": "planned"
+      "status": "complete"
     }
   ]
 }

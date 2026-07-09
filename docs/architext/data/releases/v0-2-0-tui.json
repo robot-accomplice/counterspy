@@ -1,0 +1,138 @@
+{
+  "id": "v0-2-0-tui",
+  "version": "0.2.0",
+  "name": "Interactive TUI triage face",
+  "status": "in-progress",
+  "posture": "on-track",
+  "summary": "Add an interactive tcell TUI over the existing three-phase pipeline: live scan or read-only --from snapshot, master-detail triage, consented quarantine and restore through the same hardened act path. ABORT-gated at rc3.",
+  "targetWindow": "Personal/beta now; public publish gated on field false-positive measurement",
+  "lastUpdated": "2026-07-09T00:00:00.000Z",
+  "updateSource": "TUI ABORT gate rc3 closure",
+  "scope": {
+    "required": [
+      {
+        "id": "tcell-tui",
+        "title": "Interactive tcell TUI",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "Pure Model + update(key)->[]Cmd with tcell only at the view/Run edge; master-detail triage, filter/sort, quarantine-with-confirm and restore via a locally-defined Actor interface. Imports only internal/model (enforced by TestDecouplingInvariant).",
+        "owner": "Project maintainers",
+        "workstreamId": "tui",
+        "dependsOn": [],
+        "evidence": [
+          "go test ./internal/tui/",
+          "TestDecouplingInvariant",
+          "docs/releases/v0.2.0-rc2-abort.md"
+        ]
+      },
+      {
+        "id": "tui-abort-conditions",
+        "title": "TUI ABORT convertibility conditions (C1-C5)",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "Signal handler restores the terminal on external kill; --from bounded (16MiB cap, byte-guard) and defended in depth (actor read-only refusal, Unicode-spoof strip); Done cleared on any restore result; tcell vendored + architext drift fixed + CI import-guard; width/modal guards + visible() benchmarked.",
+        "owner": "Project maintainers",
+        "workstreamId": "tui",
+        "dependsOn": ["tcell-tui"],
+        "evidence": [
+          "go test ./...",
+          "TestCliActor_ReadOnlyRefuses",
+          "BenchmarkVisible",
+          "docs/releases/v0.2.0-rc2-abort.md#closure"
+        ]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "per-item-undo",
+        "title": "Per-item undo in the TUI",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Session 'u' restores the whole session, not a single item.",
+        "reason": "Requires the Actor interface to return per-item outcomes; a schema change out of scope for the rc3 hardening batch. Coarse session undo plus CLI manifest-restore covers recovery in the meantime.",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "gaps-in-snapshots",
+        "title": "Carry collector gaps in --json snapshots",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "A --from snapshot omits collector gap info shown on a live scan.",
+        "reason": "Changing the --json contract to embed gaps risks the stable snapshot format; a snapshot is a point-in-time export, and a live scan surfaces gaps. Sequenced after the format stabilizes.",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": [
+      {
+        "id": "web-ui",
+        "title": "Web reporting UI",
+        "kind": "feature",
+        "summary": "A browser reporting face was floated for after the CLI/TUI prove out; not part of this release."
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "tui",
+      "name": "TUI triage face",
+      "owner": "Project maintainers",
+      "status": "in-progress",
+      "posture": "on-track",
+      "summary": "Interactive triage over []Assessment, thin over the pipeline, acting only through the hardened act path. ABORT-gated at rc3 with all convertibility conditions met.",
+      "progress": 90,
+      "itemIds": ["tcell-tui", "tui-abort-conditions"],
+      "evidence": ["go test ./...", "go vet ./...", "architext validate"]
+    }
+  ],
+  "blockers": [
+    {
+      "id": "public-false-positive-measurement",
+      "title": "Field false-positive rate unmeasured",
+      "severity": "high",
+      "status": "open",
+      "owner": "Project maintainers",
+      "summary": "Personal/beta use is GO, but a general-public GO is gated on measuring the real-world false-positive rate on live Macs (a condition inherited from the CLI ABORT). The TUI adds no new public blocker now that C1-C5 are closed.",
+      "nextAction": "Run CounterSpy across a set of real Macs and record the actionable-finding false-positive rate before any public release.",
+      "itemIds": [],
+      "evidenceNeeded": [
+        "Measured false-positive rate on live machines",
+        "Re-ABORT after public-hardening"
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "tui-abort-passed",
+      "label": "TUI ABORT conditions met (rc3)",
+      "status": "complete",
+      "targetWindow": "v0.2.0-rc3",
+      "order": 1,
+      "itemIds": ["tcell-tui", "tui-abort-conditions"]
+    },
+    {
+      "id": "public-ready",
+      "label": "Public publish ready",
+      "status": "planned",
+      "targetWindow": "After field false-positive measurement",
+      "order": 2,
+      "itemIds": ["tcell-tui"]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "full-gate",
+      "label": "go test ./... + vet + gofmt + architext validate",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "tui-abort-artifact",
+      "label": "docs/releases/v0.2.0-rc2-abort.md (gate + rc3 closure)",
+      "kind": "review",
+      "status": "complete"
+    }
+  ]
+}
