@@ -77,10 +77,15 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 			m.Focus = focusHelp
 		case 'q':
 			v := m.visible()
-			if len(v) > 0 && m.Selected < len(v) && v[m.Selected].Recommendation != model.RecMonitor {
-				m.Pending = v[m.Selected]
-				m.Focus = focusModal
+			if len(v) == 0 || m.Selected >= len(v) || v[m.Selected].Recommendation == model.RecMonitor {
+				break
 			}
+			if m.ReadOnly {
+				m.Toast = "quarantine disabled for --from snapshots — run a live scan to act"
+				break
+			}
+			m.Pending = v[m.Selected]
+			m.Focus = focusModal
 		case 'u':
 			return m, []Cmd{{Op: "restore"}}
 		case 'Q':

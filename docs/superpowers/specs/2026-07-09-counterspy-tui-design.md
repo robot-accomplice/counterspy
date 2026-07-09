@@ -23,8 +23,10 @@ core**, not new analysis.
   (confirm modal) + restore**, via the hardened `internal/act` package.
 - **Data source: live scan + `--from` snapshot** — `counterspy tui` runs a scan by
   default (sudo, live collectors); `counterspy tui --from <file>` (or stdin `-`) loads a
-  `scan --json` snapshot (`[]model.Assessment`). The snapshot path makes the TUI testable
-  and demoable without sudo, and composable (`scan --json | tui --from -`).
+  `scan --json` snapshot for TRIAGE ONLY (read-only). Quarantine is DISABLED for snapshots
+  because their paths are untrusted input — to act, run a live scan (paths from real
+  collectors). The snapshot path makes the TUI testable/demoable without sudo and composable
+  (`scan --json | tui --from -`). [rc: cp-tui-3 QA F-2/3/4 — read-only closes the confused-deputy surface.]
 
 ## 3. Architecture
 
@@ -44,10 +46,10 @@ counterspy tui [--from <json|->]
               quarantine/restore ─▶ act.Quarantine / act.Restore
 ```
 
-`--from` consumes exactly what `report.RenderJSON` emits. Quarantine from a snapshot is
-safe: `plannedActions` derives from the Assessment's evidence, and the actor's own guards
-(`refuseUnsafe`, canonical-path, missing-file, occupied-destination) reject a stale or
-tampered snapshot rather than acting blindly.
+`--from` consumes exactly what `report.RenderJSON` emits. Quarantine is DISABLED in
+`--from` mode (Model.ReadOnly): a snapshot is untrusted input, and a root tool must not move
+files named by attacker-controllable JSON even with the actor guards + confirm modal. Act only
+on a live scan, where paths come from real collectors.
 
 ## 4. Components — pure core, tcell at the edge
 

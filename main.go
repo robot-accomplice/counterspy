@@ -213,7 +213,7 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 	return out
 }
 
-func runTUI(flags []string, stdout io.Writer) int {
+func runTUI(flags []string, stdout io.Writer) (code int) {
 	from := flagValue(flags, "--from")
 	var assessments []model.Assessment
 	var gaps []string
@@ -245,13 +245,22 @@ func runTUI(flags []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
 		return 1
 	}
-	defer screen.Fini() // ALWAYS restore the terminal, even on panic
+	// Deferred LIFO: Fini runs first (restore the terminal), THEN recover reports a
+	// TUI-internal panic cleanly on the restored terminal (never a raw stack trace).
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintln(stdout, "tui: internal error:", r)
+			code = 1
+		}
+	}()
+	defer screen.Fini()
 
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
 	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts}
-	if err := tui.Run(screen, tui.New(assessments, gaps), actor); err != nil {
-		screen.Fini()
+	m := tui.New(assessments, gaps)
+	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
+	if err := tui.Run(screen, m, actor); err != nil {
 		fmt.Fprintln(stdout, "tui:", err)
 		return 1
 	}
@@ -282,6 +291,11 @@ type cliActor struct {
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 	a.Actions = plannedActions(a.Finding)
+	if len(a.Actions) == 0 {
+		// e.g. a bare-process finding: no artifact to move. Don't report false success
+		// or leave lastManifest pointing at a file that was never written (Audit F-1).
+		return "", fmt.Errorf("nothing to quarantine — no on-disk artifact for %s", a.Subject.Display())
+	}
 	if _, err := act.Quarantine(c.root, c.ts, a); err != nil {
 		return "", err
 	}

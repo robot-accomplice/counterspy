@@ -42,6 +42,7 @@ type Model struct {
 	Pending     model.Assessment // the item shown in the confirm modal
 	Done        map[string]bool  // Subject.Key() of quarantined items
 	Toast       string
+	ReadOnly    bool // --from snapshot: triage only, quarantine disabled (untrusted paths)
 }
 
 func New(assessments []model.Assessment, gaps []string) Model {

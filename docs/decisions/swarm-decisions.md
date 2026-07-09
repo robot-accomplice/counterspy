@@ -142,3 +142,15 @@ os.Exit (panic reaches caller's deferred Fini — terminal safe); withDone clone
 SESSION manifest (cliActor reuses one root/ts → all quarantines append to one manifest.json), so clearing
 all Done is correct; help text + spec §5 say "restore this session's quarantine" (Audit F-2 was a
 false alarm from reviewing run.go without the Task-7 adapter). Actor/act signature gap = Task 7 adapter's job.
+
+## Tick tui-3 (cp-tui-3, subcommand) — resolved 2026-07-09
+SEVERITY SPLIT surfaced (QA high vs Audit low on the snapshot trust boundary); ESCALATED to Jon.
+- **A. Malicious --from snapshot moves arbitrary files** (QA F-2/3/4 high): RESOLVED by Jon → --from is
+  READ-ONLY (triage/view; no quarantine). To act, run a live scan. Removes the confused-deputy surface.
+  Deviates from approved spec §2 (quarantine-from-snapshot) — spec updated. Model.ReadOnly gate in update.
+- **B. No-op quarantine false success** (Audit F-1 med, bites live path too): cliActor.Quarantine errors
+  when plannedActions is empty (bare-process finding) — no false "quarantined", no bad lastManifest.
+- **C. Double screen.Fini** (QA F-1 low): remove explicit Fini on error path (deferred covers it).
+- **D. Unrecovered panic** (Audit F-2 low): runTUI wraps Run in a deferred recover → Fini + clean error.
+- Confirmed strong: Actor seam gives STRONGER decoupling than spec'd (tui imports only model+tcell);
+  session-scoped manifest semantics correct.

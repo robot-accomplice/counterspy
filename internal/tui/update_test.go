@@ -111,6 +111,19 @@ func TestUpdate_CtrlCQuitsFromFilter(t *testing.T) {
 	}
 }
 
+// cp-tui-3: a --from snapshot is read-only — 'q' must not open the quarantine modal.
+func TestUpdate_ReadOnlyBlocksQuarantine(t *testing.T) {
+	m := threeQ()
+	m.ReadOnly = true
+	m, _ = update(m, tcell.KeyRune, 'q')
+	if m.Focus == focusModal {
+		t.Fatal("read-only must not open the quarantine modal")
+	}
+	if m.Toast == "" {
+		t.Fatal("read-only should explain why quarantine is blocked")
+	}
+}
+
 func TestUpdate_HelpToggle(t *testing.T) {
 	m := threeQ()
 	m, _ = update(m, tcell.KeyRune, '?')
