@@ -31,10 +31,16 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
 
 func run(args []string, stdout io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stdout, "usage: counterspy scan [--json] [--interactive] | counterspy restore <manifest.json>")
+		usage(stdout)
 		return 2
 	}
 	switch args[0] {
+	case "help", "-h", "--help", "-?":
+		usage(stdout) // explicit help request is success
+		return 0
+	case "version", "--version":
+		fmt.Fprintln(stdout, "counterspy "+model.Version)
+		return 0
 	case "scan":
 		return runScan(args[1:], stdout)
 	case "tui":
@@ -55,8 +61,35 @@ func run(args []string, stdout io.Writer) int {
 		return runFeedback(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
+		fmt.Fprintln(stdout)
+		usage(stdout)
 		return 2
 	}
+}
+
+// usage prints the full help: the tool banner + version, every command with its flags, and
+// how to choose the plain CLI (scan) vs the interactive UI (tui).
+func usage(w io.Writer) {
+	fmt.Fprintf(w, `CounterSpy %s — macOS spyware triage 🕵️
+Scans for spyware-like activity, ranks findings, and reversibly quarantines on approval (never deletes).
+
+Usage:
+  counterspy <command> [flags]
+
+Commands:
+  scan                     Print a ranked report to the terminal (the plain CLI)
+      --json                 emit machine-readable JSON instead of the report
+      --interactive          after the report, prompt to quarantine each finding
+  tui                      Open the interactive terminal UI for triage (the visual mode)
+      --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+  restore <manifest.json>  Undo a quarantine from its manifest
+  feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
+  version                  Print the version (also --version)
+  help                     Show this help (also -h, --help, -?)
+
+Run under sudo for full visibility (the TCC privacy-grant signal needs it).
+Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy tui
+`, model.Version)
 }
 
 func runScan(flags []string, stdout io.Writer) int {

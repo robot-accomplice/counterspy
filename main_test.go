@@ -14,6 +14,62 @@ import (
 	"counterspy/internal/model"
 )
 
+// The usual ways a user asks for help must all work and exit 0 (help is success), and the
+// help must actually advertise the tool, its version, and every command — including how to
+// reach the interactive UI (tui) vs the plain CLI (scan).
+func TestRun_HelpFlags(t *testing.T) {
+	for _, arg := range []string{"help", "-h", "--help", "-?"} {
+		var buf bytes.Buffer
+		if code := run([]string{arg}, &buf); code != 0 {
+			t.Fatalf("%q: exit %d, want 0", arg, code)
+		}
+		out := buf.String()
+		for _, want := range []string{"CounterSpy", model.Version, "scan", "tui", "feedback", "restore"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%q help missing %q in:\n%s", arg, want, out)
+			}
+		}
+	}
+}
+
+// No command given is a usage error (exit 2) but must still print the full usage, not an
+// anemic one-liner.
+func TestRun_NoArgsShowsUsage(t *testing.T) {
+	var buf bytes.Buffer
+	if code := run(nil, &buf); code != 2 {
+		t.Fatalf("no-args exit %d, want 2", code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "tui") || !strings.Contains(out, model.Version) {
+		t.Fatalf("no-args usage is anemic:\n%s", out)
+	}
+}
+
+// The version must be discoverable without reading the banner.
+func TestRun_Version(t *testing.T) {
+	for _, arg := range []string{"version", "--version"} {
+		var buf bytes.Buffer
+		if code := run([]string{arg}, &buf); code != 0 {
+			t.Fatalf("%q exit %d, want 0", arg, code)
+		}
+		if !strings.Contains(buf.String(), model.Version) {
+			t.Fatalf("%q missing version:\n%s", arg, buf.String())
+		}
+	}
+}
+
+// An unknown command fails (exit 2) AND shows usage so the user can recover.
+func TestRun_UnknownCommandShowsUsage(t *testing.T) {
+	var buf bytes.Buffer
+	if code := run([]string{"bogus"}, &buf); code != 2 {
+		t.Fatalf("unknown exit %d, want 2", code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "unknown command") || !strings.Contains(out, "Usage:") {
+		t.Fatalf("unknown-command output missing usage:\n%s", out)
+	}
+}
+
 func TestRun_ScanJSONDryEmitsArray(t *testing.T) {
 	var buf bytes.Buffer
 	if code := run([]string{"scan", "--json", "--dry"}, &buf); code != 0 {
