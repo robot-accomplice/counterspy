@@ -42,3 +42,13 @@ func TestExfil(t *testing.T) {
 		t.Fatalf("Exfil(notarized foreground) = %s, want <= low", risk2)
 	}
 }
+
+// A TRUSTED app that quietly uploads in the background must still surface — trust is one
+// signal, not a kill switch. Guards the trust-gating regression a review caught.
+func TestConcern_TrustedBackgroundUploaderStillSurfaces(t *testing.T) {
+	g := model.EgressGroup{Trust: "notarized", Background: true, OutRate: 800_000,
+		Destinations: []model.Endpoint{{IP: "198.51.100.7", Port: 443}}}
+	if got := Concern(g); got <= model.Minimal {
+		t.Fatalf("a notarized background daemon uploading 800KB/s must surface (> minimal), got %s", got)
+	}
+}
