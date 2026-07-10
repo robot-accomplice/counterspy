@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/**", "swarm/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    # macOS runner: codesign/lsof/ps/nettop exist here, and the suite is mock-driven, so
+    # tests need neither sudo nor a live network — they run hermetically in CI.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/'))"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test (race + coverage)
+        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out
+
+      - name: coverage gate (>= 80%)
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9.]+%' | tr -d '%')"
+          echo "Total coverage: ${total}%"
+          awk "BEGIN { exit !(${total} >= 80.0) }" || {
+            echo "::error::coverage ${total}% is below the 80% gate"; exit 1;
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out

@@ -1,13 +1,20 @@
 # CounterSpy 🕵️
 
+[![CI](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)](#testing)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+![platform](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)
+![dependencies](https://img.shields.io/badge/deps-stdlib%20%2B%20tcell-1f6feb)
+![status](https://img.shields.io/badge/status-active-success)
+
 A macOS command-line tool that triages your Mac for spyware-like activity, ranks what
 it finds with plain-language recommendations, and — with your approval — **reversibly**
 quarantines suspicious items. It never deletes.
 
-> **Status:** functional v1 (CLI). It runs end-to-end and is validated on a real Mac.
-> See [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
-> before treating its output as verdicts — it recommends, you decide. A TUI is planned
-> (post-v1); see the [interactive mockup](docs/mockups/counterspy-tui.html).
+> **Status:** active. The scanner, the interactive **TUI**, and the opt-in **feedback loop**
+> ship today; the **egress monitor** (`counterspy egress`) lands in v0.4.0. See the
+> [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
+> on false-positive volume before treating output as verdicts — it recommends, you decide.
 
 ## Build
 
@@ -15,7 +22,8 @@ quarantines suspicious items. It never deletes.
 go build -o counterspy .
 ```
 
-Requires Go 1.21+. No third-party dependencies.
+Requires **Go 1.26+**. No third-party dependencies beyond [`tcell`](https://github.com/gdamore/tcell)
+(vendored) for the terminal UI.
 
 ## Use
 
@@ -27,6 +35,9 @@ sudo ./counterspy restore <manifest>  # undo a prior quarantine
 
 sudo ./counterspy tui                 # interactive triage TUI (navigate, quarantine, restore)
 ./counterspy tui --from scan.json     # drive the TUI from a `scan --json` snapshot (no sudo)
+
+sudo ./counterspy egress              # live "egress top": per-app outbound traffic + concern
+sudo ./counterspy egress --json       # one-shot, machine-readable egress snapshot (non-TTY)
 ```
 
 The **TUI** is a master-detail triage view (tcell): `j/k` navigate, `q` quarantine (with a
@@ -93,6 +104,37 @@ choose `detail: "full"`. Use `counterspy feedback list` to see exactly what's qu
 from the network — no remote config, no fetched allowlists, no update checks. An
 anti-spyware tool must never be remotely steerable, so this is enforced in code
 (`TestEgressOnly`), not just promised.
+
+## Egress monitor (v0.4.0)
+
+`counterspy egress` answers the complementary question to the scanner — not *"is this
+spyware?"* but *"this app is trusted; what is it sending, where, and how much?"* It's a live,
+per-application "egress top" built by polling `nettop` + `lsof` under sudo (no entitlements,
+no packet capture, no payloads read):
+
+- **Per-app rollup** — every PID, port, and protocol of an app collapses into one row you can
+  expand; outbound rate, destinations, and a cadence (one-off / bursty / steady / periodic).
+- **Trust + provenance lens** — each row carries its code-sign trust and process ancestry, so a
+  notarized app talking to its vendor reads as *expected* while an unsigned background daemon
+  uploading to a raw IP reads as *elevated*.
+- **Inferred exfil risk** — capability × egress: an app that holds Screen Recording or Input
+  Monitoring **and** is uploading gets flagged with the candidate data categories it *could* be
+  leaking. Inference, never confirmed content — CounterSpy reads no payloads.
+
+Piped or with `--json`, it prints a one-shot report instead of the live view. Real destination
+*names* (SNI/DNS) are a roadmapped enrichment (v0.4.1); v1 shows `IP:port`.
+
+## Testing
+
+Deterministic, mock-driven, and CI-safe: the exec edges (`nettop`, `lsof`, `ps`, `codesign`,
+TCC) and the terminal are behind injectable seams, so the whole suite runs in GitHub Actions
+without sudo or external tools. Coverage is gated at **≥80%** per package in CI (currently
+**91%** overall).
+
+```sh
+go test ./...                          # full suite
+go test ./... -cover                   # per-package coverage
+```
 
 ## Not for
 
