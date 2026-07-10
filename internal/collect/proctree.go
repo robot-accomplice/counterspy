@@ -61,8 +61,8 @@ func ParseLsof(b []byte) map[int][]string {
 	return out
 }
 
-// ancestry walks parent links up to launchd (pid 1) and renders the chain.
-func ancestry(procs map[int]*Proc, pid int) string {
+// Ancestry walks parent links up to launchd (pid 1) and renders the chain.
+func Ancestry(procs map[int]*Proc, pid int) string {
 	var chain []string
 	seen := map[int]bool{}
 	for p := procs[pid]; p != nil && !seen[p.PID]; p = procs[p.PPID] {
@@ -102,7 +102,7 @@ func BuildProcessEvidence(procs map[int]*Proc, listeners map[int][]string) []mod
 		facts := map[string]string{
 			"argv":     p.Cmd,
 			"argv0":    firstField(p.Cmd),
-			"ancestry": ancestry(procs, pid),
+			"ancestry": Ancestry(procs, pid),
 			"ports":    strings.Join(descs, ", "),
 		}
 		summary := "process has an active network connection"
