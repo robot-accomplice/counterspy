@@ -29,3 +29,10 @@ func TestRenderEgressJSON(t *testing.T) {
 		t.Fatalf("json: %v %s", err, b)
 	}
 }
+
+func TestRenderEgressJSON_EmptyIsArray(t *testing.T) {
+	b, err := RenderEgressJSON(nil)
+	if err != nil || strings.TrimSpace(string(b)) != "[]" {
+		t.Fatalf("empty json: %v %s", err, b)
+	}
+}

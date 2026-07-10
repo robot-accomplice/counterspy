@@ -510,13 +510,17 @@ func runFeedback(args []string, stdout io.Writer) int {
 	}
 }
 
+// newEgressMonitor builds the egress sampler. It's a package var so tests can inject a fake
+// sampler and exercise the report/JSON path WITHOUT shelling out to nettop/lsof (CI-safe).
+var newEgressMonitor = func(interval float64) tui.Sampler { return egress.New(interval) }
+
 // runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
 // TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
 func runEgress(flags []string, stdout io.Writer) int {
 	asJSON := has(flags, "--json")
 	once := has(flags, "--once")
 	interval := 2.0
-	mon := egress.New(interval)
+	mon := newEgressMonitor(interval)
 
 	fi, _ := os.Stdout.Stat()
 	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
@@ -539,7 +543,7 @@ func runEgress(flags []string, stdout io.Writer) int {
 }
 
 // runEgressTUI mirrors runTUI's screen/signal/fini handling for the live "egress top" view.
-func runEgressTUI(mon *egress.Monitor, interval float64, stdout io.Writer) (code int) {
+func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int) {
 	screen, err := tcell.NewScreen()
 	if err != nil {
 		fmt.Fprintln(stdout, "egress: cannot open screen:", err)

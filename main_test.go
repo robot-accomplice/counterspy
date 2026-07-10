@@ -12,6 +12,7 @@ import (
 
 	"counterspy/internal/feedback"
 	"counterspy/internal/model"
+	"counterspy/internal/tui"
 )
 
 // The usual ways a user asks for help must all work and exit 0 (help is success), and the
@@ -82,14 +83,45 @@ func TestRun_ScanJSONDryEmitsArray(t *testing.T) {
 
 // A PID-only process finding has no on-disk artifact — no quarantine action (matches
 // the actor: nothing to move, and we never offer an irreversible kill).
+// fakeEgressSampler stands in for egress.Monitor in tests so the report/JSON path never
+// shells out to nettop/lsof (those require sudo and aren't present in CI).
+type fakeEgressSampler struct{ calls int }
+
+func (f *fakeEgressSampler) Sample() []model.EgressGroup {
+	f.calls++
+	return []model.EgressGroup{{App: "backuptool", Trust: "unsigned", Concern: model.Elevated,
+		ExfilRisk: model.Elevated, Candidate: []string{"screen"}, OutRate: 840_000, Background: true}}
+}
+
+// withFakeEgress swaps newEgressMonitor for a fake sampler for the duration of the test.
+func withFakeEgress(t *testing.T) {
+	t.Helper()
+	orig := newEgressMonitor
+	newEgressMonitor = func(float64) tui.Sampler { return &fakeEgressSampler{} }
+	t.Cleanup(func() { newEgressMonitor = orig })
+}
+
 func TestRunEgress_JSONReport(t *testing.T) {
 	// Non-TTY (test) → report path; --json emits an array. --once avoids the live loop.
+	withFakeEgress(t)
 	var buf bytes.Buffer
 	if code := runEgress([]string{"--json", "--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(buf.String()), "[") {
-		t.Fatalf("expected JSON array, got: %s", buf.String())
+	out := strings.TrimSpace(buf.String())
+	if !strings.HasPrefix(out, "[") || !strings.Contains(out, "backuptool") {
+		t.Fatalf("expected JSON array with content, got: %s", out)
+	}
+}
+
+func TestRunEgress_TextReport(t *testing.T) {
+	withFakeEgress(t)
+	var buf bytes.Buffer
+	if code := runEgress([]string{"--once"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(buf.String(), "backuptool") {
+		t.Fatalf("text report missing content: %s", buf.String())
 	}
 }
 

@@ -10,6 +10,9 @@ import (
 
 // RenderEgressJSON emits the machine-readable per-app egress form.
 func RenderEgressJSON(groups []model.EgressGroup) ([]byte, error) {
+	if groups == nil {
+		groups = []model.EgressGroup{}
+	}
 	return json.MarshalIndent(groups, "", "  ")
 }
 
