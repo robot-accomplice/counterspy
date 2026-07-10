@@ -62,6 +62,7 @@ type EgressRow struct {
     OutRate      uint64       // bytes/sec this interval
     InRate       uint64
     OutTotal     uint64       // bytes since monitor start
+    Spark        []uint64     // recent out-rate samples (oldest→newest) for the sparkline
     Conns        int
     Destinations []Endpoint
     Background   bool         // daemon/agent vs. a foreground/user app
@@ -102,24 +103,41 @@ A new tick-driven model/view/run in `internal/tui` (still imports only `internal
 the decoupling invariant holds). A ticker goroutine samples and `screen.PostEvent`s a
 `tick` carrying fresh `[]EgressRow` into the pure `update`; `view` renders.
 
+**Layout (confirmed): a full-width "top" table + a bottom detail strip** — not the scan
+TUI's left/right master-detail. Egress needs five columns and reads as a live-streaming
+`top`/`nettop`-style view, so a wide table suits it better than a narrow master pane.
+
 ```
-CounterSpy · Egress          ▲ 1 elevated  2 notable      sampling 2s   p pause · Q quit
-  APP / PROCESS            TRUST       OUT↑        TOP DESTINATION            CONCERN
-▎ com.acme.backuptool      unsigned    840 KB/s    198.51.100.7:443 (raw IP)  ELEVATED
-  Claude                   notarized   1.2 MB/s    api.anthropic.com:443 (+3) expected
-  Safari                   Apple       120 KB/s    12 destinations            low
-DETAIL — com.acme.backuptool
-  /sbin/launchd → /Users/.../.hidden/backuptool   unsigned, no Gatekeeper accept
-  destinations:  198.51.100.7:443 · 198.51.100.9:443  (raw IP, no DNS)
-  out 840 KB/s (52 MB since start) · in 3 KB/s · 2 conns · background daemon
+CounterSpy · Egress
+● 1 elevated   ▲ 1 notable   · 3 low   · 42 minimal          sampling 2s · p pause · Q quit
+APP / PROCESS      TRUST       OUT↑      RATE      TOP DESTINATION              CONCERN
+backuptool         unsigned    840 KB/s  ▁▃▅▇█▆    198.51.100.7:443 raw ip +1  elevated   ← selected
+node ⇢ helper      unsigned    60 KB/s   ▂▃▂▄▃▂    analytics.3rdparty.io +4    notable
+Claude             notarized   1.2 MB/s  ▄▅▄▆▅▇    api.anthropic.com +3        low
+Safari             apple       120 KB/s  ▁▂▁▃▂▁    12 destinations             minimal
+mDNSResponder      apple       3 KB/s    ▁▁▂▁▁▁     local + 2                  minimal
+DETAIL — backuptool · pid 4821
+  /sbin/launchd → /Users/jon/Library/.hidden/backuptool
+  unsigned · no Gatekeeper accept · background daemon
+  destinations  198.51.100.7:443  198.51.100.9:443   (both raw IP — no DNS name)
+  volume        out 840 KB/s · 52 MB since start · in 3 KB/s · 2 connections
+  concern       elevated — unsigned background daemon, sustained upload to raw IPs
 ```
 
+- **Whole row tints by concern** (elevated red → notable amber → low gray → minimal very
+  dim), so the one row that matters jumps out while Apple/vendor traffic recedes. Reuses
+  the existing tcell palette; concern labels are lowercase (cleaner than the scan view's
+  ALL-CAPS tiers — a deliberate, noted divergence for this new dimension).
+- **RATE sparkline** per app (`▁▂▃▄▅▆▇█`, concern-colored): the ticker keeps a short
+  bounded ring buffer of recent out-rates per PID and passes the sequence in via
+  `EgressRow.Spark`; the pure `view` just maps values → block glyphs. Model stays pure.
 - Sorted by **out-rate** (biggest talkers up top) by default; `s` cycles sort
-  (rate / concern / app), `/` filter, `p` pause sampling, arrows + detail pane, `Q` quit.
-- Rows concern-colored; reuse the existing tcell palette and provenance rendering.
-- Sampling is stateless from the Model's view: the ticker owns the previous sample for
-  rate diffing and passes finished `EgressRow`s in; the Model just holds the latest rows +
-  selection/sort/filter (keeps `update` pure and `SimulationScreen`-testable).
+  (rate / concern / app), `/` filter, `p` pause sampling, `j/k`+arrows move the selection
+  (detail strip follows), `Q` quit.
+- Sampling is stateless from the Model's view: the ticker owns the previous byte sample
+  (for rate diffing) and the per-PID spark ring buffer, and passes finished `EgressRow`s
+  in; the Model just holds the latest rows + selection/sort/filter (keeps `update` pure
+  and `SimulationScreen`-testable).
 
 ## Architecture
 
