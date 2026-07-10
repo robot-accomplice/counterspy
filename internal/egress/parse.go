@@ -19,9 +19,6 @@ type Bytes struct{ Out, In uint64 }
 func ParseNettop(b []byte) map[int]Bytes {
 	out := map[int]Bytes{}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) == 0 {
-		return out
-	}
 	header := strings.Split(lines[0], ",")
 	inCol, outCol := -1, -1
 	for i, h := range header {
@@ -56,7 +53,7 @@ func pidFromNameDotPid(fields []string) int {
 	for _, f := range fields {
 		f = strings.TrimSpace(f)
 		if dot := strings.LastIndex(f, "."); dot > 0 {
-			if pid, err := strconv.Atoi(f[dot+1:]); err == nil {
+			if pid, err := strconv.Atoi(f[dot+1:]); err == nil && pid > 0 {
 				return pid
 			}
 		}
