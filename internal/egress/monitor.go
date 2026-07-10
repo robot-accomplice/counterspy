@@ -29,14 +29,17 @@ type Monitor struct {
 
 func New(interval float64) *Monitor {
 	return &Monitor{
-		interval:  interval,
-		prev:      map[int]Bytes{},
-		spark:     map[string][]uint64{},
-		runNettop: func() []byte { b, _ := exec.Command("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output(); return b },
-		runLsof:   func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
-		procs:     defaultProcs,
-		trustOf:   defaultTrust,
-		capsOf:    defaultCaps,
+		interval: interval,
+		prev:     map[int]Bytes{},
+		spark:    map[string][]uint64{},
+		runNettop: func() []byte {
+			b, _ := exec.Command("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			return b
+		},
+		runLsof: func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
+		procs:   defaultProcs,
+		trustOf: defaultTrust,
+		capsOf:  defaultCaps,
 	}
 }
 
