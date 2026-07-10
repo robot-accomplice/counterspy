@@ -18,6 +18,7 @@ import (
 
 	"counterspy/internal/act"
 	"counterspy/internal/collect"
+	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
 	"counterspy/internal/model"
@@ -59,6 +60,8 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "feedback":
 		return runFeedback(args[1:], stdout)
+	case "egress":
+		return runEgress(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		fmt.Fprintln(stdout)
@@ -84,6 +87,9 @@ Commands:
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
   restore <manifest.json>  Undo a quarantine from its manifest
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
+  egress                   Observe per-app outbound traffic (live TUI on a tty, report/--json otherwise)
+      --json                 emit machine-readable JSON instead of the report
+      --once                 print a single report and exit (no live loop)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)
 
@@ -502,6 +508,87 @@ func runFeedback(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "usage: counterspy feedback [list|submit]")
 		return 2
 	}
+}
+
+// runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
+// TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
+func runEgress(flags []string, stdout io.Writer) int {
+	asJSON := has(flags, "--json")
+	once := has(flags, "--once")
+	interval := 2.0
+	mon := egress.New(interval)
+
+	fi, _ := os.Stdout.Stat()
+	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
+	if once || asJSON || !isTTY {
+		mon.Sample()           // establish a baseline
+		groups := mon.Sample() // second sample carries rates
+		if asJSON {
+			b, err := report.RenderEgressJSON(groups)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "render:", err)
+				return 1
+			}
+			fmt.Fprintln(stdout, string(b))
+			return 0
+		}
+		fmt.Fprint(stdout, report.RenderEgress(groups, colorEnabled()))
+		return 0
+	}
+	return runEgressTUI(mon, interval, stdout)
+}
+
+// runEgressTUI mirrors runTUI's screen/signal/fini handling for the live "egress top" view.
+func runEgressTUI(mon *egress.Monitor, interval float64, stdout io.Writer) (code int) {
+	screen, err := tcell.NewScreen()
+	if err != nil {
+		fmt.Fprintln(stdout, "egress: cannot open screen:", err)
+		return 1
+	}
+	if err := screen.Init(); err != nil {
+		fmt.Fprintln(stdout, "egress: cannot init screen:", err)
+		return 1
+	}
+	var finiOnce sync.Once
+	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() { <-sigCh; fini(); os.Exit(130) }()
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "egress: internal error: %v\n%s\n", r, debug.Stack())
+			code = 1
+		}
+	}()
+	defer fini()
+
+	tick := make(chan struct{})
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				select {
+				case tick <- struct{}{}:
+				default:
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	err = tui.RunEgress(screen, mon, tick)
+	close(stop)
+	close(tick) // ticker goroutine has stopped sending (close(stop) above) — safe to close now,
+	// so RunEgress's `range tick` forwarding goroutine exits instead of leaking.
+	fini()
+	if err != nil {
+		fmt.Fprintln(stdout, "egress:", err)
+		return 1
+	}
+	return 0
 }
 
 func flagValue(flags []string, name string) string {

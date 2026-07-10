@@ -82,6 +82,17 @@ func TestRun_ScanJSONDryEmitsArray(t *testing.T) {
 
 // A PID-only process finding has no on-disk artifact — no quarantine action (matches
 // the actor: nothing to move, and we never offer an irreversible kill).
+func TestRunEgress_JSONReport(t *testing.T) {
+	// Non-TTY (test) → report path; --json emits an array. --once avoids the live loop.
+	var buf bytes.Buffer
+	if code := runEgress([]string{"--json", "--once"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(buf.String()), "[") {
+		t.Fatalf("expected JSON array, got: %s", buf.String())
+	}
+}
+
 func TestPlannedActions_ProcessOnlyHasNone(t *testing.T) {
 	f := model.Finding{Subject: model.Subject{PID: 8821}}
 	if got := plannedActions(f); len(got) != 0 {
