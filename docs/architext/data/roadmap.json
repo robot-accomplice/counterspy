@@ -6,7 +6,15 @@
       "kind": "feature",
       "section": "v0.4.0",
       "status": "planned",
-      "summary": "Live tracking of what certified/legitimate apps actually send — moving CounterSpy from 'is this spyware?' to 'this app is trusted, but here's what it's exfiltrating; do you consent?'. A per-process egress observer (destination/volume tracking, consent deltas). Rationale: the v0.3.0 feedback loop measures false positives among flagged apps; the next risk surface is the apps NOT flagged — notarized/allowlisted software that over-collects. Rhymes with the egress-only invariant: watch egress because egress is where the risk lives."
+      "summary": "Live tracking of what certified/legitimate apps actually send — moving CounterSpy from 'is this spyware?' to 'this app is trusted, but here's what it's exfiltrating; do you consent?'. A per-process egress observer (destination/volume tracking, consent deltas). v1 (now in development): a live TUI 'egress top' via sudo-CLI observation (nettop + lsof), observe-only. Rationale: the v0.3.0 feedback loop measures false positives among flagged apps; the next risk surface is the apps NOT flagged — notarized/allowlisted software that over-collects. Rhymes with the egress-only invariant: watch egress because egress is where the risk lives."
+    },
+    {
+      "id": "roadmap-egress-packet-capture",
+      "title": "Egress destination enrichment via packet capture",
+      "kind": "feature",
+      "section": "v0.4.1",
+      "status": "planned",
+      "summary": "Enrich the egress monitor's destinations with real names and per-flow volume via a root packet tap (pktap/tcpdump) with process attribution — surfacing TLS SNI / DNS names instead of bare cloud IPs. Deferred from v0.4.0 for scope and sequencing: the v0.4.0 observe loop (nettop + lsof) establishes the per-app egress picture first; packet capture adds pcap parsing and a heavier data path best layered on a working monitor. Still root-CLI-feasible (no entitlement), unlike the Network Extension path."
     }
   ]
 }
