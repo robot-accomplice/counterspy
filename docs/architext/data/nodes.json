@@ -67,7 +67,7 @@
       "sourcePaths": ["main.go"],
       "runtime": "Go binary",
       "interfaces": ["run(args, stdout)"],
-      "dependencies": ["mod-collect", "mod-score", "mod-interpret", "mod-report", "mod-act", "mod-model", "mod-tui", "mod-feedback"],
+      "dependencies": ["mod-collect", "mod-score", "mod-interpret", "mod-report", "mod-act", "mod-model", "mod-tui", "mod-feedback", "mod-egress"],
       "dataHandled": ["scan-findings"],
       "security": ["Applies user allowlist", "Only phase that reads stdin for consent"],
       "observability": ["stdout report", "gap lines"],
@@ -227,6 +227,25 @@
       "relatedDecisions": [],
       "knownRisks": ["risk-false-positive-volume"],
       "verification": ["go test ./internal/feedback/", "TestEgressOnly"]
+    },
+    {
+      "id": "mod-egress",
+      "type": "module",
+      "name": "internal/egress",
+      "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability × egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only; reads no payloads.",
+      "responsibilities": ["Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence", "Group by app; score concern; infer exfil risk + candidate categories", "Feed the live TUI (via Sampler) and the non-TTY report"],
+      "owner": "Project maintainers",
+      "sourcePaths": ["internal/egress/parse.go", "internal/egress/rate.go", "internal/egress/aggregate.go", "internal/egress/concern.go", "internal/egress/monitor.go"],
+      "runtime": "in-process + exec (nettop/lsof/ps/codesign/sqlite3)",
+      "interfaces": ["New", "Monitor.Sample", "Concern", "Exfil", "Aggregate"],
+      "dependencies": ["mod-model", "mod-collect", "macos-tools"],
+      "dataHandled": ["process-list", "code-signatures", "tcc-grants"],
+      "security": ["Observe-only; no blocking, no payload reading", "Exfil is INFERRED from capability × egress, never confirmed content", "Exec edge injectable so CI runs without sudo/tools"],
+      "observability": ["live egress TUI", "egress report / --json"],
+      "relatedFlows": ["scan-pipeline"],
+      "relatedDecisions": [],
+      "knownRisks": [],
+      "verification": ["go test ./internal/egress/"]
     }
   ]
 }
