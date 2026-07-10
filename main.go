@@ -337,10 +337,15 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	// Worst-Case-Customer NO-GO).
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	sigDone := make(chan struct{})
+	defer func() { signal.Stop(sigCh); close(sigDone) }()
 	go func() {
-		<-sigCh
-		fini()
-		os.Exit(130)
+		select {
+		case <-sigCh:
+			fini()
+			os.Exit(130)
+		case <-sigDone: // normal exit — unregister and return instead of leaking this goroutine
+		}
 	}()
 
 	// Deferred LIFO: Fini runs first (restore the terminal), THEN recover reports a
@@ -594,7 +599,16 @@ func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int
 	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	go func() { <-sigCh; fini(); os.Exit(130) }()
+	sigDone := make(chan struct{})
+	defer func() { signal.Stop(sigCh); close(sigDone) }()
+	go func() {
+		select {
+		case <-sigCh:
+			fini()
+			os.Exit(130)
+		case <-sigDone: // normal exit — unregister and return instead of leaking this goroutine
+		}
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "egress: internal error: %v\n%s\n", r, debug.Stack())
