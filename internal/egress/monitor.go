@@ -4,6 +4,7 @@ package egress
 import (
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"counterspy/internal/collect"
@@ -46,21 +47,27 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	procs := m.procs()
 
 	insts := make([]Instance, 0, len(conns))
-	activeKeys := map[string]bool{}
-	for pid, cs := range conns {
+	// Sorted pid iteration → deterministic output order (Go map iteration is randomized),
+	// satisfying the Sample()-deterministic-given-injected-seams contract.
+	pids := make([]int, 0, len(conns))
+	for pid := range conns {
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	for _, pid := range pids {
 		p := procs[pid]
 		path, app := binaryPath(p), displayName(p, pid)
-		key := path
-		if key == "" {
-			key = app
+		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than
+		// attributing the process's entire historical cumulative output to a single tick.
+		var rate uint64
+		if prev, ok := m.prev[pid]; ok {
+			rate = RateOut(prev, cur[pid], m.interval)
 		}
-		rate := RateOut(m.prev[pid], cur[pid], m.interval)
 		insts = append(insts, Instance{
 			PID: pid, App: app, Path: path, Ancestry: collect.Ancestry(procs, pid),
 			Trust: m.trustOf(path), OutRate: rate, OutTotal: cur[pid].Out, InRate: 0,
-			Conns: cs, Capabilities: m.capsOf(path),
+			Conns: conns[pid], Capabilities: m.capsOf(path),
 		})
-		activeKeys[key] = true
 	}
 	// Advance per-app spark ring buffers from this tick's summed rate.
 	summed := map[string]uint64{}

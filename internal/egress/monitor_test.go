@@ -40,3 +40,43 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 		t.Fatalf("exfil risk should be set from capabilities: %s", g.ExfilRisk)
 	}
 }
+
+// Two concurrent pids: output order must be stable across identical calls (determinism),
+// and a pid's FIRST sighting must report rate 0 even with a large cumulative counter (the
+// process's history must not be attributed to one tick). Guards both review findings.
+func TestMonitor_DeterministicOrderAndFirstSightRateZero(t *testing.T) {
+	newM := func() *Monitor {
+		m := New(2)
+		m.runNettop = func() []byte {
+			return []byte("time,,bytes_in,bytes_out\n15:04:05.0,a.100,0,500000\n15:04:05.0,b.200,0,900000\n")
+		}
+		m.runLsof = func() []byte {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+				"a 100 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->1.1.1.1:443 (ESTABLISHED)\n" +
+				"b 200 root 11u IPv4 0x2 0t0 TCP 10.0.0.3:6->2.2.2.2:443 (ESTABLISHED)\n")
+		}
+		m.procs = func() map[int]*collect.Proc {
+			return map[int]*collect.Proc{100: {PID: 100, Cmd: "/x/a"}, 200: {PID: 200, Cmd: "/x/b"}}
+		}
+		m.trustOf = func(string) string { return "unsigned" }
+		m.capsOf = func(string) []string { return nil }
+		return m
+	}
+	m := newM()
+	first := m.Sample()
+	for _, g := range first {
+		if g.OutRate != 0 {
+			t.Fatalf("first-sight rate must be 0 (cumulative not attributed to one tick), got %d for %s", g.OutRate, g.App)
+		}
+	}
+	// Stable order across identical subsequent calls.
+	a, b := m.Sample(), m.Sample()
+	if len(a) != 2 || len(b) != 2 {
+		t.Fatalf("want 2 groups, got %d/%d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i].App != b[i].App {
+			t.Fatalf("nondeterministic order at %d: %q vs %q", i, a[i].App, b[i].App)
+		}
+	}
+}
