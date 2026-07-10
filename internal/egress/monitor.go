@@ -129,7 +129,13 @@ func defaultTrust(path string) string {
 	if path == "" {
 		return "unknown"
 	}
-	for _, e := range collect.CollectCodesign(path) {
+	return trustFromCodesign(collect.CollectCodesign(path))
+}
+
+// trustFromCodesign maps codesign evidence to a trust label. Pure and unit-tested; the exec
+// (CollectCodesign) stays in defaultTrust so the mapping can be tested without shelling out.
+func trustFromCodesign(ev []model.Evidence) string {
+	for _, e := range ev {
 		switch e.Facts["signed"] {
 		case "false":
 			return "unsigned"
@@ -162,10 +168,16 @@ var tccServiceCap = map[string]string{
 }
 
 func defaultCaps(path string) []string {
+	ev, _ := collect.CollectTCC()
+	return capsFromTCC(ev, path)
+}
+
+// capsFromTCC maps TCC grant evidence to capability names for a given binary path. Pure and
+// unit-tested; the exec (CollectTCC) stays in defaultCaps.
+func capsFromTCC(ev []model.Evidence, path string) []string {
 	if path == "" {
 		return nil
 	}
-	ev, _ := collect.CollectTCC()
 	seen := map[string]bool{}
 	var out []string
 	for _, e := range ev {
