@@ -124,9 +124,24 @@ func runScan(flags []string, stdout io.Writer) int {
 	}
 	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled()))
 	if interactive {
-		quarantineLoop(assessments, stdout)
+		quarantineLoop(assessments, stdout, os.Stdin, actQuarantiner{})
 	}
 	return 0
+}
+
+// collectorSpec pairs an evidence collector with the friendly gap note to record when it
+// errors.
+type collectorSpec struct {
+	gap string
+	fn  func() ([]model.Evidence, error)
+}
+
+// evidenceCollectors is the fan-out set collectAll drives; a package var so tests can
+// inject fakes (success + failure) instead of touching the OS (CI has no sudo).
+var evidenceCollectors = []collectorSpec{
+	{"Persistence signal unavailable", collect.CollectPersistence},
+	{"Process/network signal unavailable", collect.CollectProcesses},
+	{"TCC privacy-grant signal unavailable — run with sudo to include it", collect.CollectTCC},
 }
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
@@ -142,9 +157,9 @@ func collectAll() ([]model.Evidence, []string) {
 		}
 		ev = append(ev, e...)
 	}
-	add("Persistence signal unavailable", collect.CollectPersistence)
-	add("Process/network signal unavailable", collect.CollectProcesses)
-	add("TCC privacy-grant signal unavailable — run with sudo to include it", collect.CollectTCC)
+	for _, c := range evidenceCollectors {
+		add(c.gap, c.fn)
+	}
 	// codesign runs ONCE per unique on-disk binary surfaced by the other collectors.
 	// Skip .plist files (they aren't signed binaries — codesigning one yields a bogus
 	// "unsigned") and anything that isn't a regular existing file.
@@ -163,21 +178,41 @@ func collectAll() ([]model.Evidence, []string) {
 	return ev, gaps
 }
 
+// isTerminal reports whether f is a real character-device terminal. A package var so
+// tests can simulate a tty (CI has none) without a real terminal.
+var isTerminal = func(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 // colorEnabled reports whether to emit ANSI color: a real terminal on stdout and
 // NO_COLOR unset (https://no-color.org).
 func colorEnabled() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
-	fi, err := os.Stdout.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	return isTerminal(os.Stdout)
 }
 
-func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
+// quarantiner performs the quarantine effect quarantineLoop requests — a small local
+// interface (narrower than tui.Actor, which quarantineLoop doesn't need) so tests can
+// inject a fake and assert y/N/q branch behavior without touching the filesystem.
+type quarantiner interface {
+	Quarantine(root, ts string, a model.Assessment) (model.ManifestItem, error)
+}
+
+// actQuarantiner is the real quarantiner: it calls internal/act.
+type actQuarantiner struct{}
+
+func (actQuarantiner) Quarantine(root, ts string, a model.Assessment) (model.ManifestItem, error) {
+	return act.Quarantine(root, ts, a)
+}
+
+func quarantineLoop(assessments []model.Assessment, stdout io.Writer, stdin io.Reader, q quarantiner) {
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
 	root := filepath.Join(home, "CounterSpyQuarantine", ts)
-	in := bufio.NewReader(os.Stdin)
+	in := bufio.NewReader(stdin)
 
 	for _, a := range assessments {
 		if a.Recommendation == model.RecMonitor {
@@ -194,7 +229,7 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer) {
 			return
 		case "y":
 			a.Actions = actions // a.Finding.Actions (embedded)
-			if _, err := act.Quarantine(root, ts, a); err != nil {
+			if _, err := q.Quarantine(root, ts, a); err != nil {
 				fmt.Fprintln(stdout, "    stopped (partial state recorded in manifest):", report.Clean(err.Error()))
 				continue
 			}
@@ -279,12 +314,11 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	}
 
 	// The TUI needs a real terminal; refuse (and guide) when piped.
-	fi, err := os.Stdout.Stat()
-	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+	if !isTerminal(os.Stdout) {
 		fmt.Fprintln(stdout, "TUI needs a terminal — use `counterspy scan` (or `--json`).")
 		return 2
 	}
-	screen, err := tcell.NewScreen()
+	screen, err := newScreen()
 	if err != nil {
 		fmt.Fprintln(stdout, "tui: cannot open screen:", err)
 		return 1
@@ -514,6 +548,10 @@ func runFeedback(args []string, stdout io.Writer) int {
 // sampler and exercise the report/JSON path WITHOUT shelling out to nettop/lsof (CI-safe).
 var newEgressMonitor = func(interval float64) tui.Sampler { return egress.New(interval) }
 
+// newScreen opens the terminal screen. A package var so tests can inject a
+// tcell.SimulationScreen and drive the TUI event loops without a real terminal (CI-safe).
+var newScreen = func() (tcell.Screen, error) { return tcell.NewScreen() }
+
 // runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
 // TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
 func runEgress(flags []string, stdout io.Writer) int {
@@ -522,8 +560,7 @@ func runEgress(flags []string, stdout io.Writer) int {
 	interval := 2.0
 	mon := newEgressMonitor(interval)
 
-	fi, _ := os.Stdout.Stat()
-	isTTY := fi != nil && fi.Mode()&os.ModeCharDevice != 0
+	isTTY := isTerminal(os.Stdout)
 	if once || asJSON || !isTTY {
 		mon.Sample()           // establish a baseline
 		groups := mon.Sample() // second sample carries rates
@@ -544,7 +581,7 @@ func runEgress(flags []string, stdout io.Writer) int {
 
 // runEgressTUI mirrors runTUI's screen/signal/fini handling for the live "egress top" view.
 func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int) {
-	screen, err := tcell.NewScreen()
+	screen, err := newScreen()
 	if err != nil {
 		fmt.Fprintln(stdout, "egress: cannot open screen:", err)
 		return 1

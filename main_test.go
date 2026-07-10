@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 
 	"counterspy/internal/feedback"
 	"counterspy/internal/model"
@@ -301,5 +304,454 @@ func TestSubmit_AskRequiresYes(t *testing.T) {
 	_ = submitFeedback(feedback.Config{Share: feedback.ShareAsk}, st2, txYes, true, strings.NewReader("y\n"), io.Discard)
 	if txYes.sent != 1 {
 		t.Fatal("ask + 'y' must send")
+	}
+}
+
+// --- flagValue -------------------------------------------------------------
+
+func TestFlagValue(t *testing.T) {
+	if got := flagValue([]string{"--from", "path.json"}, "--from"); got != "path.json" {
+		t.Fatalf("space form: got %q", got)
+	}
+	if got := flagValue([]string{"--from=path.json"}, "--from"); got != "path.json" {
+		t.Fatalf("= form: got %q", got)
+	}
+	if got := flagValue([]string{"--other"}, "--from"); got != "" {
+		t.Fatalf("absent: got %q, want empty", got)
+	}
+	if got := flagValue([]string{"--from"}, "--from"); got != "" {
+		t.Fatalf("trailing flag with no value: got %q, want empty", got)
+	}
+}
+
+// --- colorEnabled / dim (isTerminal seam) -----------------------------------
+
+func TestColorEnabled(t *testing.T) {
+	origIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = origIsTerminal })
+
+	isTerminal = func(*os.File) bool { return true }
+	t.Setenv("NO_COLOR", "")
+	if !colorEnabled() {
+		t.Fatal("want color enabled on a tty with NO_COLOR unset")
+	}
+
+	t.Setenv("NO_COLOR", "1")
+	if colorEnabled() {
+		t.Fatal("NO_COLOR must disable color even on a tty")
+	}
+
+	t.Setenv("NO_COLOR", "")
+	isTerminal = func(*os.File) bool { return false }
+	if colorEnabled() {
+		t.Fatal("non-tty must disable color")
+	}
+}
+
+func TestDim(t *testing.T) {
+	origIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = origIsTerminal })
+	t.Setenv("NO_COLOR", "")
+
+	isTerminal = func(*os.File) bool { return true }
+	if got := dim("x"); got == "x" || !strings.Contains(got, "x") {
+		t.Fatalf("expected ANSI-wrapped string, got %q", got)
+	}
+
+	isTerminal = func(*os.File) bool { return false }
+	if got := dim("x"); got != "x" {
+		t.Fatalf("expected plain string when color disabled, got %q", got)
+	}
+}
+
+// --- userAllowlist -----------------------------------------------------------
+
+func TestUserAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cfgDir := filepath.Join(dir, ".config", "counterspy")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "com.jon.roboticus\n# a comment\n\n/tmp/evil\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "allowlist.txt"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := userAllowlist()
+	if !got["com.jon.roboticus"] || !got["/tmp/evil"] || got["# a comment"] || len(got) != 2 {
+		t.Fatalf("allowlist parse wrong: %+v", got)
+	}
+}
+
+func TestUserAllowlist_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	if got := userAllowlist(); len(got) != 0 {
+		t.Fatalf("missing file should yield empty allowlist, got %+v", got)
+	}
+}
+
+// --- loadSnapshot: missing + oversize cap -----------------------------------
+
+func TestLoadSnapshot_Missing(t *testing.T) {
+	if _, err := loadSnapshot(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+		t.Fatal("missing file should error")
+	}
+}
+
+func TestLoadSnapshot_OversizeCap(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "huge.json")
+	big := make([]byte, maxSnapshotBytes+1)
+	if err := os.WriteFile(p, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadSnapshot(p)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversize error, got %v", err)
+	}
+}
+
+// --- feedbackPaths / chooseTransmitter ---------------------------------------
+
+func TestFeedbackPaths(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+	cfgPath, storePath := feedbackPaths()
+	wantBase := filepath.Join(dir, ".config", "counterspy")
+	if cfgPath != filepath.Join(wantBase, "feedback.json") {
+		t.Fatalf("cfgPath = %q", cfgPath)
+	}
+	if storePath != filepath.Join(wantBase, "feedback-store.json") {
+		t.Fatalf("storePath = %q", storePath)
+	}
+}
+
+func TestChooseTransmitter(t *testing.T) {
+	tx := chooseTransmitter(feedback.Config{Endpoint: "http://example.com"}, "/tmp")
+	if _, ok := tx.(*feedback.HTTPTransmitter); !ok {
+		t.Fatalf("endpoint set should choose HTTPTransmitter, got %T", tx)
+	}
+	tx2 := chooseTransmitter(feedback.Config{}, "/tmp")
+	if _, ok := tx2.(*feedback.FileTransmitter); !ok {
+		t.Fatalf("no endpoint should choose FileTransmitter, got %T", tx2)
+	}
+}
+
+// --- collectAll: fan-out + fail-loud gap note (evidenceCollectors seam) -----
+
+func TestCollectAll_FanOutAndGapNote(t *testing.T) {
+	orig := evidenceCollectors
+	t.Cleanup(func() { evidenceCollectors = orig })
+	evidenceCollectors = []collectorSpec{
+		{"gap A", func() ([]model.Evidence, error) {
+			return []model.Evidence{{Subject: model.Subject{Label: "com.a"}}}, nil
+		}},
+		{"gap B", func() ([]model.Evidence, error) {
+			return nil, errors.New("boom")
+		}},
+	}
+	ev, gaps := collectAll()
+	if len(ev) != 1 || ev[0].Subject.Label != "com.a" {
+		t.Fatalf("expected 1 evidence item from the succeeding collector, got %+v", ev)
+	}
+	if len(gaps) != 1 || gaps[0] != "gap B" {
+		t.Fatalf("expected exactly the failing collector's gap note, got %+v", gaps)
+	}
+}
+
+// --- quarantineLoop: y/N/q branches + error reporting (quarantiner seam) ---
+
+type fakeQuarantiner struct {
+	calls int
+	err   error
+}
+
+func (f *fakeQuarantiner) Quarantine(root, ts string, a model.Assessment) (model.ManifestItem, error) {
+	f.calls++
+	if f.err != nil {
+		return model.ManifestItem{}, f.err
+	}
+	return model.ManifestItem{}, nil
+}
+
+func TestQuarantineLoop_YActs(t *testing.T) {
+	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/x"}}, Recommendation: model.RecQuarantine}}
+	fq := &fakeQuarantiner{}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader("y\n"), fq)
+	if fq.calls != 1 {
+		t.Fatalf("want 1 call, got %d", fq.calls)
+	}
+	if !strings.Contains(out.String(), "quarantined ->") {
+		t.Fatalf("missing success message: %s", out.String())
+	}
+}
+
+func TestQuarantineLoop_NSkips(t *testing.T) {
+	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/x"}}, Recommendation: model.RecQuarantine}}
+	fq := &fakeQuarantiner{}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader("n\n"), fq)
+	if fq.calls != 0 {
+		t.Fatalf("N must not act, got %d calls", fq.calls)
+	}
+}
+
+func TestQuarantineLoop_QStopsEarly(t *testing.T) {
+	as := []model.Assessment{
+		{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/x"}}, Recommendation: model.RecQuarantine},
+		{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/y"}}, Recommendation: model.RecQuarantine},
+	}
+	fq := &fakeQuarantiner{}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader("q\n"), fq)
+	if fq.calls != 0 {
+		t.Fatalf("q must stop before acting, got %d calls", fq.calls)
+	}
+}
+
+func TestQuarantineLoop_ErrorReportsAndContinues(t *testing.T) {
+	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/x"}}, Recommendation: model.RecQuarantine}}
+	fq := &fakeQuarantiner{err: errors.New("boom")}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader("y\n"), fq)
+	if fq.calls != 1 {
+		t.Fatalf("want 1 attempted call, got %d", fq.calls)
+	}
+	if !strings.Contains(out.String(), "stopped (partial state recorded") {
+		t.Fatalf("missing error message: %s", out.String())
+	}
+}
+
+func TestQuarantineLoop_MonitorRecommendationSkippedSilently(t *testing.T) {
+	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{Path: "/tmp/x"}}, Recommendation: model.RecMonitor}}
+	fq := &fakeQuarantiner{}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader(""), fq)
+	if fq.calls != 0 || out.Len() != 0 {
+		t.Fatalf("Monitor recommendation must be skipped silently, calls=%d out=%q", fq.calls, out.String())
+	}
+}
+
+func TestQuarantineLoop_NoActionsSkipped(t *testing.T) {
+	// A bare process finding (no label, no path) plans no actions — nothing to prompt for.
+	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{PID: 123}}, Recommendation: model.RecQuarantine}}
+	fq := &fakeQuarantiner{}
+	var out bytes.Buffer
+	quarantineLoop(as, &out, strings.NewReader(""), fq)
+	if fq.calls != 0 || out.Len() != 0 {
+		t.Fatalf("no-artifact finding must be skipped silently, calls=%d out=%q", fq.calls, out.String())
+	}
+}
+
+// --- run() dispatch branches --------------------------------------------------
+
+func TestRun_RestoreNoPath(t *testing.T) {
+	var buf bytes.Buffer
+	if code := run([]string{"restore"}, &buf); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "usage: counterspy restore") {
+		t.Fatalf("missing usage: %s", buf.String())
+	}
+}
+
+func TestRun_RestoreBadPath(t *testing.T) {
+	var buf bytes.Buffer
+	if code := run([]string{"restore", "/no/such/manifest.json"}, &buf); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+}
+
+func TestRun_RestoreSuccess(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(p, []byte(`{"Items":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := run([]string{"restore", p}, &buf); code != 0 {
+		t.Fatalf("exit %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "restored from") {
+		t.Fatalf("missing success message: %s", buf.String())
+	}
+}
+
+func TestRun_FeedbackDispatch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+	var buf bytes.Buffer
+	if code := run([]string{"feedback"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(buf.String(), "pending feedback record") {
+		t.Fatalf("missing output: %s", buf.String())
+	}
+}
+
+func TestRun_EgressDispatch(t *testing.T) {
+	withFakeEgress(t)
+	var buf bytes.Buffer
+	if code := run([]string{"egress", "--once"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(buf.String(), "backuptool") {
+		t.Fatalf("missing output: %s", buf.String())
+	}
+}
+
+func TestRun_ScanDispatch(t *testing.T) {
+	var buf bytes.Buffer
+	if code := run([]string{"scan", "--dry"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestRunScan_InteractiveDryEmptyAssessments(t *testing.T) {
+	// --dry means no evidence is collected, so quarantineLoop iterates zero assessments —
+	// this exercises the runScan -> quarantineLoop wiring without touching stdin.
+	var buf bytes.Buffer
+	if code := run([]string{"scan", "--dry", "--interactive"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+// --- runFeedback: list / submit / unknown -------------------------------------
+
+func TestRunFeedback_SubmitOff(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+	var buf bytes.Buffer
+	if code := runFeedback([]string{"submit"}, &buf); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(buf.String(), "sharing is off") {
+		t.Fatalf("missing message: %s", buf.String())
+	}
+}
+
+func TestRunFeedback_UnknownSub(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+	var buf bytes.Buffer
+	if code := runFeedback([]string{"bogus"}, &buf); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "usage: counterspy feedback") {
+		t.Fatalf("missing usage: %s", buf.String())
+	}
+}
+
+func TestRunFeedback_SubmitAsksAndSends(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+	cfgDir := filepath.Join(dir, ".config", "counterspy")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "feedback.json"), []byte(`{"share":"always"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := feedback.NewStore(filepath.Join(cfgDir, "feedback-store.json"))
+	if err := st.Add(feedback.Capture(model.Assessment{
+		Finding: model.Finding{Subject: model.Subject{Label: "com.apple.x"}}, Recommendation: model.RecInvestigate,
+	}, model.LabelFalsePositive, feedback.DetailPublic, "n1")); err != nil {
+		t.Fatal(err)
+	}
+
+	// runFeedback submit always asks via os.Stdin — feed it a "y" through a real pipe
+	// (os.Stdin is just a package var, safe to swap for the duration of the test).
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("y\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	var buf bytes.Buffer
+	if code := runFeedback([]string{"submit"}, &buf); code != 0 {
+		t.Fatalf("exit %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "shared 1 record") {
+		t.Fatalf("expected a shared-record confirmation, got: %s", buf.String())
+	}
+}
+
+// --- runTUI / runEgressTUI: screen seam (newScreen) + isTerminal seam --------
+
+// keyInjectingScreen wraps a real tcell.SimulationScreen so its Init() injects a key
+// event immediately after the real Init sets up the event channel — avoiding a race
+// against production code's own screen.Init() call (which would otherwise discard any
+// event injected beforehand, since Init() replaces the event channel).
+type keyInjectingScreen struct {
+	tcell.SimulationScreen
+	key tcell.Key
+	r   rune
+}
+
+func (k *keyInjectingScreen) Init() error {
+	if err := k.SimulationScreen.Init(); err != nil {
+		return err
+	}
+	k.SimulationScreen.InjectKey(k.key, k.r, tcell.ModNone)
+	return nil
+}
+
+func TestRunTUI_FromSnapshotQuitsImmediately(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("SUDO_USER", "")
+
+	origIsTerminal, origNewScreen := isTerminal, newScreen
+	t.Cleanup(func() { isTerminal, newScreen = origIsTerminal, origNewScreen })
+	isTerminal = func(*os.File) bool { return true }
+	newScreen = func() (tcell.Screen, error) {
+		return &keyInjectingScreen{SimulationScreen: tcell.NewSimulationScreen(""), key: tcell.KeyRune, r: 'Q'}, nil
+	}
+
+	var buf bytes.Buffer
+	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 0 {
+		t.Fatalf("exit %d: %s", code, buf.String())
+	}
+}
+
+func TestRunTUI_NonTerminalRefuses(t *testing.T) {
+	origIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = origIsTerminal })
+	isTerminal = func(*os.File) bool { return false }
+
+	// --from a snapshot: the terminal check runs after evidence is gathered, and a live
+	// scan would shell out to the real collectors — use the snapshot path to stay hermetic.
+	var buf bytes.Buffer
+	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "TUI needs a terminal") {
+		t.Fatalf("missing message: %s", buf.String())
+	}
+}
+
+func TestRunEgressTUI_QuitsImmediately(t *testing.T) {
+	origNewScreen := newScreen
+	t.Cleanup(func() { newScreen = origNewScreen })
+	newScreen = func() (tcell.Screen, error) {
+		return &keyInjectingScreen{SimulationScreen: tcell.NewSimulationScreen(""), key: tcell.KeyRune, r: 'Q'}, nil
+	}
+
+	var buf bytes.Buffer
+	if code := runEgressTUI(&fakeEgressSampler{}, 0.01, &buf); code != 0 {
+		t.Fatalf("exit %d: %s", code, buf.String())
 	}
 }
