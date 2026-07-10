@@ -620,6 +620,7 @@ func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int
 	tick := make(chan struct{})
 	stop := make(chan struct{})
 	go func() {
+		defer close(tick) // sole sender closes the channel, so RunEgress's forwarder ends cleanly
 		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
 		defer t.Stop()
 		for {
@@ -635,9 +636,7 @@ func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int
 		}
 	}()
 	err = tui.RunEgress(screen, mon, tick)
-	close(stop)
-	close(tick) // ticker goroutine has stopped sending (close(stop) above) — safe to close now,
-	// so RunEgress's `range tick` forwarding goroutine exits instead of leaking.
+	close(stop) // ends the ticker goroutine, which closes tick, which ends RunEgress's forwarder
 	fini()
 	if err != nil {
 		fmt.Fprintln(stdout, "egress:", err)

@@ -48,14 +48,21 @@ func ParseNettop(b []byte) map[int]Bytes {
 	return out
 }
 
-// pidFromNameDotPid finds the "name.pid" field and returns the trailing pid, else 0.
+// pidFromNameDotPid finds the "name.pid" field and returns the trailing pid. A timestamp
+// column (e.g. "15:04:05.123456") also ends in ".<int>", so fields whose pre-dot portion
+// contains a ':' are skipped — otherwise the microseconds would be misread as a PID.
 func pidFromNameDotPid(fields []string) int {
 	for _, f := range fields {
 		f = strings.TrimSpace(f)
-		if dot := strings.LastIndex(f, "."); dot > 0 {
-			if pid, err := strconv.Atoi(f[dot+1:]); err == nil && pid > 0 {
-				return pid
-			}
+		dot := strings.LastIndex(f, ".")
+		if dot <= 0 {
+			continue
+		}
+		if strings.ContainsRune(f[:dot], ':') {
+			continue // a timestamp, not name.pid
+		}
+		if pid, err := strconv.Atoi(f[dot+1:]); err == nil && pid > 0 {
+			return pid
 		}
 	}
 	return 0
