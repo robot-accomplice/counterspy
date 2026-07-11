@@ -6,6 +6,7 @@
 ![platform](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)
 ![dependencies](https://img.shields.io/badge/deps-stdlib%20%2B%20tcell-1f6feb)
 ![status](https://img.shields.io/badge/status-active-success)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A macOS command-line tool that triages your Mac for spyware-like activity, ranks what
 it finds with plain-language recommendations, and — with your approval — **reversibly**
