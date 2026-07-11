@@ -1,0 +1,80 @@
+// Package mark is the pure symbology vocabulary: the glyph marks CounterSpy
+// draws for a finding's concern tier, code-signing trust, and liveness, plus the
+// Legend that documents them. It does no I/O and imports only internal/model, so
+// every render surface (CLI report, TUI, egress) shares one source of truth.
+package mark
+
+import (
+	"strings"
+
+	"counterspy/internal/model"
+)
+
+// Concern (tier) glyphs — carried by BOTH color and glyph, so tier survives a
+// NO_COLOR / piped terminal.
+const (
+	GlyphQuarantine  = '⚑'
+	GlyphInvestigate = '▲'
+	GlyphMonitor     = '·'
+)
+
+// Trust (provenance) glyphs — a filled→hollow→struck gradient of decreasing trust.
+const (
+	GlyphApple     = '●' // Apple system code
+	GlyphNotarized = '◆' // Developer ID, Gatekeeper-accepted
+	GlyphSigned    = '◇' // signed but not accepted/notarized
+	GlyphUnsigned  = '○' // no signature
+	GlyphRevoked   = '⊘' // revoked certificate
+)
+
+// Liveness glyphs.
+const (
+	GlyphActive    = '▸' // subject maps to a running process
+	GlyphVestigial = '†' // persistence install whose target is not running
+	GlyphSocket    = '↔' // holds a network listener
+)
+
+// Concern maps a recommendation tier to its glyph.
+func Concern(r model.Recommendation) rune {
+	switch r {
+	case model.RecQuarantine:
+		return GlyphQuarantine
+	case model.RecInvestigate:
+		return GlyphInvestigate
+	default:
+		return GlyphMonitor
+	}
+}
+
+// Trust classifies a finding's code-signing provenance from its codesign
+// evidence Facts. Returns 0 (blank slot) when the finding carries no codesign
+// signal. Apple-authority is checked before Developer-ID so Apple system code
+// reads as ● not ◆. The mapping is written against current develop (spctl-accepted)
+// semantics; see spec §8 for the PR #25 coupling.
+func Trust(f model.Finding) rune {
+	for _, e := range f.Evidence {
+		if e.Kind != model.KindCodesign {
+			continue
+		}
+		switch e.Facts["signed"] {
+		case "revoked":
+			return GlyphRevoked
+		case "false":
+			return GlyphUnsigned
+		case "true":
+			switch a := e.Facts["authority"]; {
+			case a == "":
+				return GlyphSigned
+			case isAppleAuthority(a):
+				return GlyphApple
+			default:
+				return GlyphNotarized
+			}
+		}
+	}
+	return 0
+}
+
+func isAppleAuthority(a string) bool {
+	return strings.Contains(a, "Apple") || strings.Contains(a, "Software Signing")
+}
