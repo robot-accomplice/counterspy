@@ -42,30 +42,19 @@ func ParseCodesign(path, verifyErr string, accepted bool, authority string) []mo
 	}
 }
 
-// CollectCodesign runs codesign/spctl for a path (I/O edge).
-func CollectCodesign(path string) []model.Evidence {
-	verify, _ := execCombined("codesign", "--verify", "--deep", path)
-	v := string(verify)
-	// A revoked/unsigned binary needs no Gatekeeper assessment or authority extraction —
-	// ParseCodesign discards both for those verdicts. Skipping them avoids two subprocesses
-	// (spctl --assess is the slow one, ~0.5s) per unsigned/revoked binary.
-	if strings.Contains(v, "revoked") || strings.Contains(v, "not signed") {
-		return ParseCodesign(path, v, false, "")
-	}
-	// spctl's EXIT CODE is the unspoofable acceptance signal (T-3, cp-5 F-1/F-3) —
-	// exit 0 == accepted. We never parse its free-text output for the verdict.
-	accepted := execAccepts("spctl", "--assess", "--type", "execute", path)
-	authOut, _ := execCombined("codesign", "-dv", "--verbose=2", path)
-	return ParseCodesign(path, v, accepted, extractAuthority(string(authOut)))
-}
+// sigProbe returns a code-signature verdict for a path, in the same shape ParseCodesign
+// consumes: a verify-error string ("" = signed, "...not signed..." = unsigned, "...revoked..."
+// = revoked), whether the signature is valid/accepted, and the leaf-certificate authority. The
+// darwin build wires this to an in-process Security.framework implementation (native.go); it's
+// a package var so tests can inject a fake and stay hermetic. Nil on platforms without a
+// backend, where CollectCodesign yields no evidence.
+var sigProbe func(path string) (verifyErr string, accepted bool, authority string)
 
-// extractAuthority returns the first Authority= line — the leaf/signer cert; later
-// lines are the CA chain. The allowlist matches the leaf CN, so first-match is correct.
-func extractAuthority(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if strings.HasPrefix(line, "Authority=") {
-			return strings.TrimPrefix(line, "Authority=")
-		}
+// CollectCodesign returns code-signature evidence for a path (I/O edge, via sigProbe).
+func CollectCodesign(path string) []model.Evidence {
+	if sigProbe == nil {
+		return nil
 	}
-	return ""
+	verifyErr, accepted, authority := sigProbe(path)
+	return ParseCodesign(path, verifyErr, accepted, authority)
 }
