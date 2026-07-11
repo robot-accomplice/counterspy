@@ -49,3 +49,13 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+      # Publishes coverage to Codecov for the live README badge. Requires the Codecov GitHub
+      # app installed on the repo + a CODECOV_TOKEN repo secret. Non-fatal until that's set up.
+      - name: upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          slug: robot-accomplice/counterspy
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

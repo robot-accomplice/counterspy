@@ -1,7 +1,7 @@
 # CounterSpy 🕵️
 
 [![CI](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)](#testing)
+[![codecov](https://codecov.io/gh/robot-accomplice/counterspy/graph/badge.svg)](https://codecov.io/gh/robot-accomplice/counterspy)
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![platform](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)
 ![dependencies](https://img.shields.io/badge/deps-stdlib%20%2B%20tcell-1f6feb)
