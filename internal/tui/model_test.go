@@ -55,6 +55,18 @@ func BenchmarkVisible(b *testing.B) {
 	}
 }
 
+func TestRecRank_AllThreeTiers(t *testing.T) {
+	if recRank(model.RecQuarantine) != 0 {
+		t.Fatal("RecQuarantine should rank 0")
+	}
+	if recRank(model.RecInvestigate) != 1 {
+		t.Fatal("RecInvestigate should rank 1")
+	}
+	if recRank(model.RecMonitor) != 2 {
+		t.Fatal("RecMonitor (default) should rank 2")
+	}
+}
+
 func TestCounts(t *testing.T) {
 	m := New([]model.Assessment{
 		mk("q", model.RecQuarantine, 12), mk("i", model.RecInvestigate, 6),

@@ -1,0 +1,116 @@
+{
+  "id": "v0-4-0-egress",
+  "version": "0.4.0",
+  "name": "Egress monitor",
+  "status": "in-progress",
+  "posture": "on-track",
+  "summary": "Live 'egress top': per-application outbound traffic (rate, destinations, cadence) through the trust/provenance lens, with an inferred exfiltration risk (capability x egress). Sudo-CLI observation (nettop + lsof), observe-only, reads no payloads.",
+  "targetWindow": "v0.4.0-rc1 on the feat/egress-monitor branch; real destination names deferred to v0.4.1 (packet capture)",
+  "lastUpdated": "2026-07-09T00:00:00.000Z",
+  "updateSource": "SDD execution of the egress-monitor plan",
+  "scope": {
+    "required": [
+      {
+        "id": "egress-pipeline",
+        "title": "internal/egress: parse -> rate -> aggregate -> concern/exfil",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "nettop/lsof parsers, reset-safe out-rate diff + cadence, group-by-app aggregation (collapse pids/ports/protocols, worst-case trust), concern scoring and exfil inference (capability x egress). Pure given inputs; exec edge + joins injectable.",
+        "owner": "Project maintainers",
+        "workstreamId": "egress",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/egress/ (89%)"]
+      },
+      {
+        "id": "egress-tui-report",
+        "title": "Live egress TUI + non-TTY report",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "Tick-driven live 'egress top' (expand/collapse per app, concern color, sparkline, detail strip) keeping internal/tui -> internal/model only; non-TTY windowed report + --json; the `egress` subcommand wired into main (TTY -> TUI, else report).",
+        "owner": "Project maintainers",
+        "workstreamId": "egress",
+        "dependsOn": ["egress-pipeline"],
+        "evidence": ["go test ./internal/tui/ (99%)", "go test . (egress report, mock sampler)"]
+      },
+      {
+        "id": "coverage-ci",
+        "title": "80% coverage rule + mockable integration + GitHub Actions CI",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "Every package >=80% (overall 91%); exec edges (nettop/lsof/ps/codesign/TCC) and the terminal behind injectable seams so tests run in CI without sudo/tools; GitHub Actions workflow gates build/vet/gofmt/test at >=80% coverage. Rule recorded in rules.json.",
+        "owner": "Project maintainers",
+        "workstreamId": "egress",
+        "dependsOn": [],
+        "evidence": ["go test ./... -cover (91% overall)", ".github/workflows/ci.yml", "rules.json min-test-coverage"]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "pcap-destination-names",
+        "title": "Real destination names via packet capture",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "SNI/DNS destination names + per-flow volume via pktap/tcpdump; v1 shows IP:port.",
+        "reason": "Sequencing: the observe loop (nettop+lsof) establishes the per-app egress picture first; packet capture adds pcap parsing best layered on a working monitor. Recorded as roadmap v0.4.1.",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": [
+      {
+        "id": "network-extension",
+        "title": "Network Extension continuous filter",
+        "kind": "feature",
+        "summary": "A NEFilterDataProvider system extension needs an Apple entitlement + signed app + system-extension install — a different product that abandons the CLI architecture. Explicitly not this release."
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "egress",
+      "name": "Egress monitor",
+      "owner": "Project maintainers",
+      "status": "in-progress",
+      "posture": "on-track",
+      "summary": "Live per-app egress observation through the trust/provenance lens with inferred exfil risk. Built + coverage-hardened + CI-gated; pending final whole-branch review and tag.",
+      "progress": 90,
+      "itemIds": ["egress-pipeline", "egress-tui-report", "coverage-ci"],
+      "evidence": ["go test ./... (91% overall)", "go vet ./...", "architext validate"]
+    }
+  ],
+  "blockers": [],
+  "milestones": [
+    {
+      "id": "egress-built",
+      "label": "Egress monitor built + CI-gated (v0.4.0-rc1)",
+      "status": "complete",
+      "targetWindow": "v0.4.0-rc1",
+      "order": 1,
+      "itemIds": ["egress-pipeline", "egress-tui-report", "coverage-ci"]
+    },
+    {
+      "id": "egress-reviewed",
+      "label": "Whole-branch review + tag",
+      "status": "planned",
+      "targetWindow": "before merge",
+      "order": 2,
+      "itemIds": []
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "full-gate-v040",
+      "label": "go test ./... (91%) + vet + gofmt + architext validate",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "ci-workflow",
+      "label": "GitHub Actions CI with >=80% coverage gate",
+      "kind": "test",
+      "status": "complete"
+    }
+  ]
+}

@@ -135,3 +135,85 @@ func TestUpdate_HelpToggle(t *testing.T) {
 		t.Fatal("esc should close help")
 	}
 }
+
+func TestUpdate_FilterEnterConfirmsAndKeepsSelection(t *testing.T) {
+	m := threeQ()
+	m, _ = update(m, tcell.KeyRune, '/')
+	m, _ = update(m, tcell.KeyRune, 'b')
+	m, _ = update(m, tcell.KeyEnter, 0)
+	if m.Focus != focusList {
+		t.Fatal("enter should confirm the filter and return to the list")
+	}
+	if m.Filter != "b" {
+		t.Fatalf("enter must not clear the filter text, got %q", m.Filter)
+	}
+}
+
+func TestUpdate_FilterBackspace(t *testing.T) {
+	m := threeQ()
+	m, _ = update(m, tcell.KeyRune, '/')
+	m, _ = update(m, tcell.KeyRune, 'a')
+	m, _ = update(m, tcell.KeyRune, 'b')
+	m, _ = update(m, tcell.KeyBackspace, 0)
+	if m.Filter != "a" {
+		t.Fatalf("backspace should drop the last filter rune, got %q", m.Filter)
+	}
+	m, _ = update(m, tcell.KeyBackspace2, 0)
+	if m.Filter != "" {
+		t.Fatalf("backspace should drop the remaining filter rune, got %q", m.Filter)
+	}
+	// Backspacing an already-empty filter must not panic or underflow.
+	m, _ = update(m, tcell.KeyBackspace, 0)
+	if m.Filter != "" {
+		t.Fatalf("backspace on empty filter should stay empty, got %q", m.Filter)
+	}
+}
+
+func TestUpdate_ArrowKeysMoveSelection(t *testing.T) {
+	m := threeQ()
+	m, _ = update(m, tcell.KeyDown, 0)
+	if m.Selected != 1 {
+		t.Fatalf("KeyDown should move selection to 1, got %d", m.Selected)
+	}
+	m, _ = update(m, tcell.KeyUp, 0)
+	if m.Selected != 0 {
+		t.Fatalf("KeyUp should move selection back to 0, got %d", m.Selected)
+	}
+}
+
+func TestUpdate_QuarantineBlockedOnMonitorSelection(t *testing.T) {
+	m := New([]model.Assessment{mk("z", model.RecMonitor, 2)}, nil)
+	m.ShowMonitor = true // so the monitor item is visible and selectable
+	m, cmds := update(m, tcell.KeyRune, 'q')
+	if m.Focus == focusModal || len(cmds) != 0 {
+		t.Fatalf("quarantining a Monitor-tier item should be a no-op, got focus=%v cmds=%v", m.Focus, cmds)
+	}
+}
+
+func TestUpdate_QuarantineBlockedOnEmptyList(t *testing.T) {
+	m := New(nil, nil)
+	m, cmds := update(m, tcell.KeyRune, 'q')
+	if m.Focus == focusModal || len(cmds) != 0 {
+		t.Fatalf("quarantining an empty list should be a no-op, got focus=%v cmds=%v", m.Focus, cmds)
+	}
+}
+
+func TestUpdate_LabelBlockedOnEmptyList(t *testing.T) {
+	m := New(nil, nil)
+	_, cmds := update(m, tcell.KeyRune, 'g')
+	if len(cmds) != 0 {
+		t.Fatalf("labeling an empty list should emit no cmd, got %+v", cmds)
+	}
+	_, cmds = update(m, tcell.KeyRune, 'b')
+	if len(cmds) != 0 {
+		t.Fatalf("labeling an empty list should emit no cmd, got %+v", cmds)
+	}
+}
+
+func TestMoveSel_EmptyListResetsToZero(t *testing.T) {
+	m := Model{Selected: 5}
+	m = moveSel(m, +1, 0)
+	if m.Selected != 0 {
+		t.Fatalf("moveSel with n=0 should reset selection to 0, got %d", m.Selected)
+	}
+}
