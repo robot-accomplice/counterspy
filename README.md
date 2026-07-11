@@ -17,6 +17,16 @@ quarantines suspicious items. It never deletes.
 > [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
 > on false-positive volume before treating output as verdicts — it recommends, you decide.
 
+<p align="center">
+  <img src="docs/screenshots/tui.png" alt="CounterSpy interactive triage TUI: findings ranked by concern with an evidence and provenance detail pane" width="900">
+</p>
+
+<p align="center"><em>Interactive triage TUI — findings ranked by concern, with correlated evidence and provenance. Below: the plain CLI report — synthesis, not a dump.</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/scan.png" alt="CounterSpy CLI scan report: 1 actionable of 335 scanned, the rest counted" width="900">
+</p>
+
 ## Install
 
 **Prebuilt binary** — a checksum-verified universal binary (Apple Silicon + Intel), no Go toolchain needed:
