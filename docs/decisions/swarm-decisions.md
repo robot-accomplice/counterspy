@@ -154,3 +154,27 @@ SEVERITY SPLIT surfaced (QA high vs Audit low on the snapshot trust boundary); E
 - **D. Unrecovered panic** (Audit F-2 low): runTUI wraps Run in a deferred recover → Fini + clean error.
 - Confirmed strong: Actor seam gives STRONGER decoupling than spec'd (tui imports only model+tcell);
   session-scoped manifest semantics correct.
+
+## Handover + substrate reconciliation (fresh-context resume) — 2026-07-12
+
+Resumed CounterSpy under a fresh orchestrator session; coordinated a live handover
+with the retired writer session (via ccd_session_mgmt) rather than reconstructing
+from the bus alone. Key reconciliations recorded so a future resume is not misled
+by the stale cp-* picture:
+
+- **Execution model:** the project has moved OFF the cp-* fan-out checkpoint model
+  onto **gitflow + PR**, CI-gated (build/vet/gofmt/test --race + >=80% coverage per
+  package). The `.swarm/` bus checkpoints end at cp-tui-3 (2026-07-09); egress,
+  feedback, and the TUI spinner shipped since via PR, reviewed through gitflow.
+- **Swarm value retained:** the swarm's parallel read-only reviewer fan-out
+  (Antagonist + Audit subagents on each diff) + single-writer discipline is kept as
+  the quality mechanism; only the shipped artifact changed (cp-* bus entry -> git PR).
+  No spawn_task chips (they would create a second writer).
+- **Branch/PR posture at handover:** main = v0.4.0; develop = integration target.
+  Open PRs -> develop: #25 feature/native-codesign (trust-semantics shift, awaiting
+  Jon's human decision) and #26 bug/tui-startup-spinner (spinner, green).
+- **Current work:** feature/symbology-legend off develop. Spec + plan committed
+  (docs/superpowers/{specs,plans}/2026-07-1*-symbology-legend*). Three-axis mark
+  vocabulary (concern/trust/liveness), uniform-cadence cluster, documented drift-proof
+  key. Closes T-4 (real exec path per PID) + #23 (active-vs-vestigial). Liveness is
+  display-only (scorer untouched). PR #25 coupling flagged, not decided here (spec §8).
