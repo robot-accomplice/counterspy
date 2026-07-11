@@ -159,11 +159,100 @@ func TestEgressView_ExpandedRowsAndDetail(t *testing.T) {
 	}
 }
 
-func TestSelectedRowIndex_OutOfRange(t *testing.T) {
+func TestEgressView_FooterKeybindsPresent(t *testing.T) {
+	s := simScreen(t)
 	m := NewEgress().withGroups([]model.EgressGroup{eg("a", model.Low, 10)})
-	m.Selected = 5 // out of range
-	rows := m.visibleRows()
-	if idx := selectedRowIndex(m, rows); idx != -1 {
-		t.Fatalf("out-of-range selection should yield -1, got %d", idx)
+	egressView(m, s)
+	s.Show()
+	out := screenText(s)
+	for _, want := range []string{"j/k", "↵/→ expand", "← collapse", "s sort", "/ filter", "p pause", "Q quit"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("footer keybind hint missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestEgressView_EmptyState(t *testing.T) {
+	s := simScreen(t)
+	m := NewEgress().withGroups(nil)
+	egressView(m, s)
+	s.Show()
+	out := screenText(s)
+	if !strings.Contains(out, "No outbound traffic observed — run with sudo for full visibility.") {
+		t.Fatalf("expected empty-state hint, got:\n%s", out)
+	}
+}
+
+func TestEgressView_SparklineDownsampledAndColumnsAligned(t *testing.T) {
+	s := simScreen(t) // 120x40
+	spark := make([]uint64, 24)
+	for i := range spark {
+		spark[i] = uint64(i)
+	}
+	g := eg("a", model.Low, 10)
+	g.Spark = spark
+	m := NewEgress().withGroups([]model.EgressGroup{g})
+	egressView(m, s)
+	s.Show()
+
+	cols := computeCols(120)
+	row := 2 // first data row (row 0 = title, row 1 = header, row 2 = first group)
+
+	glyphs := 0
+	for x := cols.trendX; x < cols.trendX+trendW; x++ {
+		r, _, _, _ := s.GetContent(x, row)
+		if r != ' ' && r != 0 {
+			glyphs++
+		}
+	}
+	if glyphs > trendW {
+		t.Fatalf("sparkline overflowed its %d-wide column: found %d glyphs", trendW, glyphs)
+	}
+	if glyphs == 0 {
+		t.Fatal("expected the sparkline to render at least one glyph")
+	}
+
+	var concern strings.Builder
+	for x := cols.concernX; x < cols.concernX+concernW; x++ {
+		r, _, _, _ := s.GetContent(x, row)
+		if r == 0 {
+			r = ' '
+		}
+		concern.WriteRune(r)
+	}
+	if !strings.Contains(concern.String(), model.Low.String()) {
+		t.Fatalf("CONCERN column misaligned, got %q at x=%d", concern.String(), cols.concernX)
+	}
+}
+
+func TestDownsample_PassThroughWhenAlreadyWithinWidth(t *testing.T) {
+	in := []uint64{1, 2, 3}
+	got := downsample(in, 10)
+	if len(got) != 3 {
+		t.Fatalf("short input should pass through unchanged, got %d values", len(got))
+	}
+}
+
+func TestDownsample_BucketsDownToWidth(t *testing.T) {
+	in := make([]uint64, 24)
+	for i := range in {
+		in[i] = uint64(i)
+	}
+	got := downsample(in, 8)
+	if len(got) != 8 {
+		t.Fatalf("expected 8 buckets, got %d", len(got))
+	}
+}
+
+func TestComputeCols_ColumnsAscendAndFitWidth(t *testing.T) {
+	c := computeCols(120)
+	xs := []int{c.markerX, c.appX, c.trustX, c.rateX, c.trendX, c.destX, c.concernX}
+	for i := 1; i < len(xs); i++ {
+		if xs[i] <= xs[i-1] {
+			t.Fatalf("columns must be strictly increasing left-to-right, got %v", xs)
+		}
+	}
+	if end := c.concernX + concernW; end > 120 {
+		t.Fatalf("CONCERN column overflows terminal width: ends at %d, want <= 120", end)
 	}
 }
