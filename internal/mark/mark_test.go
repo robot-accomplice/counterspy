@@ -31,6 +31,10 @@ func TestTrust(t *testing.T) {
 		{"apple", map[string]string{"signed": "true", "authority": "Software Signing"}, GlyphApple},
 		{"apple-named", map[string]string{"signed": "true", "authority": "Apple Mac OS Application Signing"}, GlyphApple},
 		{"notarized-devid", map[string]string{"signed": "true", "authority": "Developer ID Application: Acme (TEAM1)"}, GlyphNotarized},
+		// SECURITY (cp T1 review F-1): a Gatekeeper-accepted Developer-ID cert whose
+		// company name contains "Apple" must NOT forge the ● Apple-system mark.
+		{"devid-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Application: Apple Fan LLC (TEAM9)"}, GlyphNotarized},
+		{"devid-installer-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Installer: Apple Lovers Inc (TEAM8)"}, GlyphNotarized},
 		{"signed-not-accepted", map[string]string{"signed": "true"}, GlyphSigned},
 		{"unsigned", map[string]string{"signed": "false"}, GlyphUnsigned},
 		{"revoked", map[string]string{"signed": "revoked"}, GlyphRevoked},

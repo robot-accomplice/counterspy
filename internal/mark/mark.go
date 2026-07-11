@@ -75,6 +75,16 @@ func Trust(f model.Finding) rune {
 	return 0
 }
 
+// isAppleAuthority reports whether an spctl-accepted signing authority is Apple's
+// own platform code. A third-party Developer-ID leaf ALWAYS begins with
+// "Developer ID " ("Developer ID Application:" / "Developer ID Installer:"), so we
+// exclude that prefix first — otherwise a legitimately-notarized Developer-ID cert
+// whose company name merely contains "Apple" (e.g. "Developer ID Application: Apple
+// Fan LLC") would forge the ● Apple-system mark. Only after ruling out Developer-ID
+// do we accept Apple's platform authorities. (swarm cp T1 review F-1, crit.)
 func isAppleAuthority(a string) bool {
-	return strings.Contains(a, "Apple") || strings.Contains(a, "Software Signing")
+	if strings.HasPrefix(a, "Developer ID") {
+		return false
+	}
+	return strings.Contains(a, "Apple") || a == "Software Signing"
 }
