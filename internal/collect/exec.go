@@ -11,19 +11,21 @@ import (
 // (ABORT C1).
 const cmdTimeout = 15 * time.Second
 
-func execOutput(name string, args ...string) ([]byte, error) {
+// execOutput, execCombined, and execAccepts are package vars (not funcs) so tests
+// can override them with fakes keyed on command name — no shelling out in tests.
+var execOutput = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
-func execCombined(name string, args ...string) ([]byte, error) {
+var execCombined = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
-func execAccepts(name string, args ...string) bool {
+var execAccepts = func(name string, args ...string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).Run() == nil

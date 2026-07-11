@@ -8,7 +8,7 @@ import (
 
 // Cmd is an effect the event loop must perform (Run executes it). update stays pure.
 type Cmd struct {
-	Op string // "quarantine" | "restore" | "quit"
+	Op string // "quarantine" | "restore" | "labelFP" | "labelTP" | "quit"
 	A  model.Assessment
 }
 
@@ -88,6 +88,16 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 			m.Focus = focusModal
 		case 'u':
 			return m, []Cmd{{Op: "restore"}}
+		case 'g':
+			if n == 0 || m.Selected >= n {
+				break
+			}
+			return m, []Cmd{{Op: "labelFP", A: v[m.Selected]}}
+		case 'b':
+			if n == 0 || m.Selected >= n {
+				break
+			}
+			return m, []Cmd{{Op: "labelTP", A: v[m.Selected]}}
 		case 'Q':
 			return m, []Cmd{{Op: "quit"}}
 		}

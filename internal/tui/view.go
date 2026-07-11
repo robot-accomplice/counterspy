@@ -293,6 +293,8 @@ func drawHelp(s tcell.Screen) {
 		"j / k, ↑/↓   move selection",
 		"q            quarantine (confirm)",
 		"u            restore this session's quarantine",
+		"g            mark selected as a FALSE positive (legit)",
+		"b            mark selected as correctly flagged (bad)",
 		"m            show / hide Monitor tier",
 		"s            sort by score / recommendation",
 		"/            filter by name   ·   esc clears",

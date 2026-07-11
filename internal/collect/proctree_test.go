@@ -59,3 +59,14 @@ func TestBuildProcessEvidence_EstablishedIsNotListener(t *testing.T) {
 		t.Errorf("want net=connection for a non-LISTEN socket, got %q", ev[0].Facts["net"])
 	}
 }
+
+func TestAncestry_Exported(t *testing.T) {
+	procs := map[int]*Proc{
+		1:   {PID: 1, PPID: 0, Cmd: "/sbin/launchd"},
+		200: {PID: 200, PPID: 1, Cmd: "/Applications/X.app/Contents/MacOS/X --flag"},
+	}
+	got := Ancestry(procs, 200)
+	if got != "/sbin/launchd -> /Applications/X.app/Contents/MacOS/X" {
+		t.Fatalf("Ancestry = %q", got)
+	}
+}

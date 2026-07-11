@@ -18,6 +18,25 @@
         "edit": true,
         "delete": true
       }
+    },
+    {
+      "id": "min-test-coverage",
+      "title": "80% minimum unit-test coverage, mockable integration",
+      "summary": "Code must reach at least 80% LOC unit-test coverage. Integration/exec code (nettop, lsof, ps, codesign, TCC/sqlite3, terminal screens, network) must be exercised through injectable mocks so tests run in GitHub CI without sudo or external tools; extract pure logic behind seams rather than shelling out in tests.",
+      "category": "development",
+      "criticality": "high",
+      "order": 20,
+      "source": "maintainer",
+      "rationale": "GitHub Actions cannot run sudo-gated CLIs or open a real terminal; shelling out in tests is non-hermetic, slow, and fails in the pipeline. Mockable seams keep the codebase both testable and CI-safe.",
+      "appliesTo": [
+        "new code",
+        "code review",
+        "CI"
+      ],
+      "protection": {
+        "edit": true,
+        "delete": true
+      }
     }
   ]
 }

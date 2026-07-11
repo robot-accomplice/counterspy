@@ -1,0 +1,128 @@
+{
+  "id": "v0-3-0-feedback",
+  "version": "0.3.0",
+  "name": "Field feedback loop",
+  "status": "in-progress",
+  "posture": "on-track",
+  "summary": "Opt-in, off-by-default feedback loop that turns the userbase into the fleet: users label findings true/false-positive and anonymous heuristic fingerprints are pushed to a write-only sink, so the real-world false-positive rate can be measured. Egress-only by design.",
+  "targetWindow": "Client complete; live measurement pending an author-operated endpoint + userbase",
+  "lastUpdated": "2026-07-09T00:00:00.000Z",
+  "updateSource": "SDD execution of the feedback-loop plan",
+  "scope": {
+    "required": [
+      {
+        "id": "feedback-package",
+        "title": "internal/feedback: anonymous capture + write-only transport",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "Minimize (deterministic anonymous scrub with public-identity gating), Capture (nonce + detail=full opt-in), local Store (fingerprint dedup + sent-tracking), three-way consent Config (off/ask/always), and a write-only Transmitter (file + http) that only ever sends.",
+        "owner": "Project maintainers",
+        "workstreamId": "feedback",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/feedback/", "TestEgressOnly"]
+      },
+      {
+        "id": "egress-only-invariant",
+        "title": "Egress-only invariant enforced in CI",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "The feedback path is push-only at three layers: the Transmitter type returns only error; the HTTP impl reads status only and discards the body without decoding; the tool never fetches config/allowlists/updates. TestEgressOnly flags any non-test file that both reads a response body and decodes — catching the two-step read-then-unmarshal idiom, not just an inline decode.",
+        "owner": "Project maintainers",
+        "workstreamId": "feedback",
+        "dependsOn": ["feedback-package"],
+        "evidence": ["TestEgressOnly (RED-then-GREEN proven)"]
+      },
+      {
+        "id": "tui-cli-labeling",
+        "title": "TUI g/b labeling + counterspy feedback + consent-gated submission",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "TUI g/b keys label findings through the Actor seam (internal/tui still imports only internal/model); cliActor persists labels under the invoking user's home (SUDO_USER-aware); end-of-session submission honors off/ask/always and never loses records on a failed send; counterspy feedback list|submit for non-TUI use.",
+        "owner": "Project maintainers",
+        "workstreamId": "feedback",
+        "dependsOn": ["feedback-package"],
+        "evidence": ["go test ./ (TestSubmit_*, TestCliActor_Label)", "TestDecouplingInvariant"]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "operate-endpoint",
+        "title": "Stand up the push-only ingest endpoint",
+        "kind": "infrastructure",
+        "status": "deferred",
+        "summary": "A ~30-line Cloudflare Worker (POST-only) + GitHub transparency mirror; the client ships against a config'd URL.",
+        "reason": "Author-owned operational prerequisite outside the code change; the client is fully buildable/testable now via the file transmitter, so infra can follow without blocking the release. Live false-positive measurement depends on it plus a userbase.",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": [
+      {
+        "id": "egress-privacy-monitor",
+        "title": "v0.4.0 privacy egress monitor",
+        "kind": "feature",
+        "summary": "Live tracking of what certified/legitimate apps actually send ('trusted, but here's what it exfiltrates — do you consent?'). A distinct subsystem (per-process network observation, destination/volume tracking, consent deltas) recorded in roadmap.json for the next milestone."
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "feedback",
+      "name": "Field feedback loop",
+      "owner": "Project maintainers",
+      "status": "in-progress",
+      "posture": "on-track",
+      "summary": "Anonymous, opt-in, egress-only feedback so the false-positive rate can be measured from the field. Client complete and reviewed; live data collection pending the endpoint + userbase.",
+      "progress": 85,
+      "itemIds": ["feedback-package", "egress-only-invariant", "tui-cli-labeling"],
+      "evidence": ["go test ./...", "go vet ./...", "architext validate"]
+    }
+  ],
+  "blockers": [
+    {
+      "id": "public-false-positive-measurement",
+      "title": "Field false-positive rate not yet measured",
+      "severity": "medium",
+      "status": "open",
+      "owner": "Project maintainers",
+      "summary": "MITIGATED by mechanism: the v0.2.0 public-readiness blocker (unmeasured false-positive rate on a single test Mac) now has a userbase-as-fleet measurement path. Fully closing it still requires operating the ingest endpoint and collecting labels from real users — so the blocker is de-risked, not yet resolved.",
+      "nextAction": "Stand up the POST-only Worker, ship v0.3.0 to a handful of users with sharing opted in, and review the aggregated false-positive fingerprints.",
+      "itemIds": [],
+      "evidenceNeeded": ["Aggregated field false-positive fingerprints", "Community allowlist of confirmed public false positives"]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "feedback-client-shipped",
+      "label": "Feedback client complete (v0.3.0-rc1)",
+      "status": "complete",
+      "targetWindow": "v0.3.0-rc1",
+      "order": 1,
+      "itemIds": ["feedback-package", "egress-only-invariant", "tui-cli-labeling"]
+    },
+    {
+      "id": "field-measurement",
+      "label": "Field false-positive rate measured",
+      "status": "planned",
+      "targetWindow": "After endpoint + userbase",
+      "order": 2,
+      "itemIds": []
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "full-gate-v030",
+      "label": "go test ./... + vet + gofmt + architext validate",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "sdd-review-trail",
+      "label": "Per-task spec+quality reviews (2 findings caught and fixed)",
+      "kind": "review",
+      "status": "complete"
+    }
+  ]
+}
