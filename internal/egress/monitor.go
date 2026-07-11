@@ -72,7 +72,8 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			Conns: conns[pid], Capabilities: m.capsOf(path),
 		})
 	}
-	// Advance per-app spark ring buffers from this tick's summed rate.
+	// Advance per-binary spark ring buffers from this tick's summed rate. Key by path to
+	// match Aggregate's grouping (so sparklines attach to the right group).
 	summed := map[string]uint64{}
 	for _, in := range insts {
 		k := in.Path

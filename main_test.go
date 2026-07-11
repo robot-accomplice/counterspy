@@ -9,7 +9,9 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -753,5 +755,87 @@ func TestRunEgressTUI_QuitsImmediately(t *testing.T) {
 	var buf bytes.Buffer
 	if code := runEgressTUI(&fakeEgressSampler{}, 0.01, &buf); code != 0 {
 		t.Fatalf("exit %d: %s", code, buf.String())
+	}
+}
+
+// codesignAll runs the per-binary signature check concurrently with a mockable cs func
+// (no shelling out), returns evidence in deterministic input order, and reports progress.
+func TestCodesignAll_ConcurrentDeterministicWithProgress(t *testing.T) {
+	paths := []string{"/a", "/b", "/c", "/d"}
+	var calls int64
+	cs := func(p string) []model.Evidence {
+		atomic.AddInt64(&calls, 1)
+		return []model.Evidence{{Subject: model.Subject{Path: p}, Kind: model.KindCodesign}}
+	}
+	var lastDone, lastTotal int64
+	ev := codesignAll(paths, cs, func(done, total int) {
+		atomic.StoreInt64(&lastDone, int64(done))
+		atomic.StoreInt64(&lastTotal, int64(total))
+	})
+	if atomic.LoadInt64(&calls) != 4 {
+		t.Fatalf("cs called %d times, want 4", calls)
+	}
+	if len(ev) != 4 || ev[0].Subject.Path != "/a" || ev[3].Subject.Path != "/d" {
+		t.Fatalf("evidence not in deterministic input order: %+v", ev)
+	}
+	if lastDone != 4 || lastTotal != 4 {
+		t.Fatalf("final progress = %d/%d, want 4/4", lastDone, lastTotal)
+	}
+}
+
+func TestCodesignAll_EmptyNoWork(t *testing.T) {
+	if ev := codesignAll(nil, func(string) []model.Evidence { t.Fatal("cs must not run for empty input"); return nil }, nil); ev != nil {
+		t.Fatalf("empty input should return nil, got %+v", ev)
+	}
+}
+
+// The startup spinner renders a progress line and clears it on stop, so the multi-second
+// code-signature phase is never a silent wait.
+func TestScanSpinner_ShowsProgressAndClears(t *testing.T) {
+	var buf bytes.Buffer
+	var done, total int64
+	atomic.StoreInt64(&total, 10)
+	atomic.StoreInt64(&done, 4)
+	stop := make(chan struct{})
+	fin := make(chan struct{})
+	go func() { scanSpinner(&buf, &done, &total, stop); close(fin) }()
+	time.Sleep(120 * time.Millisecond) // ~1 tick at 90ms
+	close(stop)
+	<-fin
+	out := buf.String()
+	if !strings.Contains(out, "code signatures") || !strings.Contains(out, "4/10") {
+		t.Fatalf("spinner should render progress, got %q", out)
+	}
+	if !strings.HasSuffix(out, "\r\033[K") {
+		t.Fatalf("spinner should clear its line on stop, got %q", out)
+	}
+}
+
+// collectWithSpinner runs the collectors (mocked here — no shelling out), surfaces gaps, and
+// works on both the tty (spinner) and non-tty paths.
+func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
+	origCol := evidenceCollectors
+	evidenceCollectors = []collectorSpec{
+		{"unused gap", func() ([]model.Evidence, error) {
+			return []model.Evidence{{Subject: model.Subject{PID: 9}, Kind: model.KindProcess}}, nil
+		}},
+		{"a gap", func() ([]model.Evidence, error) { return nil, errors.New("boom") }},
+	}
+	t.Cleanup(func() { evidenceCollectors = origCol })
+	origTerm := isTerminal
+	t.Cleanup(func() { isTerminal = origTerm })
+
+	isTerminal = func(*os.File) bool { return true } // tty → spinner path
+	ev, gaps := collectWithSpinner()
+	if len(ev) != 1 || ev[0].Subject.PID != 9 {
+		t.Fatalf("evidence wrong: %+v", ev)
+	}
+	if len(gaps) != 1 || gaps[0] != "a gap" {
+		t.Fatalf("gap not surfaced: %+v", gaps)
+	}
+
+	isTerminal = func(*os.File) bool { return false } // non-tty → plain collectAll
+	if ev2, _ := collectWithSpinner(); len(ev2) != 1 {
+		t.Fatalf("non-tty path wrong: %+v", ev2)
 	}
 }
