@@ -2,7 +2,7 @@
   "id": "v0-4-0-egress",
   "version": "0.4.0",
   "name": "Egress monitor",
-  "status": "in-progress",
+  "status": "complete",
   "posture": "on-track",
   "summary": "Live 'egress top': per-application outbound traffic (rate, destinations, cadence) through the trust/provenance lens, with an inferred exfiltration risk (capability x egress). Sudo-CLI observation (nettop + lsof), observe-only, reads no payloads.",
   "targetWindow": "v0.4.0-rc1 on the feat/egress-monitor branch; real destination names deferred to v0.4.1 (packet capture)",
@@ -71,10 +71,10 @@
       "id": "egress",
       "name": "Egress monitor",
       "owner": "Project maintainers",
-      "status": "in-progress",
+      "status": "complete",
       "posture": "on-track",
-      "summary": "Live per-app egress observation through the trust/provenance lens with inferred exfil risk. Built + coverage-hardened + CI-gated; pending final whole-branch review and tag.",
-      "progress": 90,
+      "summary": "Live per-app egress observation through the trust/provenance lens with inferred exfil risk. Built, whole-branch reviewed (2 bugs fixed), coverage-hardened, CI-gated. Released to main as the first v0.4.0 cut.",
+      "progress": 100,
       "itemIds": ["egress-pipeline", "egress-tui-report", "coverage-ci"],
       "evidence": ["go test ./... (91% overall)", "go vet ./...", "architext validate"]
     }
@@ -92,7 +92,7 @@
     {
       "id": "egress-reviewed",
       "label": "Whole-branch review + tag",
-      "status": "planned",
+      "status": "complete",
       "targetWindow": "before merge",
       "order": 2,
       "itemIds": []

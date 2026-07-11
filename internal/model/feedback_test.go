@@ -31,7 +31,9 @@ func TestFeedbackRecordJSON(t *testing.T) {
 	if strings.Contains(string(b2), "identity") || strings.Contains(string(b2), "extra") {
 		t.Fatalf("empty identity/extra must be omitted: %s", b2)
 	}
-	if Version != "v0.3.0-rc1" {
-		t.Fatalf("Version = %s, want v0.3.0-rc1", Version)
+	// Version must be a set, v-prefixed build stamp (provenance in every manifest/record).
+	// Assert the shape, not a literal, so a release bump doesn't break this test.
+	if len(Version) < 2 || Version[0] != 'v' {
+		t.Fatalf("Version = %q, want a v-prefixed version string", Version)
 	}
 }
