@@ -24,15 +24,19 @@ type Instance struct {
 // Aggregate collapses instances into one EgressGroup per application (keyed by process
 // NAME), summing rates/volume, unioning destinations/conns/capabilities, and taking the
 // worst-case trust. Each input Instance also becomes an EgressGroup.Member so the TUI can
-// render the name → instance → connection tree. `spark` maps the group key (App name) →
-// recent summed out-rate history.
+// render the binary → instance → connection tree. Grouping is by binary PATH (not name) so
+// two distinct binaries that happen to share a process name stay separate rows; the App name
+// is only the display label. `spark` maps the group key (path) → recent summed out-rate history.
 func Aggregate(insts []Instance, spark map[string][]uint64) []model.EgressGroup {
 	byKey := map[string]*model.EgressGroup{}
 	order := []string{}
 	dests := map[string]map[string]bool{}
 	caps := map[string]map[string]bool{}
 	for _, in := range insts {
-		key := in.App
+		key := in.Path
+		if key == "" {
+			key = in.App
+		}
 		g, ok := byKey[key]
 		if !ok {
 			g = &model.EgressGroup{App: in.App, Path: in.Path, Ancestry: in.Ancestry, Trust: in.Trust}
