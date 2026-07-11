@@ -178,3 +178,15 @@ by the stale cp-* picture:
   vocabulary (concern/trust/liveness), uniform-cadence cluster, documented drift-proof
   key. Closes T-4 (real exec path per PID) + #23 (active-vs-vestigial). Liveness is
   display-only (scorer untouched). PR #25 coupling flagged, not decided here (spec §8).
+
+## cp-T1 (Task 1: internal/mark vocabulary) — reviewed 2026-07-12
+Antagonist(haiku)+Audit(sonnet) read-only fan-out on the diff. CROSS-REVIEWER CONFIRMED:
+- **F-1 (crit, both, high-conf): isAppleAuthority substring-spoof.** A Gatekeeper-accepted
+  Developer-ID cert with "Apple" in the CN forged ● Apple-system. FIX-NOW (unanimous): exclude
+  the "Developer ID" leaf prefix before Apple matching. T-3's accepted-gate already blocks
+  self-signed fakes; the reachable case was a legit-notarized third-party CN — now closed.
+- **F-2 (high, Audit): spoof case untested.** FIX-NOW: added devid-apple-spoof + installer-spoof tests.
+- **DEFER (justified): multi-codesign-evidence tie-break** (both, low). Not reachable — codesign.go
+  emits exactly one codesign Evidence per finding (verified). Revisit only if that invariant changes.
+- **WON'T-FIX (justified): case-sensitive "signed"** (our collector emits canonical lowercase) and
+  **Concern default->Monitor** (safe low-noise default by design).
