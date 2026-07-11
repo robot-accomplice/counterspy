@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -106,7 +107,7 @@ func runScan(flags []string, stdout io.Writer) int {
 	var ev []model.Evidence
 	var gaps []string
 	if !dry {
-		ev, gaps = collectAll()
+		ev, gaps = collectWithSpinner()
 	}
 	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 
@@ -146,7 +147,13 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
-func collectAll() ([]model.Evidence, []string) {
+func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
+
+// collectAllWithProgress runs the collectors, then the per-binary code-signature checks
+// CONCURRENTLY (a bounded pool — each CollectCodesign spawns 3 subprocesses, so serial over
+// hundreds of binaries is the dominant startup cost). onCodesign, if non-nil, is called after
+// each binary completes so callers can render progress.
+func collectAllWithProgress(onCodesign func(done, total int)) ([]model.Evidence, []string) {
 	var ev []model.Evidence
 	var gaps []string
 	add := func(gap string, fn func() ([]model.Evidence, error)) {
@@ -164,7 +171,8 @@ func collectAll() ([]model.Evidence, []string) {
 	// Skip .plist files (they aren't signed binaries — codesigning one yields a bogus
 	// "unsigned") and anything that isn't a regular existing file.
 	seen := map[string]bool{}
-	for _, e := range append([]model.Evidence{}, ev...) {
+	var paths []string
+	for _, e := range ev {
 		p := e.Subject.Path
 		if p == "" || seen[p] || strings.HasSuffix(p, ".plist") {
 			continue
@@ -173,9 +181,85 @@ func collectAll() ([]model.Evidence, []string) {
 			continue
 		}
 		seen[p] = true
-		ev = append(ev, collect.CollectCodesign(p)...)
+		paths = append(paths, p)
 	}
+	return append(ev, codesignAll(paths, collect.CollectCodesign, onCodesign)...), gaps
+}
+
+// codesignWorkers bounds concurrency for the code-signature checks. codesign/spctl are
+// subprocess-bound (I/O), so oversubscribing the CPU count is the win.
+const codesignWorkers = 16
+
+// codesignAll runs cs over paths concurrently (bounded pool) and returns the evidence in a
+// deterministic order (by input path index). cs is injected so tests need not shell out.
+// onDone, if non-nil, fires once per completed path with the running done/total count.
+func codesignAll(paths []string, cs func(string) []model.Evidence, onDone func(done, total int)) []model.Evidence {
+	total := len(paths)
+	if total == 0 {
+		return nil
+	}
+	results := make([][]model.Evidence, total)
+	sem := make(chan struct{}, codesignWorkers)
+	var wg sync.WaitGroup
+	var done int64
+	for i := range paths {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			results[i] = cs(paths[i])
+			<-sem
+			if onDone != nil {
+				onDone(int(atomic.AddInt64(&done, 1)), total)
+			}
+		}(i)
+	}
+	wg.Wait()
+	var out []model.Evidence
+	for _, r := range results {
+		out = append(out, r...)
+	}
+	return out
+}
+
+// collectWithSpinner runs collection, animating a progress line on stderr when it is a tty
+// so the multi-second code-signature phase is never a silent wait. Piped/non-tty stays quiet.
+func collectWithSpinner() ([]model.Evidence, []string) {
+	if !isTerminal(os.Stderr) {
+		return collectAll()
+	}
+	var done, total int64
+	stop := make(chan struct{})
+	spinnerDone := make(chan struct{})
+	go func() { scanSpinner(os.Stderr, &done, &total, stop); close(spinnerDone) }()
+	ev, gaps := collectAllWithProgress(func(d, t int) {
+		atomic.StoreInt64(&done, int64(d))
+		atomic.StoreInt64(&total, int64(t))
+	})
+	close(stop)
+	<-spinnerDone // ensure the spinner cleared its line before the report prints
 	return ev, gaps
+}
+
+// scanSpinner animates a braille spinner + progress line on w until stop closes.
+func scanSpinner(w io.Writer, done, total *int64, stop <-chan struct{}) {
+	frames := []rune("⣾⣽⣻⢿⡿⣟⣯⣷")
+	t := time.NewTicker(90 * time.Millisecond)
+	defer t.Stop()
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			fmt.Fprint(w, "\r\033[K") // clear the line
+			return
+		case <-t.C:
+			d, tot := atomic.LoadInt64(done), atomic.LoadInt64(total)
+			msg := "collecting signals…"
+			if tot > 0 {
+				msg = fmt.Sprintf("checking code signatures  %d/%d", d, tot)
+			}
+			fmt.Fprintf(w, "\r\033[K%c %s", frames[i%len(frames)], msg)
+		}
+	}
 }
 
 // isTerminal reports whether f is a real character-device terminal. A package var so
