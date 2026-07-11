@@ -1,0 +1,82 @@
+version: 2
+
+project_name: counterspy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: counterspy
+    main: .
+    binary: counterspy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
+# One universal binary that runs on both Apple Silicon and Intel — no arch guessing at
+# install time. replace: true drops the per-arch builds so the release ships a single asset.
+universal_binaries:
+  - id: counterspy
+    replace: true
+
+archives:
+  - id: counterspy
+    ids: [counterspy]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  github:
+    owner: robot-accomplice
+    name: counterspy
+  draft: false
+  prerelease: auto
+  name_template: "CounterSpy {{ .Tag }}"
+  footer: |
+    ## Install
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/robot-accomplice/counterspy/main/install.sh | sh
+    ```
+    These builds are **not yet notarized** (signing is imminent). `curl | sh` and Homebrew
+    avoid Gatekeeper — the quarantine flag is only set on *browser* downloads. If you download
+    a `.tar.gz` in a browser, run `xattr -d com.apple.quarantine ./counterspy` before first use.
+
+# Homebrew tap — uncomment after creating the `robot-accomplice/homebrew-tap` repo and adding
+# a HOMEBREW_TAP_GITHUB_TOKEN secret (a PAT with contents:write on that tap repo). Left off by
+# default so a release never fails just because the tap isn't set up yet.
+# brews:
+#   - name: counterspy
+#     ids: [counterspy]
+#     repository:
+#       owner: robot-accomplice
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: "https://github.com/robot-accomplice/counterspy"
+#     description: "On-demand macOS spyware triage, reversible quarantine, and egress monitor"
+#     license: "MIT"
+#     caveats: |
+#       counterspy runs under sudo for full visibility. These builds are not yet notarized;
+#       Homebrew installs into a trusted prefix, so Gatekeeper won't block them.

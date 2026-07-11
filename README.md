@@ -17,7 +17,25 @@ quarantines suspicious items. It never deletes.
 > [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
 > on false-positive volume before treating output as verdicts — it recommends, you decide.
 
-## Build
+## Install
+
+**Prebuilt binary** — a checksum-verified universal binary (Apple Silicon + Intel), no Go toolchain needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/robot-accomplice/counterspy/main/install.sh | sh
+```
+
+**Homebrew** *(once the tap is published)*:
+
+```sh
+brew install robot-accomplice/tap/counterspy
+```
+
+**Manual** — download a `.tar.gz` from [Releases](https://github.com/robot-accomplice/counterspy/releases)
+and extract. Builds aren't notarized yet (signing is imminent) — `curl | sh` and Homebrew sidestep
+Gatekeeper, but a *browser* download needs `xattr -d com.apple.quarantine ./counterspy` before first run.
+
+## Build (from source)
 
 ```sh
 go build -o counterspy .
