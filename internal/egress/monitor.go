@@ -23,6 +23,7 @@ type Monitor struct {
 	runNettop func() []byte
 	runLsof   func() []byte
 	procs     func() map[int]*collect.Proc
+	exePaths  func() map[int]string // pid -> full executable path (spaces intact)
 	trustOf   func(path string) string
 	capsOf    func(path string) []string
 }
@@ -36,11 +37,19 @@ func New(interval float64) *Monitor {
 			b, _ := exec.Command("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
-		runLsof: func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
-		procs:   defaultProcs,
-		trustOf: defaultTrust,
-		capsOf:  defaultCaps,
+		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
+		procs:    defaultProcs,
+		exePaths: defaultExePaths,
+		trustOf:  defaultTrust,
+		capsOf:   defaultCaps,
 	}
+}
+
+// defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
+// spaces in the path are unambiguous — fixes the "Application" mislabel).
+func defaultExePaths() map[int]string {
+	b, _ := exec.Command("ps", "-axo", "pid=,comm=").Output()
+	return ParsePidPaths(b)
 }
 
 // Sample runs one observation tick and returns the current aggregated, scored groups.
@@ -48,6 +57,7 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	cur := ParseNettop(m.runNettop())
 	conns := ParseLsofConns(m.runLsof())
 	procs := m.procs()
+	exe := m.exePaths()
 
 	insts := make([]Instance, 0, len(conns))
 	// Sorted pid iteration → deterministic output order (Go map iteration is randomized),
@@ -59,7 +69,13 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	sort.Ints(pids)
 	for _, pid := range pids {
 		p := procs[pid]
-		path, app := binaryPath(p), displayName(p, pid)
+		// Prefer the real executable path from `ps -o comm` (spaces intact); fall back to
+		// the argv[0] token only when comm is unavailable for a pid.
+		path := exe[pid]
+		if path == "" {
+			path = binaryPath(p)
+		}
+		app := appName(path, pid)
 		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than
 		// attributing the process's entire historical cumulative output to a single tick.
 		var rate uint64
@@ -106,11 +122,12 @@ func binaryPath(p *collect.Proc) string {
 	return firstToken(p.Cmd)
 }
 
-func displayName(p *collect.Proc, pid int) string {
-	if p == nil {
+// appName is the display name: the executable's base name, or "pid:N" when no path resolved.
+func appName(path string, pid int) string {
+	if path == "" {
 		return "pid:" + itoa(pid)
 	}
-	return filepath.Base(firstToken(p.Cmd))
+	return filepath.Base(path)
 }
 
 func firstToken(s string) string {

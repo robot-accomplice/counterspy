@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
@@ -719,7 +720,7 @@ func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int
 			}
 		}
 	}()
-	err = tui.RunEgress(screen, mon, tick)
+	err = tui.RunEgress(screen, mon, tick, pbcopy)
 	close(stop) // ends the ticker goroutine, which closes tick, which ends RunEgress's forwarder
 	fini()
 	if err != nil {
@@ -739,6 +740,13 @@ func flagValue(flags []string, name string) string {
 		}
 	}
 	return ""
+}
+
+// pbcopy writes s to the macOS clipboard (the egress TUI's copy-path action).
+func pbcopy(s string) error {
+	c := exec.Command("pbcopy")
+	c.Stdin = strings.NewReader(s)
+	return c.Run()
 }
 
 func dim(s string) string {

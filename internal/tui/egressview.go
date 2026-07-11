@@ -24,7 +24,27 @@ const (
 	concernW = 10
 )
 
-const footerHint = "j/k ↑/↓ move · ↵/→ expand · ← collapse · s sort · / filter · p pause · Q quit"
+const footerHint = "j/k ↑/↓ move · ↵/→ expand · ← collapse · y copy path · s sort · / filter · p pause · Q quit"
+
+// middleEllipsis renders a long path as "start…/finalBinary": it keeps the leading path and
+// the final component (the binary), collapsing the middle with … so both the location and the
+// binary name stay visible instead of the tail being truncated away. Rune-aware.
+func middleEllipsis(s string, max int) string {
+	r := []rune(s)
+	if max <= 1 || len(r) <= max {
+		return s
+	}
+	base := r
+	if i := strings.LastIndexByte(s, '/'); i >= 0 {
+		base = []rune(s[i:]) // "/binary"
+	}
+	if len(base)+1 >= max { // even the final component doesn't fit; keep its tail
+		return "…" + string(base[len(base)-(max-1):])
+	}
+	head := max - len(base) - 1 // -1 for the … rune
+	return string(r[:head]) + "…" + string(base)
+}
+
 const emptyHint = "No outbound traffic observed — run with sudo for full visibility."
 
 type egressCols struct {
@@ -140,7 +160,11 @@ func egressView(m EgressModel, s tcell.Screen) {
 		status = "PAUSED"
 	}
 	statusLine := fmt.Sprintf("%d app(s) · %s", len(groups), status)
-	drawText(s, w-len(statusLine)-marginR, 0, tcell.StyleDefault.Foreground(colDim), statusLine)
+	statusColor := colDim
+	if m.Status != "" { // transient feedback (e.g. copied path) takes over the status slot
+		statusLine, statusColor = m.Status, colAccent
+	}
+	drawText(s, w-len(statusLine)-marginR, 0, tcell.StyleDefault.Foreground(statusColor), statusLine)
 
 	cols := computeCols(w)
 	headerY := 1
@@ -153,7 +177,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 
 	rows := m.visibleRows()
 	footerY := h - 1
-	detail := detailLines(rows, m.Selected)
+	detail := detailLines(rows, m.Selected, w-marginX-marginR)
 	tableBottom := footerY - 1 - len(detail)
 
 	tableTop := headerY + 1
@@ -250,7 +274,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 
 // detailLines describes the selected row: the app's full detail, or "App › pid N" for an
 // instance/connection row. Empty when there's no selectable row.
-func detailLines(rows []egressRow, selected int) []string {
+func detailLines(rows []egressRow, selected, maxW int) []string {
 	if selected < 0 || selected >= len(rows) {
 		return nil
 	}
@@ -258,6 +282,9 @@ func detailLines(rows []egressRow, selected int) []string {
 	g := row.group
 	if row.member == nil {
 		lines := []string{model.Clean(fmt.Sprintf("DETAIL — %s · %d instance(s) · %d conn(s)", g.App, g.Instances, len(g.Conns)))}
+		if g.Path != "" {
+			lines = append(lines, model.Clean(middleEllipsis(g.Path, maxW)))
+		}
 		if g.Ancestry != "" {
 			lines = append(lines, model.Clean(g.Ancestry))
 		}
@@ -272,7 +299,7 @@ func detailLines(rows []egressRow, selected int) []string {
 	mem := row.member
 	return []string{
 		model.Clean(fmt.Sprintf("%s › pid %d", g.App, mem.PID)),
-		model.Clean(mem.Path),
+		model.Clean(middleEllipsis(mem.Path, maxW)),
 		fmt.Sprintf("%s · out %s/s · in %s/s", mem.Trust, human(mem.OutRate), human(mem.InRate)),
 	}
 }

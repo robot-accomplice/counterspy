@@ -107,6 +107,29 @@ func ParseLsofConns(b []byte) map[int][]model.Conn {
 	return out
 }
 
+// ParsePidPaths parses `ps -axo pid=,comm=` — one "PID /full/executable path" per line — into
+// a pid→path map. `comm` is the executable path with NO argv, so the path (which on macOS is
+// riddled with spaces, e.g. ".../Application Support/...") is everything after the leading pid;
+// this avoids the space-splitting that collapsed spaced paths to "Application".
+func ParsePidPaths(b []byte) map[int]string {
+	out := map[int]string{}
+	for _, ln := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		ln = strings.TrimLeft(ln, " ")
+		sp := strings.IndexByte(ln, ' ')
+		if sp <= 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(ln[:sp])
+		if err != nil {
+			continue
+		}
+		if path := strings.TrimSpace(ln[sp+1:]); path != "" {
+			out[pid] = path
+		}
+	}
+	return out
+}
+
 // splitHostPort splits "IP:port" from the right so IPv6 (which contains colons) keeps its host.
 func splitHostPort(s string) (string, int) {
 	c := strings.LastIndex(s, ":")

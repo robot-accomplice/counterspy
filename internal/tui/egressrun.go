@@ -21,7 +21,9 @@ type Sampler interface {
 // quit) are always handled immediately. Each receive on `tick` triggers a sample (unless
 // paused); key events drive the pure egressUpdate. Screen is injected for tests; the caller
 // Inits/Finis it. The caller closes `tick` (or lets the process exit) to stop.
-func RunEgress(s tcell.Screen, sampler Sampler, tick <-chan struct{}) error {
+// clip copies a string to the system clipboard (satisfied by a pbcopy adapter in main); nil
+// disables the copy action. It's injected so internal/tui keeps importing only model + tcell.
+func RunEgress(s tcell.Screen, sampler Sampler, tick <-chan struct{}, clip func(string) error) error {
 	m := NewEgress()
 	var paused atomic.Bool
 	// Sample OFF the UI thread: the blocking Sample() runs here and posts its result as event
@@ -41,6 +43,15 @@ func RunEgress(s tcell.Screen, sampler Sampler, tick <-chan struct{}) error {
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventKey:
 			next, quit := egressUpdate(m, ev.Key(), ev.Rune())
+			if next.CopyReq != "" { // perform the clipboard I/O off the pure update
+				path := next.CopyReq
+				next.CopyReq = ""
+				if clip != nil && clip(path) == nil {
+					next.Status = "copied path to clipboard"
+				} else {
+					next.Status = "copy unavailable"
+				}
+			}
 			m = next
 			paused.Store(m.Paused)
 			if quit {

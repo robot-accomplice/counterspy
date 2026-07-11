@@ -29,3 +29,19 @@ func TestParseLsofConns_EstablishedOnly(t *testing.T) {
 		t.Fatal("a LISTEN socket (no ->remote) must be skipped, not counted as egress")
 	}
 }
+
+func TestParsePidPaths_SpacedPathsIntact(t *testing.T) {
+	in := []byte("  5210 /Users/analyst/Library/Application Support/Claude/claude.app/Contents/MacOS/claude\n" +
+		"  100 /usr/sbin/cupsd\n" +
+		"garbage-no-space\n")
+	m := ParsePidPaths(in)
+	if m[5210] != "/Users/analyst/Library/Application Support/Claude/claude.app/Contents/MacOS/claude" {
+		t.Fatalf("spaced path must stay whole, got %q", m[5210])
+	}
+	if m[100] != "/usr/sbin/cupsd" {
+		t.Fatalf("plain path wrong, got %q", m[100])
+	}
+	if len(m) != 2 {
+		t.Fatalf("malformed line must be skipped; got %d entries: %v", len(m), m)
+	}
+}
