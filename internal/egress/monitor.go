@@ -75,11 +75,7 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	// Advance per-app spark ring buffers from this tick's summed rate.
 	summed := map[string]uint64{}
 	for _, in := range insts {
-		k := in.Path
-		if k == "" {
-			k = in.App
-		}
-		summed[k] += in.OutRate
+		summed[in.App] += in.OutRate
 	}
 	for k, r := range summed {
 		s := append(m.spark[k], r)

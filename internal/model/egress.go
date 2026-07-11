@@ -38,6 +38,18 @@ func (l ConcernLevel) String() string {
 	}
 }
 
+// EgressInstance is one process (PID) within an EgressGroup — the middle tier of the
+// name → instance → connection tree.
+type EgressInstance struct {
+	PID      int
+	Path     string
+	Trust    string
+	OutRate  uint64
+	InRate   uint64
+	OutTotal uint64
+	Conns    []Conn
+}
+
 // EgressGroup aggregates ALL instances (PIDs) and connections (ports/protocols/destinations)
 // of one application into a single collapsible row.
 type EgressGroup struct {
@@ -46,6 +58,7 @@ type EgressGroup struct {
 	Ancestry     string
 	Trust        string // "apple" | "notarized" | "signed" | "unsigned" | "unknown"
 	Instances    int
+	Members      []EgressInstance
 	OutRate      uint64
 	InRate       uint64
 	OutTotal     uint64
