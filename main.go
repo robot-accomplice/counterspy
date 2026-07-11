@@ -2,19 +2,23 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"counterspy/internal/act"
 	"counterspy/internal/collect"
+	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
@@ -27,10 +31,16 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
 
 func run(args []string, stdout io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stdout, "usage: counterspy scan [--json] [--interactive] | counterspy restore <manifest.json>")
+		usage(stdout)
 		return 2
 	}
 	switch args[0] {
+	case "help", "-h", "--help", "-?":
+		usage(stdout) // explicit help request is success
+		return 0
+	case "version", "--version":
+		fmt.Fprintln(stdout, "counterspy "+model.Version)
+		return 0
 	case "scan":
 		return runScan(args[1:], stdout)
 	case "tui":
@@ -47,10 +57,39 @@ func run(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "restored from", args[1])
 		fmt.Fprintln(stdout, dim("  disabled launch items reload at next login (or were re-enabled now)."))
 		return 0
+	case "feedback":
+		return runFeedback(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
+		fmt.Fprintln(stdout)
+		usage(stdout)
 		return 2
 	}
+}
+
+// usage prints the full help: the tool banner + version, every command with its flags, and
+// how to choose the plain CLI (scan) vs the interactive UI (tui).
+func usage(w io.Writer) {
+	fmt.Fprintf(w, `CounterSpy %s — macOS spyware triage 🕵️
+Scans for spyware-like activity, ranks findings, and reversibly quarantines on approval (never deletes).
+
+Usage:
+  counterspy <command> [flags]
+
+Commands:
+  scan                     Print a ranked report to the terminal (the plain CLI)
+      --json                 emit machine-readable JSON instead of the report
+      --interactive          after the report, prompt to quarantine each finding
+  tui                      Open the interactive terminal UI for triage (the visual mode)
+      --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+  restore <manifest.json>  Undo a quarantine from its manifest
+  feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
+  version                  Print the version (also --version)
+  help                     Show this help (also -h, --help, -?)
+
+Run under sudo for full visibility (the TCC privacy-grant signal needs it).
+Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy tui
+`, model.Version)
 }
 
 func runScan(flags []string, stdout io.Writer) int {
@@ -248,6 +287,11 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
 		return 1
 	}
+	// finiOnce guarantees the terminal is restored exactly once no matter which path
+	// (signal, panic, error, or success) triggers it first.
+	var finiOnce sync.Once
+	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
+
 	// Restore the terminal on an EXTERNAL kill (SIGINT/TERM/HUP — e.g. `kill`, SSH drop)
 	// which bypasses defers. SIGKILL can never be caught (true of any TUI) (ABORT-TUI
 	// Worst-Case-Customer NO-GO).
@@ -255,7 +299,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		<-sigCh
-		screen.Fini()
+		fini()
 		os.Exit(130)
 	}()
 
@@ -268,11 +312,17 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 			code = 1
 		}
 	}()
-	defer screen.Fini()
+	defer fini()
 
 	home, _ := os.UserHomeDir()
 	ts := time.Now().UTC().Format("2006-01-02T150405Z")
-	actor := &cliActor{root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts, readOnly: from != ""}
+	cfgPath, storePath := feedbackPaths()
+	cfg := feedback.LoadConfig(cfgPath)
+	store := feedback.NewStore(storePath)
+	actor := &cliActor{
+		root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts,
+		readOnly: from != "", store: store, detail: cfg.Detail,
+	}
 	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
 	// the confirm modal without importing act (keeps internal/tui → model only).
 	for i := range assessments {
@@ -284,6 +334,8 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "tui:", err)
 		return 1
 	}
+	fini() // restore the terminal BEFORE the feedback prompt/messages (stdin cooked, stdout visible)
+	_ = submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), cfg.Share == feedback.ShareAsk, os.Stdin, stdout)
 	return 0
 }
 
@@ -320,6 +372,8 @@ func loadSnapshot(path string) ([]model.Assessment, error) {
 type cliActor struct {
 	root, ts string
 	readOnly bool
+	store    *feedback.Store
+	detail   feedback.Detail
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
@@ -345,6 +399,110 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 }
 
 func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
+
+// Label records a TP/FP judgement to the local store (no network — submission is a
+// separate, consent-gated step). A read-only snapshot may still be labeled.
+func (c *cliActor) Label(a model.Assessment, falsePositive bool) error {
+	if c.store == nil {
+		return nil
+	}
+	label := model.LabelTruePositive
+	if falsePositive {
+		label = model.LabelFalsePositive
+	}
+	return c.store.Add(feedback.Capture(a, label, c.detail, feedback.NewNonce()))
+}
+
+// invokingUserHome resolves the HOME of the human who ran the tool, not root's — the tool
+// runs under sudo, so os.UserHomeDir() would point at /var/root. Falls back to os.UserHomeDir.
+func invokingUserHome() string {
+	if su := os.Getenv("SUDO_USER"); su != "" {
+		if u, err := user.Lookup(su); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+	}
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+// feedbackPaths returns the config and local-store paths under the invoking user's home.
+func feedbackPaths() (configPath, storePath string) {
+	base := filepath.Join(invokingUserHome(), ".config", "counterspy")
+	return filepath.Join(base, "feedback.json"), filepath.Join(base, "feedback-store.json")
+}
+
+// submitFeedback pushes pending labels according to the consent level. off → nothing;
+// ask → show the exact records and require an explicit yes; always → best-effort send.
+// A failed send keeps the records for retry (triage never blocks on telemetry).
+func submitFeedback(cfg feedback.Config, store *feedback.Store, tx feedback.Transmitter, ask bool, in io.Reader, out io.Writer) error {
+	if cfg.Share == feedback.ShareOff {
+		return nil
+	}
+	pending, err := store.Pending()
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	if ask {
+		fmt.Fprintf(out, "\n  Share %d anonymized feedback record(s)? The exact bytes:\n", len(pending))
+		b, _ := json.MarshalIndent(pending, "  ", "  ")
+		fmt.Fprintf(out, "  %s\n  send? [y/N] ", string(b))
+		line, _ := bufio.NewReader(in).ReadString('\n')
+		if strings.TrimSpace(strings.ToLower(line)) != "y" {
+			fmt.Fprintln(out, "  not shared (kept locally).")
+			return nil
+		}
+	}
+	if err := tx.Send(context.Background(), pending); err != nil {
+		fmt.Fprintln(out, "  feedback not sent (kept for retry):", err)
+		return err
+	}
+	fmt.Fprintf(out, "  shared %d record(s). Thank you.\n", len(pending))
+	return store.MarkSent(pending)
+}
+
+// chooseTransmitter uses the configured HTTP endpoint when set, else falls back to a local
+// export file (the manual-share path) so labels are never lost when no endpoint is configured.
+func chooseTransmitter(cfg feedback.Config, storeDir string) feedback.Transmitter {
+	if cfg.Endpoint != "" {
+		return &feedback.HTTPTransmitter{URL: cfg.Endpoint}
+	}
+	return &feedback.FileTransmitter{Path: filepath.Join(storeDir, "feedback-export.jsonl")}
+}
+
+// runFeedback is the non-TUI surface: list queued labels or force a submit.
+func runFeedback(args []string, stdout io.Writer) int {
+	cfgPath, storePath := feedbackPaths()
+	cfg := feedback.LoadConfig(cfgPath)
+	store := feedback.NewStore(storePath)
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "list":
+		p, err := store.Pending()
+		if err != nil {
+			fmt.Fprintln(stdout, "feedback:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "%d pending feedback record(s); sharing is %q.\n", len(p), cfg.Share)
+		b, _ := json.MarshalIndent(p, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	case "submit":
+		if cfg.Share == feedback.ShareOff {
+			fmt.Fprintln(stdout, "sharing is off — set share to \"ask\" or \"always\" in", cfgPath)
+			return 0
+		}
+		if err := submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), true, os.Stdin, stdout); err != nil {
+			return 1
+		}
+		return 0
+	default:
+		fmt.Fprintln(stdout, "usage: counterspy feedback [list|submit]")
+		return 2
+	}
+}
 
 func flagValue(flags []string, name string) string {
 	for i, f := range flags {

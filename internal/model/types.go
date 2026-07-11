@@ -9,7 +9,7 @@ import (
 
 // Version is stamped into every manifest so an incident can be traced to the exact
 // build (weights, allowlist, rules) that produced a quarantine (ABORT C4).
-const Version = "v0.1.0-rc3"
+const Version = "v0.3.0-rc1"
 
 // Clean strips control/escape characters from attacker-influenced strings (labels,
 // paths, argv) before they reach a terminal — so a crafted value can't inject ANSI or
@@ -147,4 +147,32 @@ type Assessment struct {
 	Verdict        string
 	Category       string
 	Recommendation Recommendation
+}
+
+// FeedbackSchema is the FeedbackRecord wire-schema version (independent of tool Version).
+const FeedbackSchema = "1"
+
+// Feedback labels: the user's verdict on a finding.
+const (
+	LabelFalsePositive = "false_positive" // the tool flagged legitimate software
+	LabelTruePositive  = "true_positive"  // the tool flagged correctly
+)
+
+// FeedbackRecord is an intrinsically-anonymous field report: a finding's heuristic
+// fingerprint plus the user's label. It carries no raw path, username, hostname, or
+// (by default) private identifier — anonymity lives in the data, not the transport.
+type FeedbackRecord struct {
+	Schema         string            `json:"schema"`
+	Tool           string            `json:"tool"`  // Version — weights/allowlist provenance
+	Nonce          string            `json:"nonce"` // per-submission, non-correlatable
+	Label          string            `json:"label"`
+	Recommendation string            `json:"recommendation"`
+	Category       string            `json:"category"`
+	ScoreBand      string            `json:"score_band"` // banded, not exact
+	Signals        []string          `json:"signals"`
+	Codesign       string            `json:"codesign"`
+	PathClass      string            `json:"path_class"` // class, never the path
+	Tripwire       bool              `json:"tripwire"`
+	Identity       string            `json:"identity,omitempty"` // public, or consented private
+	Extra          map[string]string `json:"extra,omitempty"`    // detail=full only
 }

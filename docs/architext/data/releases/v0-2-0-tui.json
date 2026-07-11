@@ -2,7 +2,7 @@
   "id": "v0-2-0-tui",
   "version": "0.2.0",
   "name": "Interactive TUI triage face",
-  "status": "in-progress",
+  "status": "complete",
   "posture": "on-track",
   "summary": "Add an interactive tcell TUI over the existing three-phase pipeline: live scan or read-only --from snapshot, master-detail triage, consented quarantine and restore through the same hardened act path. ABORT-gated at rc3.",
   "targetWindow": "Personal/beta now; public publish gated on field false-positive measurement",

@@ -1,6 +1,27 @@
 {
-  "currentReleaseId": "v0-2-0-tui",
+  "currentReleaseId": "v0-3-0-feedback",
   "releases": [
+    {
+      "id": "v0-3-0-feedback",
+      "version": "0.3.0",
+      "name": "Field feedback loop",
+      "status": "in-progress",
+      "posture": "on-track",
+      "targetWindow": "Client complete; live measurement pending an author-operated endpoint + userbase",
+      "lastUpdated": "2026-07-09T00:00:00.000Z",
+      "summary": "Opt-in, off-by-default feedback loop that turns the userbase into the fleet: users label findings true/false-positive and anonymous heuristic fingerprints are pushed to a write-only sink, so the real-world false-positive rate can be measured. Egress-only by design.",
+      "counts": {
+        "features": 3,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 1,
+        "complete": 3,
+        "inProgress": 0,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-3-0-feedback.json"
+    },
     {
       "id": "initial-architext-buildout",
       "version": "0.1.0",
@@ -26,7 +47,7 @@
       "id": "v0-2-0-tui",
       "version": "0.2.0",
       "name": "Interactive TUI triage face",
-      "status": "in-progress",
+      "status": "complete",
       "posture": "on-track",
       "targetWindow": "Personal/beta now; public publish gated on field false-positive measurement",
       "lastUpdated": "2026-07-09T00:00:00.000Z",

@@ -6,10 +6,12 @@ import (
 	"counterspy/internal/model"
 )
 
-// Actor performs the mutating effects (satisfied by internal/act via a main adapter).
+// Actor performs the effects the pure loop requests (satisfied by internal/act +
+// internal/feedback via a main adapter). Label records a TP/FP judgement locally.
 type Actor interface {
 	Quarantine(a model.Assessment) (string, error)
 	Restore(manifest string) error
+	Label(a model.Assessment, falsePositive bool) error
 }
 
 // Run drives the event loop until quit. The screen is injected so tests can pass a
@@ -61,6 +63,17 @@ func Run(s tcell.Screen, m Model, actor Actor) error {
 				} else {
 					m.Toast = "restored (reloads at next login)"
 				}
+			case "labelFP", "labelTP":
+				fp := c.Op == "labelFP"
+				if err := actor.Label(c.A, fp); err != nil {
+					m.Toast = "could not record label: " + err.Error()
+					break
+				}
+				verdict := "correctly flagged"
+				if fp {
+					verdict = "false positive"
+				}
+				m.Toast = "marked " + c.A.Subject.Display() + " as " + verdict
 			}
 		}
 		view(m, s)
