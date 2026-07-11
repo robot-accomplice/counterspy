@@ -16,15 +16,20 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
 	}
 	m.procs = func() map[int]*collect.Proc {
-		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/Users/jon/.hidden/daemon"}}
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/Users/jon/.hidden/daemon serve"}}
+	}
+	// exePaths resolves the REAL executable path (spaces intact) — the fix for the
+	// "Application" mislabel. A spaced path must yield its true base name, not "Application".
+	m.exePaths = func() map[int]string {
+		return map[int]string{4821: "/Users/jon/Library/Application Support/Foo/foo"}
 	}
 	m.trustOf = func(path string) string { return "unsigned" }
 	m.capsOf = func(path string) []string { return []string{"screen", "keystrokes"} }
 
 	m.Sample()           // first tick: establishes the baseline, rate 0
 	groups := m.Sample() // second tick: cur==prev cumulative here, so rate 0 — assert structure
-	if len(groups) != 1 || groups[0].App == "" {
-		t.Fatalf("expected one group, got %+v", groups)
+	if len(groups) != 1 || groups[0].App != "foo" {
+		t.Fatalf("expected one group named 'foo' (spaced path resolved), got %+v", groups)
 	}
 	g := groups[0]
 	if g.Trust != "unsigned" || !g.Background {
@@ -58,6 +63,7 @@ func TestMonitor_DeterministicOrderAndFirstSightRateZero(t *testing.T) {
 		m.procs = func() map[int]*collect.Proc {
 			return map[int]*collect.Proc{100: {PID: 100, Cmd: "/x/a"}, 200: {PID: 200, Cmd: "/x/b"}}
 		}
+		m.exePaths = func() map[int]string { return map[int]string{100: "/x/a", 200: "/x/b"} }
 		m.trustOf = func(string) string { return "unsigned" }
 		m.capsOf = func(string) []string { return nil }
 		return m

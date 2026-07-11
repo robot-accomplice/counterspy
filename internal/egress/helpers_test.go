@@ -159,19 +159,20 @@ func TestSplitHostPort(t *testing.T) {
 	}
 }
 
-func TestBinaryPathDisplayNameFirstToken(t *testing.T) {
+func TestBinaryPathAppNameFirstToken(t *testing.T) {
 	if got := binaryPath(nil); got != "" {
 		t.Fatalf("binaryPath(nil) = %q, want empty", got)
 	}
-	if got := displayName(nil, 42); got != "pid:42" {
-		t.Fatalf("displayName(nil, 42) = %q, want pid:42", got)
+	if got := appName("", 42); got != "pid:42" {
+		t.Fatalf("appName(\"\", 42) = %q, want pid:42", got)
 	}
 	p := &collect.Proc{Cmd: "/usr/bin/foo --flag arg"}
 	if got := binaryPath(p); got != "/usr/bin/foo" {
 		t.Fatalf("binaryPath(cmd with args) = %q, want /usr/bin/foo", got)
 	}
-	if got := displayName(p, 1); got != "foo" {
-		t.Fatalf("displayName(cmd with args) = %q, want foo", got)
+	// appName resolves from the real executable path, so a spaced path keeps its true base.
+	if got := appName("/Users/analyst/Library/Application Support/Claude/claude.app/Contents/MacOS/claude", 1); got != "claude" {
+		t.Fatalf("appName(spaced path) = %q, want claude", got)
 	}
 	if got := firstToken("/usr/bin/nospace"); got != "/usr/bin/nospace" {
 		t.Fatalf("firstToken(no space) = %q, want unchanged", got)

@@ -41,7 +41,7 @@ func TestRunEgress_RendersAndQuits(t *testing.T) {
 	// in a goroutine and give it a moment to land before quitting — otherwise the injected 'Q'
 	// could win the race and quit before the sample is ever applied.
 	done := make(chan error, 1)
-	go func() { done <- RunEgress(s, sampler, tick) }()
+	go func() { done <- RunEgress(s, sampler, tick, nil) }()
 	time.Sleep(30 * time.Millisecond)
 	s.InjectKey(tcell.KeyRune, 'Q', tcell.ModNone)
 
@@ -91,7 +91,7 @@ func TestRunEgress_ResamplesOnUnpausedTick(t *testing.T) {
 	sampler := &countingSampler{groups: []model.EgressGroup{eg("x", model.Low, 10)}}
 
 	done := make(chan error, 1)
-	go func() { done <- RunEgress(s, sampler, tick) }()
+	go func() { done <- RunEgress(s, sampler, tick, nil) }()
 
 	tick <- struct{}{}
 	time.Sleep(30 * time.Millisecond) // give the loop time to process the tick before quitting
@@ -120,7 +120,7 @@ func TestRunEgress_PausedSkipsResample(t *testing.T) {
 	sampler := &countingSampler{groups: []model.EgressGroup{eg("x", model.Low, 10)}}
 
 	done := make(chan error, 1)
-	go func() { done <- RunEgress(s, sampler, tick) }()
+	go func() { done <- RunEgress(s, sampler, tick, nil) }()
 
 	s.InjectKey(tcell.KeyRune, 'p', tcell.ModNone) // pause
 	time.Sleep(30 * time.Millisecond)
@@ -162,7 +162,7 @@ func TestRunEgress_QuitsWhileSampleBlocks(t *testing.T) {
 	bs := &blockingSampler{release: make(chan struct{})}
 	s.InjectKey(tcell.KeyRune, 'Q', tcell.ModNone)
 	done := make(chan error, 1)
-	go func() { done <- RunEgress(s, bs, make(chan struct{})) }()
+	go func() { done <- RunEgress(s, bs, make(chan struct{}), nil) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -184,7 +184,7 @@ func TestRunEgress_NilEventOnScreenFini(t *testing.T) {
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("x", model.Low, 10)}}
 
 	done := make(chan error, 1)
-	go func() { done <- RunEgress(s, sampler, tick) }()
+	go func() { done <- RunEgress(s, sampler, tick, nil) }()
 
 	time.Sleep(20 * time.Millisecond)
 	s.Fini()

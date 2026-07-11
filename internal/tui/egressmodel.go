@@ -36,9 +36,24 @@ type EgressModel struct {
 	Sort     egressSort
 	Filter   string
 	Paused   bool
+	Status   string // transient feedback line (e.g. "copied path"); cleared on the next key
+	CopyReq  string // full path the run loop should copy to the clipboard, then clear
 
 	expanded    map[string]bool // app name -> expanded (shows instance rows)
 	expandedPID map[int]bool    // pid -> expanded (shows connection rows)
+}
+
+// selectedPath returns the full executable path of the selected row (the instance's path for
+// an instance/conn row, else the group's binary path), or "" if there's no selectable row.
+func (m EgressModel) selectedPath(rows []egressRow) string {
+	if m.Selected < 0 || m.Selected >= len(rows) {
+		return ""
+	}
+	row := rows[m.Selected]
+	if row.member != nil {
+		return row.member.Path
+	}
+	return row.group.Path
 }
 
 func NewEgress() EgressModel {
@@ -107,6 +122,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 	if key == tcell.KeyCtrlC {
 		return m, true
 	}
+	m.Status = "" // any key clears the previous transient status
 	rows := m.visibleRows()
 	switch key {
 	case tcell.KeyDown:
@@ -127,6 +143,10 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			m.Sort = (m.Sort + 1) % 4
 		case 'p':
 			m.Paused = !m.Paused
+		case 'y', 'c':
+			if path := m.selectedPath(rows); path != "" {
+				m.CopyReq = path // the run loop performs the clipboard I/O and sets Status
+			}
 		case 'Q':
 			return m, true
 		}
