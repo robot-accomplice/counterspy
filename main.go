@@ -393,7 +393,9 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		}
 		assessments = as
 	} else {
-		ev, g := collectAll()
+		// Show the progress spinner while collecting (before the alt-screen opens) so the
+		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
+		ev, g := collectWithSpinner()
 		assessments = filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 		gaps = g
 	}
