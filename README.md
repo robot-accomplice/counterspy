@@ -51,8 +51,10 @@ Gatekeeper, but a *browser* download needs `xattr -d com.apple.quarantine ./coun
 go build -o counterspy .
 ```
 
-Requires **Go 1.26+**. No third-party dependencies beyond [`tcell`](https://github.com/gdamore/tcell)
-(vendored) for the terminal UI.
+Requires **Go 1.26+** and the macOS SDK (cgo — code-signature checks call
+`Security.framework` in-process). No third-party dependencies beyond
+[`tcell`](https://github.com/gdamore/tcell) (vendored) for the terminal UI; everything else
+is the Go standard library and system frameworks.
 
 ## Use
 

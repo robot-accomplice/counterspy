@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Code-signature checks call Security.framework via cgo; the macOS runner has clang, so
+  # this compiles and the darwin integration test runs without sudo or external tools.
+  CGO_ENABLED: "1"
+
 jobs:
   build-test:
     # macOS runner: codesign/lsof/ps/nettop exist here, and the suite is mock-driven, so
