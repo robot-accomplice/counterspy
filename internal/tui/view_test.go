@@ -6,8 +6,42 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
+
+func TestView_RendersMarkCluster(t *testing.T) {
+	s := simScreen(t)
+	a := model.Assessment{
+		Finding:        model.Finding{Subject: model.Subject{Path: "/tmp/xmrig", Label: "xmrig"}, Evidence: []model.Evidence{{Kind: model.KindCodesign, Facts: map[string]string{"signed": "false"}}}},
+		Recommendation: model.RecQuarantine,
+		Category:       "backdoor",
+	}
+	m := New([]model.Assessment{a}, nil)
+	m.Liveness = map[string]mark.Liveness{"path:/tmp/xmrig": {RunState: mark.GlyphActive, Socket: mark.GlyphSocket}}
+	view(m, s)
+	s.Show()
+	out := screenText(s)
+	for _, g := range []string{"⚑", "○", "▸", "↔", "xmrig"} {
+		if !strings.Contains(out, g) {
+			t.Errorf("expected %q on the finding row:\n%s", g, out)
+		}
+	}
+}
+
+func TestView_HelpShowsMarkLegend(t *testing.T) {
+	s := simScreen(t)
+	m := New([]model.Assessment{mk("x", model.RecInvestigate, 6)}, nil)
+	m.Focus = focusHelp
+	view(m, s)
+	s.Show()
+	out := screenText(s)
+	for _, want := range []string{"Marks", "unsigned", "vestigial", "revoked"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help overlay should list the mark legend (missing %q):\n%s", want, out)
+		}
+	}
+}
 
 func screenText(s tcell.SimulationScreen) string {
 	cells, w, h := s.GetContents()

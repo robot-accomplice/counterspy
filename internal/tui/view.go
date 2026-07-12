@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
 
@@ -42,9 +43,9 @@ func view(m Model, s tcell.Screen) {
 		drawText(s, x+2, 0, def.Foreground(colWarn), "TRIAGE ONLY — snapshot, quarantine disabled")
 	}
 	// Counts, chained so widths never collide.
-	x = drawText(s, 2, 1, def.Foreground(colQuarantine), fmt.Sprintf("● %d Quarantine", q))
-	x = drawText(s, x+3, 1, def.Foreground(colInvestigate), fmt.Sprintf("▲ %d Investigate", inv))
-	drawText(s, x+3, 1, def.Foreground(colMonitor), fmt.Sprintf("· %d Monitor", mon))
+	x = drawText(s, 2, 1, def.Foreground(colQuarantine), fmt.Sprintf("%c %d Quarantine", mark.GlyphQuarantine, q))
+	x = drawText(s, x+3, 1, def.Foreground(colInvestigate), fmt.Sprintf("%c %d Investigate", mark.GlyphInvestigate, inv))
+	drawText(s, x+3, 1, def.Foreground(colMonitor), fmt.Sprintf("%c %d Monitor", mark.GlyphMonitor, mon))
 
 	row := 2
 	for _, g := range m.Gaps {
@@ -83,7 +84,7 @@ func view(m Model, s tcell.Screen) {
 		scrollTop = m.Selected - visibleRows + 1
 	}
 	for i := scrollTop; i < len(vis) && i < scrollTop+visibleRows; i++ {
-		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i])
+		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i], m.Liveness[vis[i].Subject.Key()])
 	}
 	if len(vis) == 0 {
 		if !m.ShowMonitor && mon > 0 {
@@ -113,7 +114,7 @@ func view(m Model, s tcell.Screen) {
 }
 
 // drawListRow renders one finding row within the left pane [0, split).
-func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment) {
+func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment, lv mark.Liveness) {
 	fg := tierColor(a.Recommendation)
 	if done {
 		fg = colDim
@@ -126,14 +127,16 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 		}
 		s.SetContent(0, y, '▎', nil, tcell.StyleDefault.Foreground(colSelBar).Background(colSelBg))
 	}
-	rec := strings.ToUpper(string(a.Recommendation))
+	// The four-slot cluster leads the row; its concern glyph + tier color carry the
+	// recommendation, so no separate REC word is needed (dense-cluster design §3).
+	cluster := mark.Cluster(mark.Concern(a.Recommendation), mark.Trust(a.Finding), lv)
 	scoreStr := fmt.Sprintf("%d", a.Score)
-	drawText(s, 2, y, st.Bold(!done), rec)
+	x := drawText(s, 2, y, st.Bold(!done), cluster)
 	name := a.Subject.Display()
 	if done {
 		name = "✓ " + name
 	}
-	nameX := 2 + 12
+	nameX := x + 1
 	nameW := split - 2 - nameX - len(scoreStr)
 	drawText(s, nameX, y, st, truncate(name, nameW))
 	drawText(s, split-2-len(scoreStr), y, st, scoreStr)
@@ -303,14 +306,17 @@ func drawHelp(s tcell.Screen) {
 		"",
 		"--from <json> loads a snapshot as READ-ONLY triage",
 		"(quarantine is disabled; run a live scan to act)",
+		"",
+		"Marks",
 	}
+	rows = append(rows, mark.LegendCompact()...) // drift-proof: derived from mark.Legend()
 	w, h := s.Size()
-	bw, bh := 52, len(rows)+2
+	bw, bh := 60, len(rows)+2
 	x0, y0 := (w-bw)/2, (h-bh)/2
 	box := drawBox(s, x0, y0, bw, bh)
 	for i, r := range rows {
 		st := box
-		if i == 0 {
+		if r == "Keys" || r == "Marks" {
 			st = box.Foreground(colAccent).Bold(true)
 		}
 		drawText(s, x0+2, y0+1+i, st, truncate(r, bw-4))

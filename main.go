@@ -468,6 +468,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		assessments[i].Actions = plannedActions(assessments[i].Finding)
 	}
 	m := tui.New(assessments, gaps)
+	m.Liveness = livenessFor(assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 	if err := tui.Run(screen, m, actor); err != nil {
 		fmt.Fprintln(stdout, "tui:", err)

@@ -173,28 +173,53 @@ func pad(g rune) string {
 }
 
 // LegendRow documents one glyph. Legend is the single source of truth rendered
-// by both the in-app legend and the README key (see legend_doc_test.go).
+// by the in-app legend (CLI footer + TUI overlay) and the README key
+// (see legend_doc_test.go). Meaning is the full text; Short is the compact label
+// for space-tight surfaces like the TUI overlay.
 type LegendRow struct {
 	Glyph   rune
 	Axis    string
 	Meaning string
+	Short   string
 }
 
 // Legend returns the canonical, ordered vocabulary key.
 func Legend() []LegendRow {
 	return []LegendRow{
-		{GlyphQuarantine, "concern", "quarantine"},
-		{GlyphInvestigate, "concern", "investigate"},
-		{GlyphMonitor, "concern", "monitor"},
-		{GlyphApple, "trust", "Apple system code"},
-		{GlyphNotarized, "trust", "notarized (Developer ID, accepted)"},
-		{GlyphSigned, "trust", "signed, not notarized"},
-		{GlyphUnsigned, "trust", "unsigned"},
-		{GlyphRevoked, "trust", "revoked certificate"},
-		{GlyphActive, "liveness", "running"},
-		{GlyphVestigial, "liveness", "vestigial (installed, not running)"},
-		{GlyphSocket, "liveness", "live network socket"},
+		{GlyphQuarantine, "concern", "quarantine", "quarantine"},
+		{GlyphInvestigate, "concern", "investigate", "investigate"},
+		{GlyphMonitor, "concern", "monitor", "monitor"},
+		{GlyphApple, "trust", "Apple system code", "Apple"},
+		{GlyphNotarized, "trust", "notarized (Developer ID, accepted)", "notarized"},
+		{GlyphSigned, "trust", "signed, not notarized", "signed"},
+		{GlyphUnsigned, "trust", "unsigned", "unsigned"},
+		{GlyphRevoked, "trust", "revoked certificate", "revoked"},
+		{GlyphActive, "liveness", "running", "running"},
+		{GlyphVestigial, "liveness", "vestigial (installed, not running)", "vestigial"},
+		{GlyphSocket, "liveness", "live network socket", "socket"},
 	}
+}
+
+// LegendCompact returns the vocabulary grouped into one line per axis (concern,
+// trust, liveness) using Short labels — for the space-tight TUI ? overlay. Derived
+// from Legend() so it can never drift from the marks the app actually emits.
+func LegendCompact() []string {
+	var axes []string
+	byAxis := map[string]string{}
+	for _, r := range Legend() {
+		if _, seen := byAxis[r.Axis]; !seen {
+			axes = append(axes, r.Axis)
+		}
+		if byAxis[r.Axis] != "" {
+			byAxis[r.Axis] += "  "
+		}
+		byAxis[r.Axis] += string(r.Glyph) + " " + r.Short
+	}
+	lines := make([]string, 0, len(axes))
+	for _, ax := range axes {
+		lines = append(lines, byAxis[ax])
+	}
+	return lines
 }
 
 // LegendLine is a compact one-line key for the CLI footer.
