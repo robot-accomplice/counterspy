@@ -37,7 +37,10 @@ static int native_sig(const char* path, char* auth, int authLen, int* notarized)
 		// (no syspolicyd, no network) so ◆ notarized can be told apart from ◇ merely-signed.
 		SecRequirementRef notReq = NULL;
 		if (SecRequirementCreateWithString(CFSTR("notarized"), kSecCSDefaultFlags, &notReq) == errSecSuccess && notReq) {
-			if (SecStaticCodeCheckValidityWithErrors(code, kSecCSDoNotValidateResources, notReq, NULL) == errSecSuccess) {
+			// kSecCSNoNetworkAccess forbids any network fetch, so this only accepts a
+			// STAPLED ticket — enforcing "offline" by construction (an un-stapled binary
+			// reads not-notarized → ◇, never a slow online lookup). Keeps #25's perf goal.
+			if (SecStaticCodeCheckValidityWithErrors(code, kSecCSDoNotValidateResources | kSecCSNoNetworkAccess, notReq, NULL) == errSecSuccess) {
 				*notarized = 1;
 			}
 			CFRelease(notReq);
