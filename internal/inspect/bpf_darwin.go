@@ -9,6 +9,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ifreq mirrors the darwin C `struct ifreq` (a 16-byte interface name followed by a 16-byte
+// ifr_ifru union) as passed to the BIOCSETIF ioctl. Only the name is set here.
+type ifreq struct {
+	name [16]byte
+	_    [16]byte // ifr_ifru union — unused for BIOCSETIF
+}
+
+// Compile-time guard: a raw ioctl reads the kernel struct by layout, so a silent size/layout drift
+// would corrupt BIOCSETIF undetectably. Both constants are non-negative ONLY when Sizeof == 32.
+const _ = unsafe.Sizeof(ifreq{}) - 32
+const _ = 32 - unsafe.Sizeof(ifreq{})
+
 // bpfCapture reads IP packets from a /dev/bpf device bound to an interface. This is the untested
 // I/O edge; the record framing + link-layer strip it relies on are pure (stripLinkLayer is
 // unit-tested; parseBPFRecords is standard bpf_hdr walking).
@@ -43,10 +55,7 @@ func openLiveCapture(iface string) (PacketSource, error) {
 	}
 	// Bind the BPF device to the interface via BIOCSETIF (ifreq with the name). x/sys/unix has
 	// no darwin helper, so issue the ioctl directly.
-	var ifr struct {
-		name [16]byte
-		_    [16]byte // ifr_ifru union — unused for BIOCSETIF
-	}
+	var ifr ifreq
 	copy(ifr.name[:15], iface)
 	if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSETIF), uintptr(unsafe.Pointer(&ifr))); e != 0 {
 		unix.Close(fd)

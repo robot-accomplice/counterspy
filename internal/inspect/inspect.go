@@ -31,6 +31,7 @@ type Result struct {
 	Tier     string // which tier yielded the result: "metadata" | "plaintext" | "none"
 	Verdict  string // the honest one-line coverage verdict shown to the user
 	Payload  []byte // outbound application bytes, when a tier surfaced plaintext
+	Err      error  // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
 }
 
 // maxInspectBytes bounds how much outbound payload we accumulate for one inspection.
@@ -44,19 +45,25 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	var outbound []byte
 	for i := 0; i < maxPackets; i++ {
 		pkt, err := src.Next()
-		if err == io.EOF || err != nil {
+		if err == io.EOF {
+			break // clean end of the fixture / capture window
+		}
+		if err != nil {
+			r.Err = err // a real read failure — surfaced, never silently swallowed (§9)
 			break
 		}
 		seg, ok := ParseIPPacket(pkt)
 		if !ok || seg.Dst != flow.Remote || len(seg.Payload) == 0 {
 			continue // only outbound (client → target) application segments
 		}
+		outbound = append(outbound, seg.Payload...)
+		// SNI is parsed over the accumulated in-order outbound bytes, so a ClientHello split
+		// across TCP segments still resolves (best-effort reassembly; full reordering is T-10).
 		if r.SNI == "" {
-			if host, ok := ClientHelloSNI(seg.Payload); ok {
+			if host, ok := ClientHelloSNI(outbound); ok {
 				r.SNI = host
 			}
 		}
-		outbound = append(outbound, seg.Payload...)
 		if len(outbound) >= maxInspectBytes {
 			break
 		}
@@ -73,6 +80,8 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		} else {
 			r.Verdict = "ENCRYPTED · not decrypted (metadata only)"
 		}
+	case r.Err != nil:
+		r.Verdict = "capture failed: " + r.Err.Error() // honest failure, not a clean "no data"
 	default:
 		r.Verdict = "no application data captured"
 	}
@@ -86,7 +95,9 @@ func looksPlaintext(b []byte) bool {
 	if len(b) == 0 {
 		return false
 	}
-	if b[0] == 0x16 || b[0] == 0x17 { // TLS handshake / application_data record
+	// TLS record content types: 0x14 ChangeCipherSpec, 0x15 Alert, 0x16 Handshake,
+	// 0x17 ApplicationData, 0x18 Heartbeat — none of which is readable plaintext.
+	if b[0] >= 0x14 && b[0] <= 0x18 {
 		return false
 	}
 	n := len(b)
