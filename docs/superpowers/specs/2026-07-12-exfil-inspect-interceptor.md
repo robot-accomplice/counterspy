@@ -196,3 +196,12 @@ and should follow the safe, always-available metadata tier.
    via cgo, never a shelled `frida`/`dtrace` child (§2). The Phase-B spike targets the
    native mechanism.
 3. **Redaction: mask secrets by default** with a "reveal" toggle (§6). Agreed.
+4. **Native-first, narrowly relaxed for a pure-Go filter assembler (2026-07-12, Phase A).** The
+   scoped kernel BPF filter (§6 least-privilege) is assembled with `golang.org/x/net/bpf` — a
+   pure-Go instruction *assembler* with a VM that validates the filter program against fixture
+   packets in CI (no root). This is NOT a capture dependency and involves no shell-out: packet
+   capture stays native `/dev/bpf` via `x/sys/unix`. Hand-rolling the cBPF bytecode was judged
+   *worse* (error-prone and untestable without root), so the "no third-party dependency" line in
+   §3/§8 is relaxed for this one pure-computation assembler (pinned `v0.6.0` to avoid an `x/sys`
+   upgrade cascade). The kernel filter is currently host+TCP scoped; remote-port scoping is a
+   tracked refinement (userspace correlation already enforces the exact port).

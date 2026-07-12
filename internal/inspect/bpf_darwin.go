@@ -24,9 +24,9 @@ type ifreq struct {
 const _ = unsafe.Sizeof(ifreq{}) - 32
 const _ = 32 - unsafe.Sizeof(ifreq{})
 
-// readPoll bounds how long a single BPF read blocks with no traffic, so the capture can re-check
-// its wall-clock deadline on an idle flow instead of hanging the caller (spec §5, T-11).
-const readPoll = 200 * time.Millisecond
+// readPoll is how long Next sleeps between empty (EAGAIN) non-blocking reads, so an idle flow
+// polls its wall-clock deadline cheaply instead of busy-spinning or blocking forever (T-11).
+const readPoll = 20 * time.Millisecond
 
 // bpfCapture reads IP packets from a /dev/bpf device bound to an interface. This is the untested
 // I/O edge; the record framing + link-layer strip + BPF filter it relies on are pure (stripLinkLayer
@@ -80,8 +80,14 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 		unix.Close(fd)
 		return nil, err
 	}
-	// Bound a no-traffic read so the deadline is honored even on a silent flow.
-	setReadTimeout(fd, readPoll)
+	// Make the fd non-blocking so a read on a silent flow returns EAGAIN immediately instead of
+	// blocking forever — this is what GUARANTEES the maxWait deadline is honored (T-11). It must
+	// succeed (unlike the best-effort filter), so a failure fails the capture loudly rather than
+	// risking a hung UI loop.
+	if err := unix.SetNonblock(fd, true); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
 	// Scope the capture to the remote host in-kernel. Best-effort: if the datalink is one we have
 	// no header-length for, or the filter can't be installed, we fall back to whole-interface
 	// capture (the userspace correlation in Inspect still yields the correct flow) rather than
@@ -93,13 +99,6 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 		c.deadline = time.Now().Add(maxWait)
 	}
 	return c, nil
-}
-
-// setReadTimeout sets BIOCSRTIMEOUT so a read() returns (with no packets) after d, letting Next
-// re-check its deadline. Best-effort — a failure just means reads block until traffic arrives.
-func setReadTimeout(fd int, d time.Duration) {
-	tv := unix.Timeval{Sec: int64(d / time.Second), Usec: int32((d % time.Second) / time.Microsecond)}
-	unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSRTIMEOUT), uintptr(unsafe.Pointer(&tv)))
 }
 
 // installFlowFilter assembles and installs (BIOCSETF) a host-scoped TCP filter. Best-effort: on an
@@ -144,8 +143,12 @@ func (c *bpfCapture) Next() ([]byte, error) {
 		}
 		n, err := unix.Read(c.fd, c.buf)
 		if err != nil {
-			if err == unix.EINTR || err == unix.EAGAIN {
-				continue // interrupted / timed out with no packets — re-check the deadline
+			if err == unix.EAGAIN { // no packets buffered — sleep briefly, then re-check the deadline
+				time.Sleep(readPoll)
+				continue
+			}
+			if err == unix.EINTR {
+				continue
 			}
 			return nil, err
 		}
