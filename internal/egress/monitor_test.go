@@ -46,6 +46,82 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	}
 }
 
+// Every instance row gets its OWN sparkline: per-PID out-rate history must accumulate across
+// ticks and attach to each group member (not just the app-level Spark). Guards the "sparklines
+// on every line" behavior.
+func TestMonitor_PerPIDSparkAttachedToMembers(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 100000 * tick // cumulative climbs 100000/tick → per-tick rate 100000
+		return []byte("time,,bytes_in,bytes_out\n15:04:0" + itoa(tick) + ".0,daemon." + itoa(4821) +
+			",0," + itoa(out) + "\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → rate 0, one sample recorded
+	groups := m.Sample() // tick 2: rate 100000, second sample recorded
+	if len(groups) != 1 || len(groups[0].Members) != 1 {
+		t.Fatalf("expected one group with one member, got %+v", groups)
+	}
+	sp := groups[0].Members[0].Spark
+	if len(sp) != 2 {
+		t.Fatalf("member Spark should hold 2 ticks of history, got %v", sp)
+	}
+	if sp[0] != 0 {
+		t.Fatalf("first-sight sample should be rate 0, got %d", sp[0])
+	}
+	if sp[1] == 0 {
+		t.Fatalf("second sample should be the non-zero out-rate, got %d", sp[1])
+	}
+}
+
+// A PID that vanishes (no established connections next tick) must be pruned from the per-PID
+// history so the map stays bounded over a long session.
+func TestMonitor_PerPIDSparkPrunesDeadPIDs(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,0,200000\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.sparkPID) != 1 {
+		t.Fatalf("expected 1 tracked PID after first tick, got %d", len(m.sparkPID))
+	}
+	present = false
+	m.Sample()
+	if len(m.sparkPID) != 0 {
+		t.Fatalf("dead PID should be pruned from per-PID history, still have %d", len(m.sparkPID))
+	}
+}
+
 // Two concurrent pids: output order must be stable across identical calls (determinism),
 // and a pid's FIRST sighting must report rate 0 even with a large cumulative counter (the
 // process's history must not be attributed to one tick). Guards both review findings.

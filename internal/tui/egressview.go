@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 
@@ -133,6 +134,90 @@ func sparkline(vals []uint64) string {
 	return b.String()
 }
 
+// heatStops is the traffic sparkline's thermal ramp: blue (cool/quiet) → cyan → yellow → red
+// (hot/loud). Intensity is ABSOLUTE traffic volume, so busy flows glow red and quiet ones stay
+// blue — the TREND column reads as a heat map for spotting the loud talkers (exfil north-star).
+var heatStops = []struct {
+	at      float64
+	r, g, b int32
+}{
+	{0.00, 60, 130, 246}, // blue — cool / quiet
+	{0.40, 45, 205, 205}, // cyan
+	{0.72, 240, 205, 70}, // yellow
+	{1.00, 235, 70, 70},  // red — hot / peak
+}
+
+// heatColor maps a 0..1 intensity to a color along heatStops (linear RGB interpolation).
+func heatColor(frac float64) tcell.Color {
+	if frac <= 0 {
+		s := heatStops[0]
+		return tcell.NewRGBColor(s.r, s.g, s.b)
+	}
+	for i := 1; i < len(heatStops); i++ {
+		hi := heatStops[i]
+		if frac <= hi.at {
+			lo := heatStops[i-1]
+			t := (frac - lo.at) / (hi.at - lo.at)
+			return tcell.NewRGBColor(
+				lo.r+int32(t*float64(hi.r-lo.r)),
+				lo.g+int32(t*float64(hi.g-lo.g)),
+				lo.b+int32(t*float64(hi.b-lo.b)),
+			)
+		}
+	}
+	s := heatStops[len(heatStops)-1]
+	return tcell.NewRGBColor(s.r, s.g, s.b)
+}
+
+// drawSparkline renders vals as a heat-colored sparkline at (x,y): each glyph's height AND
+// color scale with its magnitude relative to the window's local max, so busier samples read
+// both taller and hotter. Empty history draws nothing. Preserves the selected-row background.
+func drawSparkline(s tcell.Screen, x, y int, vals []uint64, width int, selected bool) {
+	vals = downsample(vals, width)
+	if len(vals) == 0 {
+		return
+	}
+	var max uint64
+	for _, v := range vals {
+		if v > max {
+			max = v
+		}
+	}
+	for i, v := range vals {
+		idx := 0
+		if max > 0 {
+			idx = int(v * uint64(len(sparkGlyphs)-1) / max) // height: this row's OWN trend shape (relative)
+		}
+		// color: ABSOLUTE traffic volume (loud=hot) on a fixed scale, so a quiet app never
+		// flares red at its own peak — you can scan the column and spot the real talkers.
+		st := tcell.StyleDefault.Foreground(heatColor(absIntensity(v)))
+		if selected {
+			st = st.Background(colSelBg)
+		}
+		drawText(s, x+i, y, st, string(sparkGlyphs[idx]))
+	}
+}
+
+// absIntensity maps an absolute out-rate (bytes/sec) to a 0..1 heat position on a FIXED log
+// scale: 2^6=64 B/s reads cool, 2^22≈4 MB/s reads fully hot. Because it's absolute (not scaled
+// to the row's peak), sparkline COLOR reflects real volume across all rows — a 200 B/s trickle
+// stays cool even at its own maximum, while a bulk uploader glows red.
+func absIntensity(rate uint64) float64 {
+	if rate == 0 {
+		return 0
+	}
+	const lo, hi = 6.0, 22.0 // log2 anchors
+	f := (math.Log2(float64(rate)) - lo) / (hi - lo)
+	switch {
+	case f < 0:
+		return 0
+	case f > 1:
+		return 1
+	default:
+		return f
+	}
+}
+
 // downsample shrinks vals to at most width buckets (bucket-averaged) so a sparkline never
 // prints more glyphs than its column is wide. Values already within width pass through.
 func downsample(vals []uint64, width int) []uint64 {
@@ -246,6 +331,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		label = fmt.Sprintf("pid %d %s", mem.PID, shortPath(mem.Path))
 		trust = mem.Trust
 		rate = human(mem.OutRate) + "/s"
+		spark = mem.Spark
 	default: // connection row (leaf)
 		c := row.conn
 		depth = 2
@@ -274,7 +360,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	}
 	drawText(s, cols.trustX, y, style, trustGlyph)
 	drawText(s, cols.rateX, y, style, truncate(rate, rateW))
-	drawText(s, cols.trendX, y, style, sparkline(downsample(spark, trendW)))
+	drawSparkline(s, cols.trendX, y, spark, trendW, selected)
 	drawText(s, cols.destX, y, style, model.Clean(truncate(dest, cols.destW)))
 	drawText(s, cols.concernX, y, style, truncate(concernText, concernW))
 }

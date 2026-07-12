@@ -18,7 +18,8 @@ const sparkLen = 24 // recent out-rate samples kept per app for the sparkline
 type Monitor struct {
 	interval float64
 	prev     map[int]Bytes
-	spark    map[string][]uint64
+	spark    map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
+	sparkPID map[int][]uint64    // per-PID out-rate history — instance-row sparkline
 
 	runNettop func() []byte
 	runLsof   func() []byte
@@ -33,6 +34,7 @@ func New(interval float64) *Monitor {
 		interval: interval,
 		prev:     map[int]Bytes{},
 		spark:    map[string][]uint64{},
+		sparkPID: map[int][]uint64{},
 		runNettop: func() []byte {
 			b, _ := exec.Command("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
@@ -105,10 +107,30 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		}
 		m.spark[k] = s
 	}
+	// Advance per-PID spark ring buffers so each instance row has its own sparkline. Prune
+	// PIDs absent this tick (process gone / no established connections) to keep the map bounded.
+	livePID := make(map[int]bool, len(insts))
+	for _, in := range insts {
+		livePID[in.PID] = true
+		s := append(m.sparkPID[in.PID], in.OutRate)
+		if len(s) > sparkLen {
+			s = s[len(s)-sparkLen:]
+		}
+		m.sparkPID[in.PID] = s
+	}
+	for pid := range m.sparkPID {
+		if !livePID[pid] {
+			delete(m.sparkPID, pid)
+		}
+	}
 	m.prev = cur
 
 	groups := Aggregate(insts, m.spark)
 	for i := range groups {
+		// Attach each instance's own history (Aggregate stays per-app; per-PID lives here).
+		for j := range groups[i].Members {
+			groups[i].Members[j].Spark = m.sparkPID[groups[i].Members[j].PID]
+		}
 		groups[i].Concern = Concern(groups[i])
 		groups[i].ExfilRisk, groups[i].Candidate = Exfil(groups[i])
 	}
