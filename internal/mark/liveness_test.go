@@ -50,3 +50,30 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+// cp-T2 review F-1/F-3: an unknown persistence target (extraction failed, so
+// Subject.Path is the plist path) must render a BLANK run-state, not a misleading
+// †; and a nil running map must not panic (persistence then reads vestigial).
+func TestClassify_UnknownTargetAndNilRunning(t *testing.T) {
+	assessments := []model.Assessment{
+		// target extraction failed: Subject.Path is the plist, Facts has no target
+		{Finding: model.Finding{
+			Subject:  model.Subject{Path: "/Library/LaunchDaemons/x.plist"},
+			Evidence: []model.Evidence{ev(model.KindPersistence, map[string]string{"plist": "/Library/LaunchDaemons/x.plist"})},
+		}},
+		// known target, nil running set → vestigial (no panic)
+		{Finding: model.Finding{
+			Subject:  model.Subject{Path: "/opt/tool"},
+			Evidence: []model.Evidence{ev(model.KindPersistence, map[string]string{"target": "/opt/tool"})},
+		}},
+	}
+
+	got := Classify(assessments, nil)
+
+	if lv := got["path:/Library/LaunchDaemons/x.plist"]; lv.RunState != 0 {
+		t.Errorf("unknown target: got run-state %q want blank(0)", lv.RunState)
+	}
+	if lv := got["path:/opt/tool"]; lv.RunState != GlyphVestigial {
+		t.Errorf("known target, nil running: got %q want vestigial", lv.RunState)
+	}
+}

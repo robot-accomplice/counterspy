@@ -110,7 +110,13 @@ func Classify(assessments []model.Assessment, running map[string]bool) map[strin
 	out := make(map[string]Liveness, len(assessments))
 	for _, a := range assessments {
 		var lv Liveness
-		var hasProc, hasPersist bool
+		var hasProc bool
+		// Persistence run-state is derived from the extracted target executable
+		// (Facts["target"]), NOT Subject.Path: when target extraction fails,
+		// persistence.go falls Subject.Path back to the plist path, which would
+		// then falsely read as vestigial. An unknown target stays blank, not a
+		// misleading † (swarm cp-T2 review F-1).
+		var targetKnown, targetRunning bool
 		for _, e := range a.Evidence {
 			if e.Facts["listener"] == "true" {
 				lv.Socket = GlyphSocket
@@ -119,18 +125,21 @@ func Classify(assessments []model.Assessment, running map[string]bool) map[strin
 			case model.KindProcess:
 				hasProc = true
 			case model.KindPersistence:
-				hasPersist = true
+				if t := e.Facts["target"]; t != "" {
+					targetKnown = true
+					if running[t] {
+						targetRunning = true
+					}
+				}
 			}
 		}
 		switch {
-		case hasProc:
+		case hasProc: // a live process wins; process/persistence can't co-occur today (defensive, cp-T2 F-2)
 			lv.RunState = GlyphActive
-		case hasPersist:
-			if running[a.Subject.Path] {
-				lv.RunState = GlyphActive
-			} else {
-				lv.RunState = GlyphVestigial
-			}
+		case targetRunning:
+			lv.RunState = GlyphActive
+		case targetKnown:
+			lv.RunState = GlyphVestigial
 		}
 		out[a.Subject.Key()] = lv
 	}
