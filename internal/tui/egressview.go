@@ -8,8 +8,19 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
+
+// collapsedMarker is the tree-disclosure control: '+' can expand, '−' is expanded.
+// A disclosure control, not a liveness state — kept distinct from the ▸ active mark
+// so the two never collide (cp-T design: egress toggle moved off ▸).
+func collapsedMarker(expanded bool) rune {
+	if expanded {
+		return '−'
+	}
+	return '+'
+}
 
 // Column layout: TRUST, OUT↑, TREND and CONCERN are fixed-width; APP/PROCESS and
 // DESTINATIONS are flex columns that share whatever width is left over.
@@ -221,11 +232,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	switch {
 	case row.member == nil: // app header
 		depth = 0
-		if expanded[g.App] {
-			marker = '▾'
-		} else {
-			marker = '▸'
-		}
+		marker = collapsedMarker(expanded[g.App])
 		label = g.App
 		trust = g.Trust
 		rate = human(g.OutRate) + "/s"
@@ -235,11 +242,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	case row.conn == nil: // instance row
 		mem := row.member
 		depth = 1
-		if expandedPID[mem.PID] {
-			marker = '▾'
-		} else {
-			marker = '▸'
-		}
+		marker = collapsedMarker(expandedPID[mem.PID])
 		label = fmt.Sprintf("pid %d %s", mem.PID, shortPath(mem.Path))
 		trust = mem.Trust
 		rate = human(mem.OutRate) + "/s"
@@ -265,7 +268,11 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	markerStr := strings.Repeat("  ", depth) + string(marker)
 	drawText(s, cols.markerX, y, style, markerStr)
 	drawText(s, cols.appX, y, style, model.Clean(truncate(label, cols.appW)))
-	drawText(s, cols.trustX, y, style, truncate(trust, trustW))
+	trustGlyph := ""
+	if tg := mark.TrustLabel(trust); tg != 0 {
+		trustGlyph = string(tg)
+	}
+	drawText(s, cols.trustX, y, style, trustGlyph)
 	drawText(s, cols.rateX, y, style, truncate(rate, rateW))
 	drawText(s, cols.trendX, y, style, sparkline(downsample(spark, trendW)))
 	drawText(s, cols.destX, y, style, model.Clean(truncate(dest, cols.destW)))

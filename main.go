@@ -23,6 +23,7 @@ import (
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
@@ -124,7 +125,7 @@ func runScan(flags []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled()))
+	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled(), livenessFor(assessments)))
 	if interactive {
 		quarantineLoop(assessments, stdout, os.Stdin, actQuarantiner{})
 	}
@@ -148,6 +149,14 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
+// livenessFor resolves the paths referenced by running processes (best-effort)
+// and classifies each assessment's liveness. A ps failure degrades to "nothing
+// known running" — persistence then reads vestigial rather than crashing (T-4/#23).
+func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
+	running, _ := collect.CollectRunningPaths()
+	return mark.Classify(assessments, running)
+}
+
 func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
 
 // collectAllWithProgress runs the collectors, then the per-binary code-signature checks
@@ -459,6 +468,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		assessments[i].Actions = plannedActions(assessments[i].Finding)
 	}
 	m := tui.New(assessments, gaps)
+	m.Liveness = livenessFor(assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 	if err := tui.Run(screen, m, actor); err != nil {
 		fmt.Fprintln(stdout, "tui:", err)

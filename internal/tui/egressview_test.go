@@ -148,8 +148,8 @@ func TestEgressView_ExpandedRowsAndDetail(t *testing.T) {
 	if !strings.Contains(out, "pid ") {
 		t.Fatalf("expanded group should show a child connection row:\n%s", out)
 	}
-	if !strings.Contains(out, "▾") {
-		t.Fatalf("expanded marker should be the down-caret:\n%s", out)
+	if !strings.Contains(out, "−") {
+		t.Fatalf("expanded marker should be the '−' disclosure control (▸/▾ retired; ▸ reserved for liveness):\n%s", out)
 	}
 	if !strings.Contains(out, "launchd -> agent") {
 		t.Fatalf("detail strip should show ancestry:\n%s", out)
@@ -254,5 +254,19 @@ func TestComputeCols_ColumnsAscendAndFitWidth(t *testing.T) {
 	}
 	if end := c.concernX + concernW; end > 120 {
 		t.Fatalf("CONCERN column overflows terminal width: ends at %d, want <= 120", end)
+	}
+}
+
+// Task 8: the egress tree toggle uses +/- (a disclosure control), never ▸ (which is
+// reserved for the liveness "active" mark) — resolving that glyph collision.
+func TestEgressTreeTogglesWithPlusMinus(t *testing.T) {
+	if got := collapsedMarker(false); got != '+' {
+		t.Errorf("collapsed marker: got %q want +", got)
+	}
+	if got := collapsedMarker(true); got != '−' {
+		t.Errorf("expanded marker: got %q want −", got)
+	}
+	if collapsedMarker(false) == '▸' || collapsedMarker(true) == '▸' {
+		t.Error("tree toggle must not reuse ▸ (liveness-active)")
 	}
 }

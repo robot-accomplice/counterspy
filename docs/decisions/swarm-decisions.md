@@ -154,3 +154,48 @@ SEVERITY SPLIT surfaced (QA high vs Audit low on the snapshot trust boundary); E
 - **D. Unrecovered panic** (Audit F-2 low): runTUI wraps Run in a deferred recover → Fini + clean error.
 - Confirmed strong: Actor seam gives STRONGER decoupling than spec'd (tui imports only model+tcell);
   session-scoped manifest semantics correct.
+
+## Handover + substrate reconciliation (fresh-context resume) — 2026-07-12
+
+Resumed CounterSpy under a fresh orchestrator session; coordinated a live handover
+with the retired writer session (via ccd_session_mgmt) rather than reconstructing
+from the bus alone. Key reconciliations recorded so a future resume is not misled
+by the stale cp-* picture:
+
+- **Execution model:** the project has moved OFF the cp-* fan-out checkpoint model
+  onto **gitflow + PR**, CI-gated (build/vet/gofmt/test --race + >=80% coverage per
+  package). The `.swarm/` bus checkpoints end at cp-tui-3 (2026-07-09); egress,
+  feedback, and the TUI spinner shipped since via PR, reviewed through gitflow.
+- **Swarm value retained:** the swarm's parallel read-only reviewer fan-out
+  (Antagonist + Audit subagents on each diff) + single-writer discipline is kept as
+  the quality mechanism; only the shipped artifact changed (cp-* bus entry -> git PR).
+  No spawn_task chips (they would create a second writer).
+- **Branch/PR posture at handover:** main = v0.4.0; develop = integration target.
+  Open PRs -> develop: #25 feature/native-codesign (trust-semantics shift, awaiting
+  Jon's human decision) and #26 bug/tui-startup-spinner (spinner, green).
+- **Current work:** feature/symbology-legend off develop. Spec + plan committed
+  (docs/superpowers/{specs,plans}/2026-07-1*-symbology-legend*). Three-axis mark
+  vocabulary (concern/trust/liveness), uniform-cadence cluster, documented drift-proof
+  key. Closes T-4 (real exec path per PID) + #23 (active-vs-vestigial). Liveness is
+  display-only (scorer untouched). PR #25 coupling flagged, not decided here (spec §8).
+
+## cp-T1 (Task 1: internal/mark vocabulary) — reviewed 2026-07-12
+Antagonist(haiku)+Audit(sonnet) read-only fan-out on the diff. CROSS-REVIEWER CONFIRMED:
+- **F-1 (crit, both, high-conf): isAppleAuthority substring-spoof.** A Gatekeeper-accepted
+  Developer-ID cert with "Apple" in the CN forged ● Apple-system. FIX-NOW (unanimous): exclude
+  the "Developer ID" leaf prefix before Apple matching. T-3's accepted-gate already blocks
+  self-signed fakes; the reachable case was a legit-notarized third-party CN — now closed.
+- **F-2 (high, Audit): spoof case untested.** FIX-NOW: added devid-apple-spoof + installer-spoof tests.
+- **DEFER (justified): multi-codesign-evidence tie-break** (both, low). Not reachable — codesign.go
+  emits exactly one codesign Evidence per finding (verified). Revisit only if that invariant changes.
+- **WON'T-FIX (justified): case-sensitive "signed"** (our collector emits canonical lowercase) and
+  **Concern default->Monitor** (safe low-noise default by design).
+
+## Symbology & legend feature — SHIPPED to PR — 2026-07-12
+feature/symbology-legend → PR #27 (base develop). 9 plan tasks, each through an Antagonist+Audit
+fan-out. Real catches: cp-T1 ● Apple-spoof (crit), cp-T2 vestigial-mislabel (high), cp-T4/ESC-1
+comm=→full-argv correlation, cp-T5 nil-liveness prod bug (high), cp-T7 ?-overlay off-screen (crit),
+cp-T9 Architext gap (med). CI gate green (-race, coverage ≥83%/pkg). Architext mod-mark recorded.
+OPEN FOLLOW-UPS: (1) PR #25 native-codesign coupling — revisit mark.Trust ◆/◇ mapping on merge (spec §8);
+(2) T-7 interpreter-wrapper: liveness now argv-matches it, but the DETECTION/scoring side (pickTarget
+interpreter-awareness) remains open; (3) cosmetic: egress TRUST column oversized for a 1-glyph value.
