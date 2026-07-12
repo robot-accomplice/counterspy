@@ -112,7 +112,7 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 				if next.InspectReq != nil { // capture+inspect I/O off the pure update (§4)
 					target := *next.InspectReq
 					next.InspectReq = nil
-					view := model.InspectView{Verdict: "inspection unavailable in this build"}
+					view := model.InspectView{Verdict: "inspection disabled (--no-inspect)"}
 					if inspector != nil {
 						view = inspector.Inspect(target.conn)
 					}

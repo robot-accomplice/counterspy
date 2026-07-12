@@ -2,9 +2,13 @@
 
 package inspect
 
-import "errors"
+import (
+	"errors"
+	"net/netip"
+	"time"
+)
 
-// openLiveCapture is macOS-only (BPF). On other platforms inspection capture is unavailable.
-func openLiveCapture(string) (PacketSource, error) {
+// OpenLiveCapture is macOS-only (BPF). On other platforms inspection capture is unavailable.
+func OpenLiveCapture(string, netip.AddrPort, time.Duration) (PacketSource, error) {
 	return nil, errors.New("packet capture is only supported on macOS")
 }

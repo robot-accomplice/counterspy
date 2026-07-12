@@ -3,7 +3,10 @@
 package inspect
 
 import (
+	"io"
+	"net/netip"
 	"strconv"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -21,19 +24,26 @@ type ifreq struct {
 const _ = unsafe.Sizeof(ifreq{}) - 32
 const _ = 32 - unsafe.Sizeof(ifreq{})
 
+// readPoll bounds how long a single BPF read blocks with no traffic, so the capture can re-check
+// its wall-clock deadline on an idle flow instead of hanging the caller (spec §5, T-11).
+const readPoll = 200 * time.Millisecond
+
 // bpfCapture reads IP packets from a /dev/bpf device bound to an interface. This is the untested
-// I/O edge; the record framing + link-layer strip it relies on are pure (stripLinkLayer is
-// unit-tested; parseBPFRecords is standard bpf_hdr walking).
+// I/O edge; the record framing + link-layer strip + BPF filter it relies on are pure (stripLinkLayer
+// and buildFlowFilter are unit/VM-tested; parseBPFRecords is standard bpf_hdr walking).
 type bpfCapture struct {
-	fd   int
-	dlt  uint32
-	buf  []byte
-	pend [][]byte
+	fd       int
+	dlt      uint32
+	buf      []byte
+	pend     [][]byte
+	deadline time.Time // zero = no wall-clock bound
 }
 
-// openLiveCapture opens the first free /dev/bpf, binds it to iface in immediate mode, and returns
-// a PacketSource of IP-layer packets. Requires root (opening /dev/bpf).
-func openLiveCapture(iface string) (PacketSource, error) {
+// OpenLiveCapture opens the first free /dev/bpf, binds it to iface in immediate mode, installs a
+// kernel BPF filter scoped to the flow's remote host (so the whole interface is NOT copied to
+// userspace — spec §6 least-privilege), and returns a PacketSource of IP-layer packets. maxWait
+// bounds the total capture window so an idle flow can't hang the caller. Requires root (/dev/bpf).
+func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration) (PacketSource, error) {
 	var fd int
 	var err error
 	for i := 0; i < 256; i++ {
@@ -70,13 +80,73 @@ func openLiveCapture(iface string) (PacketSource, error) {
 		unix.Close(fd)
 		return nil, err
 	}
-	return &bpfCapture{fd: fd, dlt: uint32(dlt), buf: make([]byte, blen)}, nil
+	// Bound a no-traffic read so the deadline is honored even on a silent flow.
+	setReadTimeout(fd, readPoll)
+	// Scope the capture to the remote host in-kernel. Best-effort: if the datalink is one we have
+	// no header-length for, or the filter can't be installed, we fall back to whole-interface
+	// capture (the userspace correlation in Inspect still yields the correct flow) rather than
+	// installing a filter that might silently drop everything — capture correctness over privacy.
+	installFlowFilter(fd, uint32(dlt), remote)
+
+	c := &bpfCapture{fd: fd, dlt: uint32(dlt), buf: make([]byte, blen)}
+	if maxWait > 0 {
+		c.deadline = time.Now().Add(maxWait)
+	}
+	return c, nil
+}
+
+// setReadTimeout sets BIOCSRTIMEOUT so a read() returns (with no packets) after d, letting Next
+// re-check its deadline. Best-effort — a failure just means reads block until traffic arrives.
+func setReadTimeout(fd int, d time.Duration) {
+	tv := unix.Timeval{Sec: int64(d / time.Second), Usec: int32((d % time.Second) / time.Microsecond)}
+	unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSRTIMEOUT), uintptr(unsafe.Pointer(&tv)))
+}
+
+// installFlowFilter assembles and installs (BIOCSETF) a host-scoped TCP filter. Best-effort: on an
+// unknown datalink or an assembly/ioctl error it returns without installing, leaving the capture
+// unfiltered (never blinded).
+func installFlowFilter(fd int, dlt uint32, remote netip.AddrPort) {
+	hdr, ok := linkHdrLen(dlt)
+	if !ok {
+		return
+	}
+	raw, err := buildFlowFilter(hdr, remote)
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	insns := make([]unix.BpfInsn, len(raw))
+	for i, r := range raw {
+		insns[i] = unix.BpfInsn{Code: r.Op, Jt: r.Jt, Jf: r.Jf, K: r.K}
+	}
+	prog := unix.BpfProgram{Len: uint32(len(insns)), Insns: &insns[0]}
+	unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSETF), uintptr(unsafe.Pointer(&prog)))
+}
+
+// linkHdrLen maps a datalink type to the byte length of its link header (the offset the IP packet
+// sits behind), for the BPF filter's absolute loads. ok=false for datalinks we don't filter.
+func linkHdrLen(dlt uint32) (int, bool) {
+	switch dlt {
+	case dltEN10MB:
+		return 14, true
+	case dltNull:
+		return 4, true
+	case dltRaw:
+		return 0, true
+	default:
+		return 0, false
+	}
 }
 
 func (c *bpfCapture) Next() ([]byte, error) {
 	for len(c.pend) == 0 {
+		if !c.deadline.IsZero() && time.Now().After(c.deadline) {
+			return nil, io.EOF // capture window elapsed — a clean end, not a failure
+		}
 		n, err := unix.Read(c.fd, c.buf)
 		if err != nil {
+			if err == unix.EINTR || err == unix.EAGAIN {
+				continue // interrupted / timed out with no packets — re-check the deadline
+			}
 			return nil, err
 		}
 		c.pend = parseBPFRecords(c.buf[:n], c.dlt)

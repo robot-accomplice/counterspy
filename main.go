@@ -509,9 +509,9 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 			}
 		}
 	}()
-	// inspector is nil until Phase A checkpoint (d) wires the native /dev/bpf capture; a nil
-	// inspector disables the `i` inspection overlay (the --no-inspect posture).
-	err = tui.RunConsole(screen, m, actor, mon, nil, tick, pbcopy)
+	// The `i` inspection overlay captures a flow's packets via native /dev/bpf (root); --no-inspect
+	// disables it entirely for locked-down environments (spec §5.3), leaving a nil Inspector.
+	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy)
 	if err != nil {
 		fmt.Fprintln(stdout, "console:", err)
 		return 1
