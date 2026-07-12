@@ -17,7 +17,7 @@ func TestParseRunningPaths(t *testing.T) {
 	want := []string{
 		"/sbin/launchd",
 		"/usr/local/bin/live",
-		"/Users/j/.tools/agent.js",  // interpreter-run script, correlates even though argv0 is bare 'node'
+		"/Users/j/.tools/agent.js", // interpreter-run script, correlates even though argv0 is bare 'node'
 		"/usr/bin/python3",
 		"/Library/Scripts/payload.py", // the T-7 payload, present as an arg
 	}
