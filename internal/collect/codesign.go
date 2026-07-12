@@ -20,7 +20,7 @@ const (
 // its authority is dropped and cannot suppress the subject downstream.
 // "revoked" is checked before "not signed" so the more severe verdict wins when the
 // tool output mentions both (cp-5 F-2).
-func ParseCodesign(path, verifyErr string, accepted bool, authority string) []model.Evidence {
+func ParseCodesign(path, verifyErr string, accepted bool, authority string, notarized bool) []model.Evidence {
 	sub := model.Subject{Path: path}
 
 	switch {
@@ -35,7 +35,13 @@ func ParseCodesign(path, verifyErr string, accepted bool, authority string) []mo
 	default:
 		facts := map[string]string{"signed": "true"}
 		if accepted {
-			facts["authority"] = authority // trusted only when Gatekeeper accepts (T-3)
+			facts["authority"] = authority // trusted only for a valid signature (T-3)
+			if notarized {
+				// Offline stapled-ticket notarization (PR #25): distinguishes ◆ notarized
+				// from ◇ signed-not-notarized now that `accepted` means valid-signature,
+				// not Gatekeeper-notarized.
+				facts["notarized"] = "true"
+			}
 		}
 		return []model.Evidence{{Subject: sub, Kind: model.KindCodesign,
 			Summary: "signed by " + authority, Weight: 0, Facts: facts}}
@@ -48,13 +54,13 @@ func ParseCodesign(path, verifyErr string, accepted bool, authority string) []mo
 // darwin build wires this to an in-process Security.framework implementation (native.go); it's
 // a package var so tests can inject a fake and stay hermetic. Nil on platforms without a
 // backend, where CollectCodesign yields no evidence.
-var sigProbe func(path string) (verifyErr string, accepted bool, authority string)
+var sigProbe func(path string) (verifyErr string, accepted bool, authority string, notarized bool)
 
 // CollectCodesign returns code-signature evidence for a path (I/O edge, via sigProbe).
 func CollectCodesign(path string) []model.Evidence {
 	if sigProbe == nil {
 		return nil
 	}
-	verifyErr, accepted, authority := sigProbe(path)
-	return ParseCodesign(path, verifyErr, accepted, authority)
+	verifyErr, accepted, authority, notarized := sigProbe(path)
+	return ParseCodesign(path, verifyErr, accepted, authority, notarized)
 }

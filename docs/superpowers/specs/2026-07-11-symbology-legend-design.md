@@ -173,16 +173,18 @@ it would perturb a tuned, verified scorer with no current requirement to do so).
   meaning, nor the docs describe a mark the app doesn't emit.
 - **Honest legend:** the legend renders only marks the data can fill.
 
-## 8. PR #25 coupling (flagged, not resolved here)
+## 8. PR #25 coupling (RESOLVED)
 
-PR #25 (native Security.framework codesign) shifts `accepted` from
-*Gatekeeper-notarized* to *signature-valid-in-process*, which would blur the
-`◆ notarized` / `◇ signed-not-notarized` line. This redesign **makes that nuance
-visible** but does not decide it. The trust mapping in §2.1 is written against
-current `develop` (spctl-accepted) semantics. If PR #25 merges, the §2.1 mapping
-must be revisited so `◆` still means "notarized/Gatekeeper-accepted," not merely
-"signature parses." This is a human decision Jon has flagged; recorded here so the
-coupling is explicit.
+PR #25 (native Security.framework codesign) shifted `accepted` from
+*Gatekeeper-notarized* to *signature-valid-in-process*, which blurred the
+`◆ notarized` / `◇ signed-not-notarized` line (the native backend sets `authority`
+for any valid signature, so `◆` would over-report). **Resolved** when #25 landed:
+the darwin backend adds an **offline stapled-ticket notarization check** — it
+re-validates against the built-in `"notarized"` Gatekeeper `SecRequirement`
+in-process (no syspolicyd, no network) — and records a `notarized` fact.
+`mark.Trust` gates `◆` on that fact (`◇` when a valid signature is not notarized),
+so `◆` still means genuinely notarized. Verified on a real Mac: Chrome → ◆
+(notarized), `/bin/ls` → ● (Apple), non-code → ○.
 
 ## 9. Testing (TDD, ≥80%/package, no shell-out)
 

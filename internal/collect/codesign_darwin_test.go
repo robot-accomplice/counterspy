@@ -14,7 +14,7 @@ import (
 // so it needs no sudo and no external tools.
 func TestNativeSig_RealBinaries(t *testing.T) {
 	// /bin/ls is Apple-signed and valid.
-	verifyErr, accepted, authority := nativeSig("/bin/ls")
+	verifyErr, accepted, authority, _ := nativeSig("/bin/ls")
 	if verifyErr != "" || !accepted {
 		t.Fatalf("/bin/ls should be signed+accepted, got verifyErr=%q accepted=%v", verifyErr, accepted)
 	}
@@ -27,7 +27,7 @@ func TestNativeSig_RealBinaries(t *testing.T) {
 	if err := os.WriteFile(txt, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	v, acc, _ := nativeSig(txt)
+	v, acc, _, _ := nativeSig(txt)
 	if !strings.Contains(v, "not signed") || acc {
 		t.Fatalf("a non-code file should read unsigned, got verifyErr=%q accepted=%v", v, acc)
 	}

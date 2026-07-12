@@ -67,8 +67,14 @@ func Trust(f model.Finding) rune {
 				return GlyphSigned
 			case isAppleAuthority(a):
 				return GlyphApple
-			default:
+			case e.Facts["notarized"] == "true":
 				return GlyphNotarized
+			default:
+				// A valid, trusted-anchor signature that is NOT notarized (Developer-ID
+				// signed but not stapled). Since the native backend now sets `authority`
+				// for any valid signature (not only Gatekeeper-notarized), ◆ is gated on
+				// the explicit `notarized` fact so it can't over-report (PR #25 coupling).
+				return GlyphSigned
 			}
 		}
 	}

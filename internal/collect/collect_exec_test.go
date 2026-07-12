@@ -12,7 +12,7 @@ import (
 
 // withSigProbe injects a fake code-signature backend so CollectCodesign is exercised
 // hermetically (no Security.framework / no shelling out) on any platform.
-func withSigProbe(t *testing.T, fn func(string) (string, bool, string)) {
+func withSigProbe(t *testing.T, fn func(string) (string, bool, string, bool)) {
 	t.Helper()
 	orig := sigProbe
 	sigProbe = fn
@@ -20,8 +20,8 @@ func withSigProbe(t *testing.T, fn func(string) (string, bool, string)) {
 }
 
 func TestCollectCodesign_Unsigned(t *testing.T) {
-	withSigProbe(t, func(string) (string, bool, string) {
-		return "code object is not signed at all", false, ""
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "code object is not signed at all", false, "", false
 	})
 	ev := CollectCodesign("/tmp/unsigned")
 	if len(ev) != 1 || ev[0].Facts["signed"] != "false" {
@@ -38,8 +38,8 @@ func TestCollectCodesign_NoBackend(t *testing.T) {
 }
 
 func TestCollectCodesign_SignedAndAccepted(t *testing.T) {
-	withSigProbe(t, func(string) (string, bool, string) {
-		return "", true, "Developer ID Application: Apple Inc."
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "", true, "Developer ID Application: Apple Inc.", false
 	})
 	ev := CollectCodesign("/Applications/Safari.app")
 	if len(ev) != 1 || ev[0].Facts["signed"] != "true" {
@@ -51,8 +51,8 @@ func TestCollectCodesign_SignedAndAccepted(t *testing.T) {
 }
 
 func TestCollectCodesign_SignedButRejected(t *testing.T) {
-	withSigProbe(t, func(string) (string, bool, string) {
-		return "", false, "Self Signed" // valid-ish signature, but not accepted
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "", false, "Self Signed", false // valid-ish signature, but not accepted
 	})
 	ev := CollectCodesign("/tmp/selfsigned")
 	if len(ev) != 1 || ev[0].Facts["signed"] != "true" {

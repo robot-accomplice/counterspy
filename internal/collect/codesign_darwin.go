@@ -14,8 +14,9 @@ package collect
 //   0 signed & valid, 1 unsigned, 2 revoked, 3 signed-but-invalid, -1 not a code object.
 // kSecCSDoNotValidateResources: we want the signing IDENTITY, not a deep bundle-integrity
 // hash of every resource (that recursion is what made large .app bundles take seconds).
-static int native_sig(const char* path, char* auth, int authLen) {
+static int native_sig(const char* path, char* auth, int authLen, int* notarized) {
 	auth[0] = 0;
+	*notarized = 0;
 	CFStringRef p = CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8);
 	if (!p) return -1;
 	CFURLRef url = CFURLCreateWithFileSystemPath(NULL, p, kCFURLPOSIXPathStyle, false);
@@ -31,6 +32,16 @@ static int native_sig(const char* path, char* auth, int authLen) {
 	int result;
 	if (valid == errSecSuccess) {
 		result = 0;
+		// Offline stapled-ticket notarization check: re-validate against the built-in
+		// "notarized" Gatekeeper requirement. This reads the STAPLED ticket in-process
+		// (no syspolicyd, no network) so ◆ notarized can be told apart from ◇ merely-signed.
+		SecRequirementRef notReq = NULL;
+		if (SecRequirementCreateWithString(CFSTR("notarized"), kSecCSDefaultFlags, &notReq) == errSecSuccess && notReq) {
+			if (SecStaticCodeCheckValidityWithErrors(code, kSecCSDoNotValidateResources, notReq, NULL) == errSecSuccess) {
+				*notarized = 1;
+			}
+			CFRelease(notReq);
+		}
 		CFDictionaryRef info = NULL;
 		if (SecCodeCopySigningInformation(code, kSecCSSigningInformation, &info) == errSecSuccess && info) {
 			CFArrayRef certs = (CFArrayRef)CFDictionaryGetValue(info, kSecCodeInfoCertificates);
@@ -75,20 +86,21 @@ func init() { sigProbe = nativeSig }
 // nativeSig implements sigProbe via Security.framework. It returns the verify-error string /
 // accepted / authority in the exact shape ParseCodesign consumes, so the downstream evidence
 // is identical to the old codesign/spctl shell-out — just in-process and ~1000× faster.
-func nativeSig(path string) (verifyErr string, accepted bool, authority string) {
+func nativeSig(path string) (verifyErr string, accepted bool, authority string, notarized bool) {
 	cp := C.CString(path)
 	defer C.free(unsafe.Pointer(cp))
 	var buf [512]C.char
-	switch C.native_sig(cp, &buf[0], C.int(len(buf))) {
+	var not C.int
+	switch C.native_sig(cp, &buf[0], C.int(len(buf)), &not) {
 	case 0:
-		return "", true, C.GoString(&buf[0])
+		return "", true, C.GoString(&buf[0]), not == 1
 	case 2:
-		return "certificate revoked", false, ""
+		return "certificate revoked", false, "", false
 	case 3:
-		return "", false, "" // signed but invalid (tampered/expired) — signed, no trusted authority
+		return "", false, "", false // signed but invalid (tampered/expired) — signed, no trusted authority
 	case 1, -1:
-		return "code object is not signed at all", false, ""
+		return "code object is not signed at all", false, "", false
 	default:
-		return "code object is not signed at all", false, ""
+		return "code object is not signed at all", false, "", false
 	}
 }
