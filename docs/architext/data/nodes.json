@@ -5,18 +5,38 @@
       "type": "actor",
       "name": "Operator (sudo)",
       "summary": "The Mac owner running CounterSpy under sudo to triage their machine and approve quarantine actions.",
-      "responsibilities": ["Run scans", "Decide per-item whether to quarantine", "Maintain the user allowlist of vetted tools"],
+      "responsibilities": [
+        "Run scans",
+        "Decide per-item whether to quarantine",
+        "Maintain the user allowlist of vetted tools"
+      ],
       "owner": "End user",
       "sourcePaths": [],
       "runtime": "macOS terminal",
-      "interfaces": ["counterspy CLI"],
-      "dependencies": ["counterspy-cli"],
-      "dataHandled": ["scan-findings"],
-      "security": ["Runs as root; sole approver of quarantine decisions"],
-      "observability": ["Terminal report", "manifest.json"],
-      "relatedFlows": ["scan-pipeline", "quarantine"],
+      "interfaces": [
+        "counterspy CLI"
+      ],
+      "dependencies": [
+        "counterspy-cli"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Runs as root; sole approver of quarantine decisions"
+      ],
+      "observability": [
+        "Terminal report",
+        "manifest.json"
+      ],
+      "relatedFlows": [
+        "scan-pipeline",
+        "quarantine"
+      ],
       "relatedDecisions": [],
-      "knownRisks": ["risk-false-positive-volume"],
+      "knownRisks": [
+        "risk-false-positive-volume"
+      ],
       "verification": []
     },
     {
@@ -24,35 +44,84 @@
       "type": "software-system",
       "name": "CounterSpy",
       "summary": "On-demand macOS spyware triage tool: collect four correlated signals, score, synthesize recommendations, reversibly quarantine on approval.",
-      "responsibilities": ["Detect userland persistence/process/TCC/codesign spyware signals", "Recommend, never auto-act", "Never delete — reversible quarantine only"],
+      "responsibilities": [
+        "Detect userland persistence/process/TCC/codesign spyware signals",
+        "Recommend, never auto-act",
+        "Never delete — reversible quarantine only"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["main.go", "internal"],
+      "sourcePaths": [
+        "main.go",
+        "internal"
+      ],
       "runtime": "Single Go binary on macOS",
-      "interfaces": ["scan", "scan --json", "scan --interactive", "restore"],
-      "dependencies": ["macos-tools"],
-      "dataHandled": ["scan-findings", "quarantine-manifest"],
-      "security": ["Runs under sudo", "Never touches SIP/Apple-signed items", "Reversible move-not-delete"],
-      "observability": ["Ranked report", "--json", "manifest.json (RCA trail)"],
-      "relatedFlows": ["scan-pipeline", "quarantine"],
-      "relatedDecisions": ["dec-move-not-delete", "dec-deterministic-synthesis"],
-      "knownRisks": ["risk-false-positive-volume", "risk-signed-malware"],
-      "verification": ["go test ./...", "architext validate"]
+      "interfaces": [
+        "scan",
+        "scan --json",
+        "scan --interactive",
+        "restore"
+      ],
+      "dependencies": [
+        "macos-tools"
+      ],
+      "dataHandled": [
+        "scan-findings",
+        "quarantine-manifest"
+      ],
+      "security": [
+        "Runs under sudo",
+        "Never touches SIP/Apple-signed items",
+        "Reversible move-not-delete"
+      ],
+      "observability": [
+        "Ranked report",
+        "--json",
+        "manifest.json (RCA trail)"
+      ],
+      "relatedFlows": [
+        "scan-pipeline",
+        "quarantine"
+      ],
+      "relatedDecisions": [
+        "dec-move-not-delete",
+        "dec-deterministic-synthesis"
+      ],
+      "knownRisks": [
+        "risk-false-positive-volume",
+        "risk-signed-malware"
+      ],
+      "verification": [
+        "go test ./...",
+        "architext validate"
+      ]
     },
     {
       "id": "macos-tools",
       "type": "external-service",
       "name": "macOS native tools",
       "summary": "The OS utilities CounterSpy shells out to at the collector exec edge.",
-      "responsibilities": ["Provide raw evidence: launchctl, plutil, codesign, spctl, ps, lsof, sqlite3 (TCC)"],
+      "responsibilities": [
+        "Provide raw evidence: launchctl, plutil, codesign, spctl, ps, lsof, sqlite3 (TCC)"
+      ],
       "owner": "Apple",
       "sourcePaths": [],
       "runtime": "macOS",
-      "interfaces": ["CLI stdout / exit codes"],
+      "interfaces": [
+        "CLI stdout / exit codes"
+      ],
       "dependencies": [],
-      "dataHandled": ["process-list", "code-signatures", "tcc-grants"],
-      "security": ["Gatekeeper verdict via spctl exit code is the trust anchor"],
+      "dataHandled": [
+        "process-list",
+        "code-signatures",
+        "tcc-grants"
+      ],
+      "security": [
+        "Gatekeeper verdict via spctl exit code is the trust anchor"
+      ],
       "observability": [],
-      "relatedFlows": ["scan-pipeline"],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
       "relatedDecisions": [],
       "knownRisks": [],
       "verification": []
@@ -62,190 +131,519 @@
       "type": "service",
       "name": "counterspy binary",
       "summary": "The deployable unit: a single Go binary that orchestrates the three-phase pipeline.",
-      "responsibilities": ["Parse subcommands/flags", "Fan out collectors (fail-loud gaps)", "Run score→interpret→report", "Drive the consented quarantine loop"],
+      "responsibilities": [
+        "Parse subcommands/flags",
+        "Fan out collectors (fail-loud gaps)",
+        "Run score→interpret→report",
+        "Drive the consented quarantine loop"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["main.go"],
+      "sourcePaths": [
+        "main.go"
+      ],
       "runtime": "Go binary",
-      "interfaces": ["run(args, stdout)"],
-      "dependencies": ["mod-collect", "mod-score", "mod-interpret", "mod-report", "mod-act", "mod-model", "mod-tui", "mod-feedback", "mod-egress"],
-      "dataHandled": ["scan-findings"],
-      "security": ["Applies user allowlist", "Only phase that reads stdin for consent"],
-      "observability": ["stdout report", "gap lines"],
-      "relatedFlows": ["scan-pipeline", "quarantine"],
+      "interfaces": [
+        "run(args, stdout)"
+      ],
+      "dependencies": [
+        "mod-collect",
+        "mod-score",
+        "mod-interpret",
+        "mod-report",
+        "mod-act",
+        "mod-model",
+        "mod-tui",
+        "mod-feedback",
+        "mod-egress",
+        "mod-mark"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Applies user allowlist",
+        "Only phase that reads stdin for consent"
+      ],
+      "observability": [
+        "stdout report",
+        "gap lines"
+      ],
+      "relatedFlows": [
+        "scan-pipeline",
+        "quarantine"
+      ],
       "relatedDecisions": [],
       "knownRisks": [],
-      "verification": ["go test ."]
+      "verification": [
+        "go test ."
+      ]
     },
     {
       "id": "mod-model",
       "type": "module",
       "name": "internal/model",
       "summary": "The shared vocabulary (Evidence, Subject, Finding, Assessment, Action, Manifest). No I/O; imports only fmt.",
-      "responsibilities": ["Define shared types", "Subject.Key() correlation identity", "Subject.Display() human name"],
+      "responsibilities": [
+        "Define shared types",
+        "Subject.Key() correlation identity",
+        "Subject.Display() human name"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/model/types.go"],
+      "sourcePaths": [
+        "internal/model/types.go"
+      ],
       "runtime": "in-process",
-      "interfaces": ["Go types"],
+      "interfaces": [
+        "Go types"
+      ],
       "dependencies": [],
-      "dataHandled": ["scan-findings"],
-      "security": ["Namespaced Key() prevents subject-aliasing"],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Namespaced Key() prevents subject-aliasing"
+      ],
       "observability": [],
-      "relatedFlows": ["scan-pipeline"],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
       "relatedDecisions": [],
       "knownRisks": [],
-      "verification": ["go test ./internal/model/"]
+      "verification": [
+        "go test ./internal/model/"
+      ]
+    },
+    {
+      "id": "mod-mark",
+      "type": "module",
+      "name": "internal/mark",
+      "summary": "Pure symbology vocabulary: the concern/trust/liveness glyph marks, the uniform-cadence four-slot cluster, and the Legend that documents them. Shared by every render surface so the key can't drift.",
+      "responsibilities": [
+        "Concern/Trust/TrustLabel classifiers",
+        "Classify (liveness: active/vestigial/socket)",
+        "Cluster (uniform-cadence four-slot marks)",
+        "Legend/LegendLine/LegendCompact/LegendMarkdown"
+      ],
+      "owner": "Project maintainers",
+      "sourcePaths": [
+        "internal/mark/mark.go"
+      ],
+      "runtime": "in-process (pure)",
+      "interfaces": [
+        "Concern",
+        "Trust",
+        "TrustLabel",
+        "Classify",
+        "Cluster",
+        "Legend",
+        "LegendLine",
+        "LegendCompact",
+        "LegendMarkdown"
+      ],
+      "dependencies": [
+        "mod-model"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Display-only — trust/liveness marks never change verdicts or scoring; Apple-authority check excludes the Developer-ID leaf so it can't be spoofed"
+      ],
+      "observability": [
+        "CLI legend footer",
+        "TUI ? overlay",
+        "README key (drift-tested)"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [],
+      "knownRisks": [],
+      "verification": [
+        "go test ./internal/mark/"
+      ]
     },
     {
       "id": "mod-collect",
       "type": "module",
       "name": "internal/collect",
       "summary": "Four read-only collectors, each split into a pure parser + an exec edge: persistence, codesign, tcc, proctree+network.",
-      "responsibilities": ["Gather evidence from native tools", "Parse tool output (unit-tested against fixtures)", "Fail loud when a source is unreadable"],
+      "responsibilities": [
+        "Gather evidence from native tools",
+        "Parse tool output (unit-tested against fixtures)",
+        "Fail loud when a source is unreadable"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/collect/persistence.go", "internal/collect/codesign.go", "internal/collect/tcc.go", "internal/collect/proctree.go"],
+      "sourcePaths": [
+        "internal/collect/persistence.go",
+        "internal/collect/codesign.go",
+        "internal/collect/tcc.go",
+        "internal/collect/proctree.go"
+      ],
       "runtime": "in-process + exec",
-      "interfaces": ["Collect*() ([]Evidence, error)"],
-      "dependencies": ["mod-model", "macos-tools"],
-      "dataHandled": ["process-list", "code-signatures", "tcc-grants"],
-      "security": ["argv[0] never used as identity", "authority trusted only on spctl accept"],
-      "observability": ["gap errors surfaced by the CLI"],
-      "relatedFlows": ["scan-pipeline"],
-      "relatedDecisions": ["dec-pid-identity"],
+      "interfaces": [
+        "Collect*() ([]Evidence, error)"
+      ],
+      "dependencies": [
+        "mod-model",
+        "macos-tools"
+      ],
+      "dataHandled": [
+        "process-list",
+        "code-signatures",
+        "tcc-grants"
+      ],
+      "security": [
+        "argv[0] never used as identity",
+        "authority trusted only on spctl accept"
+      ],
+      "observability": [
+        "gap errors surfaced by the CLI"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [
+        "dec-pid-identity"
+      ],
       "knownRisks": [],
-      "verification": ["go test ./internal/collect/"]
+      "verification": [
+        "go test ./internal/collect/"
+      ]
     },
     {
       "id": "mod-score",
       "type": "module",
       "name": "internal/score",
       "summary": "Pure scoring engine: group evidence by subject, sum weights, correlation multiplier, exact-match Apple allowlist suppression, hard tripwires.",
-      "responsibilities": ["Score([]Evidence) []Finding", "Suppress allowlisted subjects", "Fire tripwires before suppression"],
+      "responsibilities": [
+        "Score([]Evidence) []Finding",
+        "Suppress allowlisted subjects",
+        "Fire tripwires before suppression"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/score/score.go", "internal/score/weights.go", "internal/score/allowlist.go", "internal/score/tripwire.go"],
+      "sourcePaths": [
+        "internal/score/score.go",
+        "internal/score/weights.go",
+        "internal/score/allowlist.go",
+        "internal/score/tripwire.go"
+      ],
       "runtime": "in-process (pure)",
-      "interfaces": ["Score", "IsAllowlisted"],
-      "dependencies": ["mod-model"],
-      "dataHandled": ["scan-findings"],
-      "security": ["Tripwire can never be suppressed by an allowlist hit"],
+      "interfaces": [
+        "Score",
+        "IsAllowlisted"
+      ],
+      "dependencies": [
+        "mod-model"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Tripwire can never be suppressed by an allowlist hit"
+      ],
       "observability": [],
-      "relatedFlows": ["scan-pipeline"],
-      "relatedDecisions": ["dec-pure-scorer"],
-      "knownRisks": ["risk-signed-malware"],
-      "verification": ["go test ./internal/score/"]
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [
+        "dec-pure-scorer"
+      ],
+      "knownRisks": [
+        "risk-signed-malware"
+      ],
+      "verification": [
+        "go test ./internal/score/"
+      ]
     },
     {
       "id": "mod-interpret",
       "type": "module",
       "name": "internal/interpret",
       "summary": "Pure, rule-based synthesizer: turns each Finding into a verdict, category, and recommendation (Quarantine/Investigate/Monitor).",
-      "responsibilities": ["Assess([]Finding) []Assessment", "Categorize (keylogger/backdoor/surveillance-capable/...)", "Recommend action"],
+      "responsibilities": [
+        "Assess([]Finding) []Assessment",
+        "Categorize (keylogger/backdoor/surveillance-capable/...)",
+        "Recommend action"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/interpret/interpret.go"],
+      "sourcePaths": [
+        "internal/interpret/interpret.go"
+      ],
       "runtime": "in-process (pure)",
-      "interfaces": ["Assess"],
-      "dependencies": ["mod-model", "mod-score"],
-      "dataHandled": ["scan-findings"],
-      "security": ["Deterministic — no LLM in the decision path; verdicts are auditable"],
+      "interfaces": [
+        "Assess"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-score"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "Deterministic — no LLM in the decision path; verdicts are auditable"
+      ],
       "observability": [],
-      "relatedFlows": ["scan-pipeline"],
-      "relatedDecisions": ["dec-deterministic-synthesis"],
-      "knownRisks": ["risk-false-positive-volume"],
-      "verification": ["go test ./internal/interpret/"]
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [
+        "dec-deterministic-synthesis"
+      ],
+      "knownRisks": [
+        "risk-false-positive-volume"
+      ],
+      "verification": [
+        "go test ./internal/interpret/"
+      ]
     },
     {
       "id": "mod-report",
       "type": "module",
       "name": "internal/report",
       "summary": "Presentation only: executive summary + ranked actionable findings (Monitor tier counted, not dumped) and a JSON form.",
-      "responsibilities": ["Render([]Assessment) string", "RenderJSON([]Assessment)"],
+      "responsibilities": [
+        "Render([]Assessment) string",
+        "RenderJSON([]Assessment)"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/report/report.go"],
+      "sourcePaths": [
+        "internal/report/report.go"
+      ],
       "runtime": "in-process (pure)",
-      "interfaces": ["Render", "RenderJSON"],
-      "dependencies": ["mod-model"],
-      "dataHandled": ["scan-findings"],
-      "security": ["No analysis logic — cannot change verdicts"],
-      "observability": ["Human report", "--json"],
-      "relatedFlows": ["scan-pipeline"],
+      "interfaces": [
+        "Render",
+        "RenderJSON"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-mark"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "No analysis logic — cannot change verdicts"
+      ],
+      "observability": [
+        "Human report",
+        "--json"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
       "relatedDecisions": [],
       "knownRisks": [],
-      "verification": ["go test ./internal/report/"]
+      "verification": [
+        "go test ./internal/report/"
+      ]
     },
     {
       "id": "mod-act",
       "type": "module",
       "name": "internal/act",
       "summary": "The only mutating phase: disable + MOVE artifacts (never delete) into a collision-proof quarantine mirror, with a self-written manifest; reversible restore.",
-      "responsibilities": ["Quarantine (refuse allowlisted/protected paths)", "Write manifest (undo + RCA trail)", "Restore without clobbering"],
+      "responsibilities": [
+        "Quarantine (refuse allowlisted/protected paths)",
+        "Write manifest (undo + RCA trail)",
+        "Restore without clobbering"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/act/quarantine.go", "internal/act/restore.go"],
+      "sourcePaths": [
+        "internal/act/quarantine.go",
+        "internal/act/restore.go"
+      ],
       "runtime": "in-process + exec (launchctl)",
-      "interfaces": ["Quarantine", "Restore"],
-      "dependencies": ["mod-model", "mod-score"],
-      "dataHandled": ["quarantine-manifest"],
-      "security": ["Never deletes", "Refuses /System + Apple-signed", "Path canonicalization", "Restore refuses to overwrite"],
-      "observability": ["manifest.json"],
-      "relatedFlows": ["quarantine"],
-      "relatedDecisions": ["dec-move-not-delete"],
+      "interfaces": [
+        "Quarantine",
+        "Restore"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-score"
+      ],
+      "dataHandled": [
+        "quarantine-manifest"
+      ],
+      "security": [
+        "Never deletes",
+        "Refuses /System + Apple-signed",
+        "Path canonicalization",
+        "Restore refuses to overwrite"
+      ],
+      "observability": [
+        "manifest.json"
+      ],
+      "relatedFlows": [
+        "quarantine"
+      ],
+      "relatedDecisions": [
+        "dec-move-not-delete"
+      ],
       "knownRisks": [],
-      "verification": ["go test ./internal/act/"]
+      "verification": [
+        "go test ./internal/act/"
+      ]
     },
     {
       "id": "mod-tui",
       "type": "module",
       "name": "internal/tui",
       "summary": "Interactive tcell triage face over []Assessment: a pure Model + update(key)→[]Cmd, tcell only at the view/Run edge, acting through a locally-defined Actor interface. No analysis. Imports ONLY internal/model (enforced by TestDecouplingInvariant); the act coupling lives in main's cliActor adapter, not here.",
-      "responsibilities": ["Render master-detail triage (findings + evidence)", "Navigate/filter/sort, quarantine with confirm, restore", "Stay a thin face — imports only internal/model"],
+      "responsibilities": [
+        "Render master-detail triage (findings + evidence)",
+        "Navigate/filter/sort, quarantine with confirm, restore",
+        "Stay a thin face — imports only internal/model"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/tui/model.go", "internal/tui/update.go", "internal/tui/view.go", "internal/tui/run.go"],
+      "sourcePaths": [
+        "internal/tui/model.go",
+        "internal/tui/update.go",
+        "internal/tui/view.go",
+        "internal/tui/run.go"
+      ],
       "runtime": "in-process (tcell terminal)",
-      "interfaces": ["Run(screen, Model, Actor)", "New"],
-      "dependencies": ["mod-model"],
-      "dataHandled": ["scan-findings", "quarantine-manifest"],
-      "security": ["Sanitizes attacker strings before drawing (via report.Clean at the CLI edge)", "Acts only through the Actor interface (its guards apply)"],
-      "observability": ["on-screen toast"],
-      "relatedFlows": ["scan-pipeline", "quarantine"],
-      "relatedDecisions": ["dec-move-not-delete"],
-      "knownRisks": ["risk-false-positive-volume"],
-      "verification": ["go test ./internal/tui/"]
+      "interfaces": [
+        "Run(screen, Model, Actor)",
+        "New"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-mark"
+      ],
+      "dataHandled": [
+        "scan-findings",
+        "quarantine-manifest"
+      ],
+      "security": [
+        "Sanitizes attacker strings before drawing (via report.Clean at the CLI edge)",
+        "Acts only through the Actor interface (its guards apply)"
+      ],
+      "observability": [
+        "on-screen toast"
+      ],
+      "relatedFlows": [
+        "scan-pipeline",
+        "quarantine"
+      ],
+      "relatedDecisions": [
+        "dec-move-not-delete"
+      ],
+      "knownRisks": [
+        "risk-false-positive-volume"
+      ],
+      "verification": [
+        "go test ./internal/tui/"
+      ]
     },
     {
       "id": "mod-feedback",
       "type": "module",
       "name": "internal/feedback",
       "summary": "Turns labeled findings into intrinsically-anonymous field reports and pushes them to a write-only sink. Egress-only: the Transmitter interface returns only error; the HTTP impl reads the status code and discards the body without decoding it; the tool never fetches from the network (enforced by TestEgressOnly). Off by default.",
-      "responsibilities": ["Minimize an Assessment to an anonymous fingerprint with public-identity gating", "Persist/dedupe labels locally; consent-gated (off/ask/always) submission", "Push-only transport (file + http)"],
+      "responsibilities": [
+        "Minimize an Assessment to an anonymous fingerprint with public-identity gating",
+        "Persist/dedupe labels locally; consent-gated (off/ask/always) submission",
+        "Push-only transport (file + http)"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/feedback/minimize.go", "internal/feedback/capture.go", "internal/feedback/store.go", "internal/feedback/transmit.go", "internal/feedback/http.go", "internal/feedback/config.go"],
+      "sourcePaths": [
+        "internal/feedback/minimize.go",
+        "internal/feedback/capture.go",
+        "internal/feedback/store.go",
+        "internal/feedback/transmit.go",
+        "internal/feedback/http.go",
+        "internal/feedback/config.go"
+      ],
       "runtime": "in-process + outbound HTTPS (POST only)",
-      "interfaces": ["Minimize", "Capture", "Store", "Transmitter", "LoadConfig"],
-      "dependencies": ["mod-model"],
-      "dataHandled": ["scan-findings"],
-      "security": ["No raw path/username/hostname leaves the machine; paths become classes", "Private identity dropped unless recognizably public or explicitly consented", "Egress-only: no network reads, no remote config/allowlist/update"],
-      "observability": ["local feedback store", "feedback-export.jsonl"],
-      "relatedFlows": ["scan-pipeline"],
+      "interfaces": [
+        "Minimize",
+        "Capture",
+        "Store",
+        "Transmitter",
+        "LoadConfig"
+      ],
+      "dependencies": [
+        "mod-model"
+      ],
+      "dataHandled": [
+        "scan-findings"
+      ],
+      "security": [
+        "No raw path/username/hostname leaves the machine; paths become classes",
+        "Private identity dropped unless recognizably public or explicitly consented",
+        "Egress-only: no network reads, no remote config/allowlist/update"
+      ],
+      "observability": [
+        "local feedback store",
+        "feedback-export.jsonl"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
       "relatedDecisions": [],
-      "knownRisks": ["risk-false-positive-volume"],
-      "verification": ["go test ./internal/feedback/", "TestEgressOnly"]
+      "knownRisks": [
+        "risk-false-positive-volume"
+      ],
+      "verification": [
+        "go test ./internal/feedback/",
+        "TestEgressOnly"
+      ]
     },
     {
       "id": "mod-egress",
       "type": "module",
       "name": "internal/egress",
       "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability × egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only; reads no payloads.",
-      "responsibilities": ["Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence", "Group by app; score concern; infer exfil risk + candidate categories", "Feed the live TUI (via Sampler) and the non-TTY report"],
+      "responsibilities": [
+        "Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence",
+        "Group by app; score concern; infer exfil risk + candidate categories",
+        "Feed the live TUI (via Sampler) and the non-TTY report"
+      ],
       "owner": "Project maintainers",
-      "sourcePaths": ["internal/egress/parse.go", "internal/egress/rate.go", "internal/egress/aggregate.go", "internal/egress/concern.go", "internal/egress/monitor.go"],
+      "sourcePaths": [
+        "internal/egress/parse.go",
+        "internal/egress/rate.go",
+        "internal/egress/aggregate.go",
+        "internal/egress/concern.go",
+        "internal/egress/monitor.go"
+      ],
       "runtime": "in-process + exec (nettop/lsof/ps/codesign/sqlite3)",
-      "interfaces": ["New", "Monitor.Sample", "Concern", "Exfil", "Aggregate"],
-      "dependencies": ["mod-model", "mod-collect", "macos-tools"],
-      "dataHandled": ["process-list", "code-signatures", "tcc-grants"],
-      "security": ["Observe-only; no blocking, no payload reading", "Exfil is INFERRED from capability × egress, never confirmed content", "Exec edge injectable so CI runs without sudo/tools"],
-      "observability": ["live egress TUI", "egress report / --json"],
-      "relatedFlows": ["scan-pipeline"],
+      "interfaces": [
+        "New",
+        "Monitor.Sample",
+        "Concern",
+        "Exfil",
+        "Aggregate"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-collect",
+        "macos-tools"
+      ],
+      "dataHandled": [
+        "process-list",
+        "code-signatures",
+        "tcc-grants"
+      ],
+      "security": [
+        "Observe-only; no blocking, no payload reading",
+        "Exfil is INFERRED from capability × egress, never confirmed content",
+        "Exec edge injectable so CI runs without sudo/tools"
+      ],
+      "observability": [
+        "live egress TUI",
+        "egress report / --json"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
       "relatedDecisions": [],
       "knownRisks": [],
-      "verification": ["go test ./internal/egress/"]
+      "verification": [
+        "go test ./internal/egress/"
+      ]
     }
   ]
 }

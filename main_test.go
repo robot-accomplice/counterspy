@@ -16,6 +16,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"counterspy/internal/feedback"
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/tui"
 )
@@ -837,5 +838,19 @@ func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
 	isTerminal = func(*os.File) bool { return false } // non-tty → plain collectAll
 	if ev2, _ := collectWithSpinner(); len(ev2) != 1 {
 		t.Fatalf("non-tty path wrong: %+v", ev2)
+	}
+}
+
+// Task 6 / cp-T5 review: livenessFor marks a persistence target vestigial when it
+// is not among the running paths (best-effort; a real ps runs but our fake target
+// won't be running).
+func TestLivenessForMarksVestigialWhenNotRunning(t *testing.T) {
+	a := model.Assessment{Finding: model.Finding{
+		Subject:  model.Subject{Path: "/nope/definitely-not-running-xyz"},
+		Evidence: []model.Evidence{{Kind: model.KindPersistence, Facts: map[string]string{"target": "/nope/definitely-not-running-xyz"}}},
+	}}
+	got := livenessFor([]model.Assessment{a})
+	if got["path:/nope/definitely-not-running-xyz"].RunState != mark.GlyphVestigial {
+		t.Errorf("expected vestigial, got %+v", got["path:/nope/definitely-not-running-xyz"])
 	}
 }
