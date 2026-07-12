@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
 
@@ -43,14 +44,15 @@ type Model struct {
 	SortByRec   bool // false = sort by score desc
 	ShowMonitor bool
 	Focus       focusMode
-	Pending     model.Assessment // the item shown in the confirm modal
-	Done        map[string]bool  // Subject.Key() of quarantined items
+	Pending     model.Assessment         // the item shown in the confirm modal
+	Done        map[string]bool          // Subject.Key() of quarantined items
+	Liveness    map[string]mark.Liveness // Subject.Key() -> run-state/socket marks
 	Toast       string
 	ReadOnly    bool // --from snapshot: triage only, quarantine disabled (untrusted paths)
 }
 
 func New(assessments []model.Assessment, gaps []string) Model {
-	return Model{Assessments: assessments, Gaps: gaps, Done: map[string]bool{}}
+	return Model{Assessments: assessments, Gaps: gaps, Done: map[string]bool{}, Liveness: map[string]mark.Liveness{}}
 }
 
 func recRank(r model.Recommendation) int {

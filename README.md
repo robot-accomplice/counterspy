@@ -78,6 +78,29 @@ filter, `?` help, `Q` quit. It needs a real terminal; piped, it tells you to use
 Run under `sudo` for full visibility — without it, the TCC (privacy-grant) signal is
 unavailable and the report says so (it never silently reads as "clean").
 
+## Reading the marks
+
+Each finding is tagged with a four-slot glyph cluster —
+`[concern] [trust] [run-state] [socket]` — read left to right. Color also encodes
+the concern tier, so the marks never rely on color alone. This key is generated
+from the code, so it always matches what the tool emits:
+
+<!-- BEGIN LEGEND (generated) -->
+| Mark | Axis | Meaning |
+|---|---|---|
+| ⚑ | concern | quarantine |
+| ▲ | concern | investigate |
+| · | concern | monitor |
+| ● | trust | Apple system code |
+| ◆ | trust | notarized (Developer ID, accepted) |
+| ◇ | trust | signed, not notarized |
+| ○ | trust | unsigned |
+| ⊘ | trust | revoked certificate |
+| ▸ | liveness | running |
+| † | liveness | vestigial (installed, not running) |
+| ↔ | liveness | live network socket |
+<!-- END LEGEND -->
+
 ## How it works
 
 A strict three-phase pipeline (see [design spec](docs/superpowers/specs/2026-07-08-counterspy-design.md)):
