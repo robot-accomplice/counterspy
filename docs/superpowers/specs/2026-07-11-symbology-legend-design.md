@@ -115,10 +115,17 @@ is deliberately PID-keyed with no path (the cp-8 anti-spoof-alias hardening). So
 a LaunchAgent and its running process are different subject keys and never merge.
 To classify active-vs-vestigial we correlate on real exec path:
 
-1. **T-4 — real exec path per PID.** Resolve each running PID's true executable
-   path (`proc_pidpath`), with a `ps`-derived fallback so tests neither shell out
-   nor require sudo (project Rule: mockable integration, no shelling in tests).
-   Result: a set of running executable paths.
+1. **T-4 — paths referenced by running processes (ESC-1).** Build the set of
+   filesystem paths any running process references — its executable AND every
+   absolute-path argv token — from `ps -axo pid=,args= -ww`. This supersedes a
+   `comm=`/`proc_pidpath` exec-path-only approach, which a swarm review proved
+   unreliable: `comm=` follows argv0 (bare `node` never matches), and neither
+   handles interpreter-wrapped persistence (`python3 /path/payload.py` — the T-7
+   case, where the payload is an argv token, not the exec path). Argv correlation
+   is sound here because liveness is DISPLAY-ONLY: a spoofed argv only mislabels a
+   glyph, never suppresses a finding or changes a score. Parser is pure/tested;
+   the `ps` call is the untested I/O edge. Known edge: space-containing paths are
+   whitespace-split by `ps` and won't match as a single token.
 2. **#23 — liveness classifier.** A **pure** function
    `Liveness(subjects, runningPaths) -> map[Subject.Key]LivenessMark`:
    - persistence subject whose `target` ∈ runningPaths → `▸ active`

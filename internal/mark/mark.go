@@ -98,8 +98,8 @@ type Liveness struct {
 }
 
 // Classify derives per-subject liveness (keyed by Subject.Key()). `running` is
-// the set of real executable paths of currently-running processes (see
-// collect.CollectExecPaths / T-4). Rules:
+// the set of filesystem paths referenced by running processes — executables and
+// argv path tokens (see collect.CollectRunningPaths / T-4, ESC-1). Rules:
 //   - socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true")
 //   - a finding with process evidence is active (it is a live process)
 //   - else a persistence finding is active iff its target path is running, else vestigial

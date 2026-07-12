@@ -6,36 +6,47 @@ import (
 	"strings"
 )
 
-// ParseExecPaths turns `ps -axo pid=,comm=` output into the set of real
-// executable paths of running processes. Each line is "<pid> <path>"; the path
-// may contain spaces, so we split once on the first space after the numeric pid.
-// This is the trustworthy exec path (unlike argv0), enabling persistence↔process
-// correlation for liveness (ticket T-4).
-func ParseExecPaths(b []byte) map[string]bool {
+// ParseRunningPaths extracts, from `ps -axo pid=,args= -ww` output, the set of
+// filesystem paths currently referenced by a running process: its executable AND
+// every argv token that looks like an absolute path. Correlating a persistence
+// target against THIS set (not just the exec path) makes the #23 active/vestigial
+// mark correct for two cases `comm=` gets wrong (ESC-1):
+//   - bare-argv0 processes (e.g. `node` invoked via PATH) — the target still
+//     appears if it is an argv path token;
+//   - interpreter-wrapped persistence (`/usr/bin/python3 /path/payload.py`) — the
+//     script is an argv token, so the T-7 payload correlates even though the
+//     process's executable is the interpreter.
+//
+// Ticket T-4. Liveness is DISPLAY-ONLY, so a spoofed argv only mislabels a glyph;
+// it never suppresses a finding or changes a score. Known edge: a path containing
+// spaces is whitespace-split by ps and won't match as a single token.
+func ParseRunningPaths(b []byte) map[string]bool {
 	paths := map[string]bool{}
 	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimLeft(line, " ")
+		line = strings.TrimLeft(line, " \t")
 		sp := strings.IndexByte(line, ' ')
 		if sp < 0 {
 			continue
 		}
 		if _, err := strconv.Atoi(line[:sp]); err != nil {
-			continue // not a "<pid> <path>" line
+			continue // not a "<pid> <args>" line
 		}
-		if p := strings.TrimSpace(line[sp+1:]); p != "" {
-			paths[p] = true
+		for _, tok := range strings.Fields(line[sp+1:]) {
+			if strings.HasPrefix(tok, "/") { // absolute-path token (exec or script arg)
+				paths[tok] = true
+			}
 		}
 	}
 	return paths
 }
 
-// CollectExecPaths resolves running processes' real exec paths. Best-effort:
-// callers treat an error as "no running-path knowledge" (persistence then reads
-// as vestigial rather than crashing).
-func CollectExecPaths() (map[string]bool, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,comm=").Output()
+// CollectRunningPaths resolves the paths referenced by running processes.
+// Best-effort: callers treat an error as "nothing known running" (persistence
+// then reads as vestigial rather than crashing).
+func CollectRunningPaths() (map[string]bool, error) {
+	out, err := exec.Command("ps", "-axo", "pid=,args=", "-ww").Output()
 	if err != nil {
 		return nil, err
 	}
-	return ParseExecPaths(out), nil
+	return ParseRunningPaths(out), nil
 }
