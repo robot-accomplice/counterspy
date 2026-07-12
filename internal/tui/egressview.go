@@ -340,6 +340,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		if c.OutRate > 0 {
 			rate = human(c.OutRate) + "/s"
 		}
+		spark = c.Spark
 	}
 
 	style := tcell.StyleDefault.Foreground(color)
