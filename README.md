@@ -78,7 +78,7 @@ unavailable and the report says so (it never silently reads as "clean").
 
 ## Reading the marks
 
-Each actionable finding is tagged with a four-slot glyph cluster —
+Each finding is tagged with a four-slot glyph cluster —
 `[concern] [trust] [run-state] [socket]` — read left to right. Color also encodes
 the concern tier, so the marks never rely on color alone. This key is generated
 from the code, so it always matches what the tool emits:

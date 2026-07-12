@@ -251,9 +251,16 @@ func LegendMarkdown() string {
 	for _, r := range Legend() {
 		b.WriteString("| ")
 		b.WriteRune(r.Glyph)
-		b.WriteString(" | " + r.Axis + " | " + r.Meaning + " |\n")
+		b.WriteString(" | " + mdCell(r.Axis) + " | " + mdCell(r.Meaning) + " |\n")
 	}
 	return b.String()
+}
+
+// mdCell escapes a value for a Markdown table cell so a future Meaning containing
+// a pipe or newline can't corrupt the rendered table (cp-T9 review F-1).
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.ReplaceAll(s, "\n", " ")
 }
 
 // LegendLine is a compact one-line key for the CLI footer.

@@ -16,7 +16,7 @@ func TestReadmeKeyMatchesLegend(t *testing.T) {
 	}
 	const begin = "<!-- BEGIN LEGEND (generated) -->"
 	const end = "<!-- END LEGEND -->"
-	s := string(b)
+	s := strings.ReplaceAll(string(b), "\r\n", "\n") // normalize CRLF (cp-T9 review F-3)
 	i := strings.Index(s, begin)
 	j := strings.Index(s, end)
 	if i < 0 || j < 0 || j < i {
