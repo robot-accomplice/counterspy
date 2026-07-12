@@ -269,3 +269,20 @@ REMAINING Phase A (checkpoint e), then the Phase A PR:
    high-entropy) with a reveal toggle — this overlaps #4 highlighting; can land with #4.
 5. Bundle Phase A into ONE PR → develop; swarm fan-out; CI gate.
 Then Phase B: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
+
+## cp-insA (inspect ENGINE ff4b81b..835f229) — deferred fan-out, resolved 2026-07-12 (session 3 resume)
+The Phase A engine (tls/framing/linklayer/capture/bpf/inspect) was committed a→d but never
+fan-out-reviewed (findings bus had no entry). Standing obligation → reviewed before building the view.
+Antagonist(haiku)+Audit(sonnet), read-only, on the engine diff. Outcome:
+- **F-1 4-tuple correlation** (QA high + Audit high, CROSS-CONFIRMED): DEFER (T-8). model.Conn has NO
+  local endpoint (egress/parse.go:116 + egress.go:11 verified) — the row is remote-keyed, so per-remote
+  match is the most specific identity that exists; over-merge is same-pid-same-remote, display-only,
+  observe-only. Spec §3 "row carries its local endpoint" is INACCURATE — code wins; spec reconciled.
+- **Audit F-1 no kernel BPF filter** (crit→HIGH): FIX in Phase A (T-9), its own checkpoint with the live
+  wiring. Whole-interface capture violates §6 least-privilege; reclassed high (over-captured bytes are
+  discarded in userspace, never shown/stored). cBPF host+port filter before the Phase A PR.
+- **Audit F-3 silent error swallow** (high, §9 fail-loud): FIX-NOW — surface capture failure on Result.
+- **Audit F-4 no SNI reassembly** (med): PARTIAL FIX-NOW (SNI over accumulated same-remote buffer) + T-10 (full reassembly).
+- **Audit F-5 BPF record-walker untested** (med): FIX-NOW — darwin fixture test.
+- **Audit F-6 ifreq no size assert** (med): FIX-NOW trivial. **F-7 TLS record types** (low): FIX-NOW one-liner.
+No human escalation: all engineering calls with recorded justifications. Remediation = next checkpoint (cp-insB).

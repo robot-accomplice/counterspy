@@ -14,3 +14,14 @@
       resolves to the Apple-signed interpreter, so the finding looks trusted (acceptedSigned). pickTarget
       should detect an interpreter + inline-code flag and treat the inline script as the real payload.
       Origin: rc3 C3 verifier. Pre-existing; needs interpreter-aware parsing in collect/persistence + proctree.
+- [ ] T-8  (sev:high, deferred cp-insA)  True 4-tuple flow correlation: capture the LOCAL port upstream
+      (nettop/lsof in internal/egress) → thread into model.Conn + inspect.Flow.Src, match seg.Src too,
+      and use it in the T-9 BPF filter. Trigger: any multi-local-port-same-remote inspection confusion.
+      Origin: cp-insA QA F-1 = Audit F-2 (cross-confirmed high). Deferred: needs new collector data, not a code slip.
+- [ ] T-9  (sev:high, Phase-A checkpoint)  Install a scoped cBPF filter in openLiveCapture
+      (`host <remote-ip> and port <remote-port> and tcp`) via BIOCSETF so capture is NOT whole-interface
+      (spec §6 least-privilege). Land WITH the live capture wiring + the maintainer sudo smoke test.
+      Origin: cp-insA Audit F-1 (crit→high). MUST land before the Phase A PR.
+- [ ] T-10 (sev:med, deferred cp-insA)  Full TCP segment reassembly (seq tracking + reordering) for
+      ClientHello/payload spanning many out-of-order segments. Phase-A ships best-effort concat-in-order.
+      Origin: cp-insA Audit F-4. Deferred: stateful reassembly is a distinct feature; concat handles the common split.
