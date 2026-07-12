@@ -318,3 +318,27 @@ dep mechanics (v0.6.0, no cascade), UDP-dial side-effect-freeness. Findings:
 - **F-3 (low): default in coverage switch** — WON'T-FIX (Go has no exhaustive-switch; default is the safe honest fallback).
 - **F-5 (info): stale x/net pin** — WON'T-FIX (deliberate, avoids the x/sys 0.38→0.47 cascade).
 No human escalation. cp-insD + remediation is CI-green; the /dev/bpf path awaits the maintainer root smoke test.
+
+## RESUME NOTE — Phase A (exfil inspection interceptor #3) COMPLETE, awaiting root smoke test + PR — 2026-07-12 (session 3)
+The full Phase A vertical is built, reviewed (Antagonist+Audit per checkpoint), and CI-green:
+- **Engine** (internal/inspect): tls/framing/linklayer/capture + native /dev/bpf + tier-0/1 orchestration.
+  Was committed a→d but UNREVIEWED; session 3 ran the deferred fan-out (cp-insA) → remediated (cp-insB:
+  fail-loud errors, split-hello SNI, BPF-walk tests, size assert, TLS record-type hardening).
+- **UI** (internal/tui): the `i` inspection view — consent gate (§5), full-screen pane (header + honest
+  coverage verdict + SNI + content pane), reveal toggle, pure model.Redact (§6). Decoupling invariant held
+  (tui imports only model+mark). cp-insC reviewed → remediated (PEM partial-leak, honest disabled msg).
+- **Live wiring** (cp-insD): scoped kernel BPF filter (host+TCP, via x/net/bpf assembler — VM-tested in CI;
+  maintainer relaxed native-first §10.4), bounded capture (non-blocking fd + deadline, T-11), main adapter
+  (Result→InspectView, --no-inspect flag). Reviewed → remediated (non-blocking-fd deadline guarantee, spec update).
+CHECKPOINTS: cp-insA/B/C/C-rem/D/D-rem. All go build/vet/test (-race)/gofmt/decoupling-invariant GREEN.
+
+### THE ONE THING LEFT before the Phase A PR (root, unrunnable in CI):
+Maintainer runs the /dev/bpf smoke test on a real Mac:
+  go build -o /tmp/counterspy . && sudo /tmp/counterspy console
+  → Tab to Exfiltration → expand an app/pid → press `i` on a connection row → `y` at the consent gate.
+  EXPECT: the inspection pane shows the flow header + a coverage verdict (SNI for a TLS flow, or plaintext
+  content masked-by-default with `r` to reveal). Also verify `sudo /tmp/counterspy console --no-inspect`
+  disables `i`. If capture returns "capture failed"/nothing, that path (bpf open/bind/BIOCSETF/read) needs debugging.
+Then: bundle Phase A into ONE PR → develop (swarm already reviewed each checkpoint), CI gate.
+OPEN TICKETS: T-8 (local-port 4-tuple), T-9-ref (kernel port scoping), T-10 (full reassembly), T-11/T-12 (done/optional).
+Phase B next: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
