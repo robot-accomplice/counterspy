@@ -370,3 +370,23 @@ func TestEgressTreeTogglesWithPlusMinus(t *testing.T) {
 		t.Error("tree toggle must not reuse ▸ (liveness-active)")
 	}
 }
+
+// A fully-expanded tree (app → instance → connection) renders the connection leaf row, which
+// draws that connection's OWN sparkline (covers the leaf spark path).
+func TestEgressView_ConnLeafRendersSpark(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(140, 30)
+	g := eg("app", model.Low, 5000)
+	g.Members[0].Conns[0].Spark = []uint64{100, 5000} // this connection's own trend
+	m := NewEgress().withGroups([]model.EgressGroup{g})
+	m.expanded = map[string]bool{"app": true}
+	m.expandedPID = map[int]bool{100: true}
+	egressView(m, s)
+	s.Show()
+	if !simContains(s, "1.2.3.4") {
+		t.Fatal("connection leaf row (with its own sparkline) should render its destination")
+	}
+}

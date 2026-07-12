@@ -231,3 +231,34 @@ func TestMonitor_PerConnSparkDedupsSharedKey(t *testing.T) {
 		t.Fatalf("shared connKey ring should advance once/tick (2 ticks → 2 samples), got %d", got)
 	}
 }
+
+func TestMonitor_PerConnPrunesDeadConns(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if present {
+			return []byte(",bytes_in,bytes_out,\ndaemon.42,0,1000,\ntcp4 10.0.0.1:5<->9.9.9.9:443,0,1000,\n")
+		}
+		return []byte(",bytes_in,bytes_out,\ndaemon.42,0,1000,\n") // conn gone
+	}
+	m.runLsof = func() []byte {
+		if present {
+			return []byte("H\nd 42 u 10u IPv4 0x1 0t0 TCP 10.0.0.1:5->9.9.9.9:443 (ESTABLISHED)\n")
+		}
+		return []byte("H\n")
+	}
+	m.procs = func() map[int]*collect.Proc { return map[int]*collect.Proc{42: {PID: 42, Cmd: "/x/d"}} }
+	m.exePaths = func() map[int]string { return map[int]string{42: "/x/d"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.sparkConn) != 1 {
+		t.Fatalf("expected 1 tracked connection, got %d", len(m.sparkConn))
+	}
+	present = false
+	m.Sample()
+	if len(m.sparkConn) != 0 {
+		t.Fatalf("dead connection should be pruned, still have %d", len(m.sparkConn))
+	}
+}

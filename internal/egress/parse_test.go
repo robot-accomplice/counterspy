@@ -118,3 +118,32 @@ func TestParseLsofConns_DedupsSameRemote(t *testing.T) {
 		t.Fatalf("expected 2 distinct destinations (9.9.9.9:443, 8.8.8.8:53), got %d: %+v", len(got[500]), got[500])
 	}
 }
+
+func TestCanonIP_Forms(t *testing.T) {
+	cases := map[string]string{
+		"172.20.10.13":     "172.20.10.13",    // IPv4 unchanged
+		"[fe80::1]":        "fe80::1",         // lsof brackets stripped
+		"fe80::80b9%en0":   "fe80::80b9",      // nettop %zone stripped
+		"[fe80::80b9%en0]": "fe80::80b9",      // both
+		"api.example.com":  "api.example.com", // non-IP (hostname) passes through
+		"":                 "",
+	}
+	for in, want := range cases {
+		if got := canonIP(in); got != want {
+			t.Errorf("canonIP(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseNettopEndpoint_Malformed(t *testing.T) {
+	for _, in := range []string{
+		"*:*",            // listener (handled)
+		"noendpointhere", // no dot, not addr:port
+		"1.2.3",          // dot but "1.2" isn't a valid addr
+		"host.notaport",  // dot, non-numeric port
+	} {
+		if ip, port := parseNettopEndpoint(in); ip != "" || port != 0 {
+			t.Errorf("parseNettopEndpoint(%q) = (%q,%d), want empty", in, ip, port)
+		}
+	}
+}
