@@ -162,3 +162,72 @@ func TestMonitor_DeterministicOrderAndFirstSightRateZero(t *testing.T) {
 		}
 	}
 }
+
+// Every connection leaf row gets its OWN sparkline + rate: nettop's per-connection byte rows
+// are correlated with the lsof-discovered connection and accumulate across ticks.
+func TestMonitor_PerConnRateAndSpark(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 50000 * tick // cumulative climbs 50000/tick → per-tick rate 50000
+		return []byte("time,,bytes_in,bytes_out\n" +
+			"15:04:0" + itoa(tick) + ".0,daemon.4821,0," + itoa(out) + "\n" +
+			"15:04:0" + itoa(tick) + ".0,tcp4 10.0.0.2:5<->198.51.100.7:443,0," + itoa(out) + "\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → conn rate 0
+	groups := m.Sample() // tick 2: conn rate 50000
+	conns := groups[0].Members[0].Conns
+	if len(conns) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+	if conns[0].OutRate != 50000 {
+		t.Fatalf("per-connection OutRate: got %d want 50000", conns[0].OutRate)
+	}
+	if len(conns[0].Spark) != 2 || conns[0].Spark[1] == 0 {
+		t.Fatalf("per-connection Spark should hold 2 samples ending non-zero, got %v", conns[0].Spark)
+	}
+}
+
+// Two connections to the SAME remote endpoint share a connKey; the spark ring must advance
+// once per tick, not once per FD (else duplicate rows desync and the ring grows too fast).
+func TestMonitor_PerConnSparkDedupsSharedKey(t *testing.T) {
+	m := New(1)
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 1000 * tick
+		return []byte(",bytes_in,bytes_out,\n" +
+			"daemon.4821,0," + itoa(out) + ",\n" +
+			"tcp4 10.0.0.2:5<->9.9.9.9:443,0," + itoa(out) + ",\n")
+	}
+	m.runLsof = func() []byte {
+		// two FDs from the same PID to the same remote endpoint
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->9.9.9.9:443 (ESTABLISHED)\n" +
+			"daemon 4821 root 11u IPv4 0x2 0t0 TCP 10.0.0.3:6->9.9.9.9:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	m.Sample()
+	if got := len(m.sparkConn[connKey(4821, "9.9.9.9", 443)]); got != 2 {
+		t.Fatalf("shared connKey ring should advance once/tick (2 ticks → 2 samples), got %d", got)
+	}
+}

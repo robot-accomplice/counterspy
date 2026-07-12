@@ -16,10 +16,12 @@ const sparkLen = 24 // recent out-rate samples kept per app for the sparkline
 // Monitor holds the sampling state (previous cumulative bytes + per-app spark history) and
 // the injectable exec/join seams. Sample() is called once per tick.
 type Monitor struct {
-	interval float64
-	prev     map[int]Bytes
-	spark    map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
-	sparkPID map[int][]uint64    // per-PID out-rate history — instance-row sparkline
+	interval  float64
+	prev      map[int]Bytes
+	prevConn  map[string]Bytes    // previous cumulative bytes per connKey — for per-conn rates
+	spark     map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
+	sparkPID  map[int][]uint64    // per-PID out-rate history — instance-row sparkline
+	sparkConn map[string][]uint64 // per-connKey out-rate history — connection-row sparkline
 
 	runNettop func() []byte
 	runLsof   func() []byte
@@ -31,12 +33,17 @@ type Monitor struct {
 
 func New(interval float64) *Monitor {
 	return &Monitor{
-		interval: interval,
-		prev:     map[int]Bytes{},
-		spark:    map[string][]uint64{},
-		sparkPID: map[int][]uint64{},
+		interval:  interval,
+		prev:      map[int]Bytes{},
+		prevConn:  map[string]Bytes{},
+		spark:     map[string][]uint64{},
+		sparkPID:  map[int][]uint64{},
+		sparkConn: map[string][]uint64{},
 		runNettop: func() []byte {
-			b, _ := exec.Command("nettop", "-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			// Hierarchical output (no -P): process rows carry per-PID totals AND connection
+			// sub-rows carry per-connection bytes, so one call feeds both ParseNettop and
+			// ParseNettopConns. ParseNettop skips the connection rows (no name.pid).
+			b, _ := exec.Command("nettop", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
 		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
@@ -56,10 +63,53 @@ func defaultExePaths() map[int]string {
 
 // Sample runs one observation tick and returns the current aggregated, scored groups.
 func (m *Monitor) Sample() []model.EgressGroup {
-	cur := ParseNettop(m.runNettop())
+	raw := m.runNettop()
+	cur := ParseNettop(raw)
+	curConn := ParseNettopConns(raw)
 	conns := ParseLsofConns(m.runLsof())
 	procs := m.procs()
 	exe := m.exePaths()
+
+	// Enrich each lsof-discovered connection with its per-connection out-rate (from nettop's
+	// per-connection byte counts) and advance its own spark ring — so every connection leaf
+	// row shows a real trend, not a flat line. Prune connKeys gone this tick.
+	liveConn := make(map[string]bool, len(curConn))
+	rateOf := make(map[string]uint64, len(curConn))
+	// First pass: advance each UNIQUE connKey's ring exactly once (two lsof FDs to the same
+	// remote share a key — advancing per-entry would grow the ring 2x/tick and desync rows).
+	for pid, cs := range conns {
+		for i := range cs {
+			k := connKey(pid, cs[i].Endpoint.IP, cs[i].Endpoint.Port)
+			liveConn[k] = true
+			if _, done := rateOf[k]; done {
+				continue
+			}
+			var rate uint64
+			if prev, ok := m.prevConn[k]; ok {
+				rate = RateOut(prev, curConn[k], m.interval)
+			}
+			rateOf[k] = rate
+			s := append(m.sparkConn[k], rate)
+			if len(s) > sparkLen {
+				s = s[len(s)-sparkLen:]
+			}
+			m.sparkConn[k] = s
+		}
+	}
+	// Second pass: assign the (once-advanced) rate + spark to every connection sharing a key.
+	for pid, cs := range conns {
+		for i := range cs {
+			k := connKey(pid, cs[i].Endpoint.IP, cs[i].Endpoint.Port)
+			cs[i].OutRate = rateOf[k]
+			cs[i].Spark = m.sparkConn[k]
+		}
+	}
+	m.prevConn = curConn
+	for k := range m.sparkConn {
+		if !liveConn[k] {
+			delete(m.sparkConn, k)
+		}
+	}
 
 	insts := make([]Instance, 0, len(conns))
 	// Sorted pid iteration → deterministic output order (Go map iteration is randomized),

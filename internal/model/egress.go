@@ -11,8 +11,9 @@ type Endpoint struct {
 type Conn struct {
 	PID      int
 	Endpoint Endpoint
-	Proto    string // "tcp" | "udp"
-	OutRate  uint64 // bytes/sec (may be 0 if per-connection rate is unavailable)
+	Proto    string   // "tcp" | "udp"
+	OutRate  uint64   // bytes/sec for this connection (from nettop's per-connection rows)
+	Spark    []uint64 // per-connection recent out-rate history (this connection's own sparkline)
 }
 
 // ConcernLevel is the coarse concern/exfil band used for coloring and sorting.
