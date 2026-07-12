@@ -13,7 +13,7 @@ it finds with plain-language recommendations, and — with your approval — **r
 quarantines suspicious items. It never deletes.
 
 > **Status:** active. The scanner, the interactive **TUI**, and the opt-in **feedback loop**
-> ship today; the **egress monitor** (`counterspy egress`) lands in v0.4.0. See the
+> ship today; the **Exfiltration monitor** (`counterspy console`, Tab to switch) lands in v0.4.0. See the
 > [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
 > on false-positive volume before treating output as verdicts — it recommends, you decide.
 
@@ -64,11 +64,11 @@ sudo ./counterspy scan --json         # machine-readable []Assessment (feeds CI 
 sudo ./counterspy scan --interactive  # walk findings top-down: quarantine per item (y/N/q)
 sudo ./counterspy restore <manifest>  # undo a prior quarantine
 
-sudo ./counterspy tui                 # interactive triage TUI (navigate, quarantine, restore)
-./counterspy tui --from scan.json     # drive the TUI from a `scan --json` snapshot (no sudo)
+sudo ./counterspy console             # interactive UI: Findings + Exfiltration (Tab to switch)
+./counterspy console --from scan.json # drive Findings from a `scan --json` snapshot (no sudo)
 
-sudo ./counterspy egress              # live "egress top": per-app outbound traffic + concern
-sudo ./counterspy egress --json       # one-shot, machine-readable egress snapshot (non-TTY)
+sudo ./counterspy console             # then Tab to Exfiltration: per-app outbound traffic + concern
+sudo ./counterspy console --json      # one-shot, machine-readable Exfiltration snapshot (non-TTY)
 ```
 
 The **TUI** is a master-detail triage view (tcell): `j/k` navigate, `q` quarantine (with a
@@ -159,9 +159,9 @@ from the network — no remote config, no fetched allowlists, no update checks. 
 anti-spyware tool must never be remotely steerable, so this is enforced in code
 (`TestEgressOnly`), not just promised.
 
-## Egress monitor (v0.4.0)
+## Exfiltration monitor (v0.4.0)
 
-`counterspy egress` answers the complementary question to the scanner — not *"is this
+The Exfiltration monitor (`counterspy console`, Tab) answers the complementary question to the scanner — not *"is this
 spyware?"* but *"this app is trusted; what is it sending, where, and how much?"* It's a live,
 per-application "egress top" built by polling `nettop` + `lsof` under sudo (no entitlements,
 no packet capture, no payloads read):

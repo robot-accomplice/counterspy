@@ -47,8 +47,8 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "scan":
 		return runScan(args[1:], stdout)
-	case "tui":
-		return runTUI(args[1:], stdout)
+	case "console":
+		return runConsole(args[1:], stdout)
 	case "restore":
 		if len(args) < 2 {
 			fmt.Fprintln(stdout, "usage: counterspy restore <manifest.json>")
@@ -63,8 +63,6 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "feedback":
 		return runFeedback(args[1:], stdout)
-	case "egress":
-		return runEgress(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		fmt.Fprintln(stdout)
@@ -86,18 +84,18 @@ Commands:
   scan                     Print a ranked report to the terminal (the plain CLI)
       --json                 emit machine-readable JSON instead of the report
       --interactive          after the report, prompt to quarantine each finding
-  tui                      Open the interactive terminal UI for triage (the visual mode)
+  console                  Open the interactive UI: Findings triage + the Exfiltration monitor,
+                           switched with Tab / Shift-Tab (the visual mode)
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+      --json                 print the Exfiltration report as JSON and exit (no live UI)
+      --once                 print the Exfiltration report once and exit (no live UI)
   restore <manifest.json>  Undo a quarantine from its manifest
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
-  egress                   Observe per-app outbound traffic (live TUI on a tty, report/--json otherwise)
-      --json                 emit machine-readable JSON instead of the report
-      --once                 print a single report and exit (no live loop)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)
 
 Run under sudo for full visibility (the TCC privacy-grant signal needs it).
-Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy tui
+Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy console
 `, model.Version)
 }
 
@@ -397,14 +395,26 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 	return out
 }
 
-func runTUI(flags []string, stdout io.Writer) (code int) {
+// runConsole is the unified interactive UI: Findings triage + the Exfiltration monitor in one
+// screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
+// Exfiltration report (what `egress --json/--once` used to do).
+func runConsole(flags []string, stdout io.Writer) (code int) {
+	if has(flags, "--json") || has(flags, "--once") {
+		return exfilReport(flags, stdout)
+	}
+	// The console needs a real terminal; refuse (and guide) when piped BEFORE doing a scan, so
+	// `console > out.txt` exits fast instead of collecting evidence it will never render.
+	if !isTerminal(os.Stdout) {
+		fmt.Fprintln(stdout, "console needs a terminal — use `counterspy scan` (or `console --json`).")
+		return 2
+	}
 	from := flagValue(flags, "--from")
 	var assessments []model.Assessment
 	var gaps []string
 	if from != "" {
 		as, err := loadSnapshot(from)
 		if err != nil {
-			fmt.Fprintln(stdout, "tui: cannot read snapshot:", err)
+			fmt.Fprintln(stdout, "console: cannot read snapshot:", err)
 			return 1
 		}
 		assessments = as
@@ -416,18 +426,13 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		gaps = g
 	}
 
-	// The TUI needs a real terminal; refuse (and guide) when piped.
-	if !isTerminal(os.Stdout) {
-		fmt.Fprintln(stdout, "TUI needs a terminal — use `counterspy scan` (or `--json`).")
-		return 2
-	}
 	screen, err := newScreen()
 	if err != nil {
-		fmt.Fprintln(stdout, "tui: cannot open screen:", err)
+		fmt.Fprintln(stdout, "console: cannot open screen:", err)
 		return 1
 	}
 	if err := screen.Init(); err != nil {
-		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
+		fmt.Fprintln(stdout, "console: cannot init screen:", err)
 		return 1
 	}
 	// finiOnce guarantees the terminal is restored exactly once no matter which path
@@ -456,7 +461,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	// screen that's about to clear) (ABORT-TUI Future-Me #1).
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "tui: internal error: %v\n%s\n", r, debug.Stack())
+			fmt.Fprintf(os.Stderr, "console: internal error: %v\n%s\n", r, debug.Stack())
 			code = 1
 		}
 	}()
@@ -479,8 +484,34 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	m := tui.New(assessments, gaps)
 	m.Liveness = livenessFor(assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
-	if err := tui.Run(screen, m, actor); err != nil {
-		fmt.Fprintln(stdout, "tui:", err)
+
+	// Exfiltration sampler + a 2s ticker. RunConsole samples LAZILY (only while Exfiltration is
+	// the visible mode), so the ticker fires regardless but no nettop/lsof work happens in
+	// Findings mode. The ticker closes `tick` on stop so RunConsole's sample goroutine ends.
+	const interval = 2.0
+	mon := newEgressMonitor(interval)
+	tick := make(chan struct{})
+	stop := make(chan struct{})
+	defer close(stop) // ends the ticker → closes tick → ends RunConsole's sample goroutine (also on panic)
+	go func() {
+		defer close(tick)
+		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				select {
+				case tick <- struct{}{}:
+				default:
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	err = tui.RunConsole(screen, m, actor, mon, tick, pbcopy)
+	if err != nil {
+		fmt.Fprintln(stdout, "console:", err)
 		return 1
 	}
 	fini() // restore the terminal BEFORE the feedback prompt/messages (stdin cooked, stdout visible)
@@ -663,89 +694,22 @@ var newScreen = func() (tcell.Screen, error) { return tcell.NewScreen() }
 
 // runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
 // TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
-func runEgress(flags []string, stdout io.Writer) int {
-	asJSON := has(flags, "--json")
-	once := has(flags, "--once")
-	interval := 2.0
-	mon := newEgressMonitor(interval)
-
-	isTTY := isTerminal(os.Stdout)
-	if once || asJSON || !isTTY {
-		mon.Sample()           // establish a baseline
-		groups := mon.Sample() // second sample carries rates
-		if asJSON {
-			b, err := report.RenderEgressJSON(groups)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "render:", err)
-				return 1
-			}
-			fmt.Fprintln(stdout, string(b))
-			return 0
+// exfilReport prints the non-interactive Exfiltration report (or JSON) — the output the old
+// `egress --once/--json` produced, now reached via `console --once/--json`.
+func exfilReport(flags []string, stdout io.Writer) int {
+	mon := newEgressMonitor(2.0)
+	mon.Sample()           // establish a baseline
+	groups := mon.Sample() // second sample carries rates
+	if has(flags, "--json") {
+		b, err := report.RenderEgressJSON(groups)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "render:", err)
+			return 1
 		}
-		fmt.Fprint(stdout, report.RenderEgress(groups, colorEnabled()))
+		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	return runEgressTUI(mon, interval, stdout)
-}
-
-// runEgressTUI mirrors runTUI's screen/signal/fini handling for the live "egress top" view.
-func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int) {
-	screen, err := newScreen()
-	if err != nil {
-		fmt.Fprintln(stdout, "egress: cannot open screen:", err)
-		return 1
-	}
-	if err := screen.Init(); err != nil {
-		fmt.Fprintln(stdout, "egress: cannot init screen:", err)
-		return 1
-	}
-	var finiOnce sync.Once
-	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	sigDone := make(chan struct{})
-	defer func() { signal.Stop(sigCh); close(sigDone) }()
-	go func() {
-		select {
-		case <-sigCh:
-			fini()
-			os.Exit(130)
-		case <-sigDone: // normal exit — unregister and return instead of leaking this goroutine
-		}
-	}()
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "egress: internal error: %v\n%s\n", r, debug.Stack())
-			code = 1
-		}
-	}()
-	defer fini()
-
-	tick := make(chan struct{})
-	stop := make(chan struct{})
-	go func() {
-		defer close(tick) // sole sender closes the channel, so RunEgress's forwarder ends cleanly
-		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				select {
-				case tick <- struct{}{}:
-				default:
-				}
-			case <-stop:
-				return
-			}
-		}
-	}()
-	err = tui.RunEgress(screen, mon, tick, pbcopy)
-	close(stop) // ends the ticker goroutine, which closes tick, which ends RunEgress's forwarder
-	fini()
-	if err != nil {
-		fmt.Fprintln(stdout, "egress:", err)
-		return 1
-	}
+	fmt.Fprint(stdout, report.RenderEgress(groups, colorEnabled()))
 	return 0
 }
 
