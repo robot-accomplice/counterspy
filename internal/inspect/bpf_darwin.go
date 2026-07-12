@@ -3,6 +3,7 @@
 package inspect
 
 import (
+	"fmt"
 	"io"
 	"net/netip"
 	"strconv"
@@ -53,12 +54,14 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open /dev/bpf: %w", err)
 	}
+	// Each step names itself so a failure localizes the exact ioctl + interface (RCA): a bare
+	// errno like "bad address" (EFAULT) is otherwise ambiguous across six syscalls and two paths.
 	blen := 1 << 16
 	if err := unix.IoctlSetInt(fd, unix.BIOCSBLEN, blen); err != nil {
 		unix.Close(fd)
-		return nil, err
+		return nil, fmt.Errorf("bpf %s BIOCSBLEN: %w", iface, err)
 	}
 	if got, e := unix.IoctlGetInt(fd, unix.BIOCGBLEN); e == nil && got > 0 {
 		blen = got
@@ -69,16 +72,16 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 	copy(ifr.name[:15], iface)
 	if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSETIF), uintptr(unsafe.Pointer(&ifr))); e != 0 {
 		unix.Close(fd)
-		return nil, e
+		return nil, fmt.Errorf("bpf %s BIOCSETIF: %w", iface, e)
 	}
 	if err := unix.IoctlSetInt(fd, unix.BIOCIMMEDIATE, 1); err != nil {
 		unix.Close(fd)
-		return nil, err
+		return nil, fmt.Errorf("bpf %s BIOCIMMEDIATE: %w", iface, err)
 	}
 	dlt, err := unix.IoctlGetInt(fd, unix.BIOCGDLT)
 	if err != nil {
 		unix.Close(fd)
-		return nil, err
+		return nil, fmt.Errorf("bpf %s BIOCGDLT: %w", iface, err)
 	}
 	// Make the fd non-blocking so a read on a silent flow returns EAGAIN immediately instead of
 	// blocking forever — this is what GUARANTEES the maxWait deadline is honored (T-11). It must
@@ -86,7 +89,7 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 	// risking a hung UI loop.
 	if err := unix.SetNonblock(fd, true); err != nil {
 		unix.Close(fd)
-		return nil, err
+		return nil, fmt.Errorf("bpf %s set-nonblock: %w", iface, err)
 	}
 	// Scope the capture to the remote host in-kernel. Best-effort: if the datalink is one we have
 	// no header-length for, or the filter can't be installed, we fall back to whole-interface
@@ -150,7 +153,7 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			if err == unix.EINTR {
 				continue
 			}
-			return nil, err
+			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
 		c.pend = parseBPFRecords(c.buf[:n], c.dlt)
 	}
