@@ -88,3 +88,51 @@ func isAppleAuthority(a string) bool {
 	}
 	return strings.Contains(a, "Apple") || a == "Software Signing"
 }
+
+// Liveness is the run-state + socket marks for one subject. A zero field is a
+// blank slot. RunState and Socket are independent so ▸ active and ↔ live-socket
+// can co-occur.
+type Liveness struct {
+	RunState rune // GlyphActive, GlyphVestigial, or 0
+	Socket   rune // GlyphSocket or 0
+}
+
+// Classify derives per-subject liveness (keyed by Subject.Key()). `running` is
+// the set of real executable paths of currently-running processes (see
+// collect.CollectExecPaths / T-4). Rules:
+//   - socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true")
+//   - a finding with process evidence is active (it is a live process)
+//   - else a persistence finding is active iff its target path is running, else vestigial
+//   - otherwise run-state is blank (a file/grant with no process/persistence liveness)
+//
+// Liveness is DISPLAY-ONLY and never influences scoring.
+func Classify(assessments []model.Assessment, running map[string]bool) map[string]Liveness {
+	out := make(map[string]Liveness, len(assessments))
+	for _, a := range assessments {
+		var lv Liveness
+		var hasProc, hasPersist bool
+		for _, e := range a.Evidence {
+			if e.Facts["listener"] == "true" {
+				lv.Socket = GlyphSocket
+			}
+			switch e.Kind {
+			case model.KindProcess:
+				hasProc = true
+			case model.KindPersistence:
+				hasPersist = true
+			}
+		}
+		switch {
+		case hasProc:
+			lv.RunState = GlyphActive
+		case hasPersist:
+			if running[a.Subject.Path] {
+				lv.RunState = GlyphActive
+			} else {
+				lv.RunState = GlyphVestigial
+			}
+		}
+		out[a.Subject.Key()] = lv
+	}
+	return out
+}
