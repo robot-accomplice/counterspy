@@ -41,6 +41,8 @@ type EgressModel struct {
 
 	expanded    map[string]bool // app name -> expanded (shows instance rows)
 	expandedPID map[int]bool    // pid -> expanded (shows connection rows)
+	sampled     bool            // a sampler result has arrived at least once (gates the empty-state
+	//                             remediation: before the first sample we're "collecting", not empty)
 
 	// Inspection overlay (spec §4/§5): a modal over the tree, driven off the pure update like
 	// CopyReq — egressUpdate only sets requests; RunConsole performs the capture I/O.
@@ -87,6 +89,7 @@ func NewEgress() EgressModel {
 // are preserved.
 func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.Groups = gs
+	m.sampled = true // a real sampler result arrived — even an empty one means we've looked
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
 	}

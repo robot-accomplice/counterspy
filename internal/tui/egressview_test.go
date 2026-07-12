@@ -274,12 +274,29 @@ func TestEgressView_FooterKeybindsPresent(t *testing.T) {
 
 func TestEgressView_EmptyState(t *testing.T) {
 	s := simScreen(t)
-	m := NewEgress().withGroups(nil)
+	m := NewEgress().withGroups(nil) // a completed sample that found nothing
 	egressView(m, s)
 	s.Show()
 	out := screenText(s)
 	if !strings.Contains(out, "No outbound traffic observed — run with sudo for full visibility.") {
 		t.Fatalf("expected empty-state hint, got:\n%s", out)
+	}
+}
+
+// Before the first sample returns, the view must NOT accuse the user of a misconfiguration: it
+// shows a neutral "collecting" message, not the "run with sudo" remediation (which only makes
+// sense once we've actually sampled and genuinely found nothing).
+func TestEgressView_CollectingBeforeFirstSample(t *testing.T) {
+	s := simScreen(t)
+	m := NewEgress() // never sampled yet
+	egressView(m, s)
+	s.Show()
+	out := screenText(s)
+	if !strings.Contains(out, "Collecting") {
+		t.Fatalf("expected a collecting message before the first sample, got:\n%s", out)
+	}
+	if strings.Contains(out, "sudo") {
+		t.Fatalf("must NOT show the sudo remediation before we've sampled, got:\n%s", out)
 	}
 }
 

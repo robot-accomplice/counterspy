@@ -59,6 +59,10 @@ func middleEllipsis(s string, max int) string {
 
 const emptyHint = "No outbound traffic observed — run with sudo for full visibility."
 
+// collectingHint shows before the first sample returns, so an unsampled view doesn't render as a
+// misconfiguration (the emptyHint's sudo advice only makes sense once we've actually found nothing).
+const collectingHint = "Collecting outbound traffic…"
+
 type egressCols struct {
 	markerX      int
 	appX, appW   int
@@ -278,12 +282,16 @@ func egressView(m EgressModel, s tcell.Screen) {
 
 	tableTop := headerY + 1
 	if len(rows) == 0 {
+		hint := collectingHint // haven't sampled yet — don't accuse the user of a misconfig
+		if m.sampled {
+			hint = emptyHint // sampled and genuinely empty — now the sudo remediation is earned
+		}
 		cy := (tableTop + tableBottom) / 2
-		cx := (w - len(emptyHint)) / 2
+		cx := (w - len([]rune(hint))) / 2
 		if cx < 0 {
 			cx = 0
 		}
-		drawText(s, cx, cy, tcell.StyleDefault.Foreground(colDim), emptyHint)
+		drawText(s, cx, cy, tcell.StyleDefault.Foreground(colDim), hint)
 	} else {
 		y := tableTop
 		for i, row := range rows {
