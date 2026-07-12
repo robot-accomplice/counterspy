@@ -31,7 +31,7 @@ func TestRun_HelpFlags(t *testing.T) {
 			t.Fatalf("%q: exit %d, want 0", arg, code)
 		}
 		out := buf.String()
-		for _, want := range []string{"CounterSpy", model.Version, "scan", "tui", "feedback", "restore"} {
+		for _, want := range []string{"CounterSpy", model.Version, "scan", "console", "feedback", "restore"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%q help missing %q in:\n%s", arg, want, out)
 			}
@@ -47,7 +47,7 @@ func TestRun_NoArgsShowsUsage(t *testing.T) {
 		t.Fatalf("no-args exit %d, want 2", code)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "tui") || !strings.Contains(out, model.Version) {
+	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "console") || !strings.Contains(out, model.Version) {
 		t.Fatalf("no-args usage is anemic:\n%s", out)
 	}
 }
@@ -111,7 +111,7 @@ func TestRunEgress_JSONReport(t *testing.T) {
 	// Non-TTY (test) → report path; --json emits an array. --once avoids the live loop.
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := runEgress([]string{"--json", "--once"}, &buf); code != 0 {
+	if code := runConsole([]string{"--json", "--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	out := strings.TrimSpace(buf.String())
@@ -123,7 +123,7 @@ func TestRunEgress_JSONReport(t *testing.T) {
 func TestRunEgress_TextReport(t *testing.T) {
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := runEgress([]string{"--once"}, &buf); code != 0 {
+	if code := runConsole([]string{"--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(buf.String(), "backuptool") {
@@ -596,10 +596,10 @@ func TestRun_FeedbackDispatch(t *testing.T) {
 	}
 }
 
-func TestRun_EgressDispatch(t *testing.T) {
+func TestRun_ConsoleExfilDispatch(t *testing.T) {
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := run([]string{"egress", "--once"}, &buf); code != 0 {
+	if code := run([]string{"console", "--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(buf.String(), "backuptool") {
@@ -713,6 +713,7 @@ func (k *keyInjectingScreen) Init() error {
 }
 
 func TestRunTUI_FromSnapshotQuitsImmediately(t *testing.T) {
+	withFakeEgress(t)
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("SUDO_USER", "")
@@ -725,7 +726,7 @@ func TestRunTUI_FromSnapshotQuitsImmediately(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 0 {
+	if code := runConsole([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 0 {
 		t.Fatalf("exit %d: %s", code, buf.String())
 	}
 }
@@ -738,24 +739,11 @@ func TestRunTUI_NonTerminalRefuses(t *testing.T) {
 	// --from a snapshot: the terminal check runs after evidence is gathered, and a live
 	// scan would shell out to the real collectors — use the snapshot path to stay hermetic.
 	var buf bytes.Buffer
-	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
+	if code := runConsole([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
 		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(buf.String(), "TUI needs a terminal") {
+	if !strings.Contains(buf.String(), "console needs a terminal") {
 		t.Fatalf("missing message: %s", buf.String())
-	}
-}
-
-func TestRunEgressTUI_QuitsImmediately(t *testing.T) {
-	origNewScreen := newScreen
-	t.Cleanup(func() { newScreen = origNewScreen })
-	newScreen = func() (tcell.Screen, error) {
-		return &keyInjectingScreen{SimulationScreen: tcell.NewSimulationScreen(""), key: tcell.KeyRune, r: 'Q'}, nil
-	}
-
-	var buf bytes.Buffer
-	if code := runEgressTUI(&fakeEgressSampler{}, 0.01, &buf); code != 0 {
-		t.Fatalf("exit %d: %s", code, buf.String())
 	}
 }
 
