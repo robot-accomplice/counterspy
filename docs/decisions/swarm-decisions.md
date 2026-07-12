@@ -286,3 +286,20 @@ Antagonist(haiku)+Audit(sonnet), read-only, on the engine diff. Outcome:
 - **Audit F-5 BPF record-walker untested** (med): FIX-NOW — darwin fixture test.
 - **Audit F-6 ifreq no size assert** (med): FIX-NOW trivial. **F-7 TLS record types** (low): FIX-NOW one-liner.
 No human escalation: all engineering calls with recorded justifications. Remediation = next checkpoint (cp-insB).
+
+## cp-insC (i inspection view) — reviewed 2026-07-12 (session 3)
+Antagonist(haiku)+Audit(sonnet), read-only, on the cp-insC diff. Both independently confirmed the
+security invariants: consent is a real by-construction, session-scoped gate (§5); redaction applied
+every draw with no raw-Content path when masked; InspectView.Content is display-only (never disk/log/net,
+§6); decoupling invariant holds (tui deps = model+mark only, NO internal/inspect); observe-only.
+Antagonist CLEAN (10× -race stress, no flake). Audit found:
+- **F-1 (med, CONFIRMED): PEM partial leak** — masked only complete BEGIN…END. FIX-NOW: added a
+  dangling-BEGIN→EOF fallback (rePEMOpen) + a partial-PEM test. §6 hardened.
+- **F-4 (info): message named a nonexistent --no-inspect flag** — FIX-NOW: softened to
+  "inspection unavailable in this build"; cp-insD adds the real flag.
+- **F-2 (med, PLAUSIBLE): sync Inspect seam UI-freeze** — ACCEPT sync seam (RunConsole can wrap it async
+  later WITHOUT an interface change, so nothing's locked in); bound the capture in cp-insD's adapter
+  (T-11: read deadline + packet + wall-clock cap, worst-case <~1.5s); async upgrade → T-12 if needed.
+- **F-3 (low): Coverage duplication has no exhaustiveness guard** — DEFER to cp-insD (the adapter maps
+  them there; add an exhaustive switch + test so a future tier forces both files to change).
+No human escalation — engineering calls with recorded justifications.

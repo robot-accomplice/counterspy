@@ -25,3 +25,9 @@
 - [ ] T-10 (sev:med, deferred cp-insA)  Full TCP segment reassembly (seq tracking + reordering) for
       ClientHello/payload spanning many out-of-order segments. Phase-A ships best-effort concat-in-order.
       Origin: cp-insA Audit F-4. Deferred: stateful reassembly is a distinct feature; concat handles the common split.
+- [ ] T-11 (sev:med, cp-insD)  main's Inspector adapter MUST bound the live capture: a BPF read
+      deadline + packet cap + a hard wall-clock cap, so a consented inspection of an idle flow can't
+      freeze the TUI event loop for more than ~1.5s. Origin: cp-insC Audit F-2.
+- [ ] T-12 (sev:low, if-needed)  Async inspection: run inspector.Inspect on a goroutine and deliver the
+      Result as a tcell EventInterrupt with a "capturing…" placeholder state, keeping quit/redraw live
+      during capture. Only do this if T-11's bounded sync freeze proves annoying. Origin: cp-insC Audit F-2 (deferred half).
