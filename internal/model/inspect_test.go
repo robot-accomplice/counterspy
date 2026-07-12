@@ -11,6 +11,9 @@ func TestRedact_MasksObviousSecrets(t *testing.T) {
 		{"bearer", "GET /v1 HTTP/1.1\r\nAuthorization: Bearer ya29.a0AfH6SMB-secretTOKEN_value\r\n", "ya29.a0AfH6SMB-secretTOKEN_value"},
 		{"aws", "creds AKIAIOSFODNN7EXAMPLE end", "AKIAIOSFODNN7EXAMPLE"},
 		{"pem", "key=-----BEGIN RSA PRIVATE KEY-----\nMIIabc123\n-----END RSA PRIVATE KEY-----;", "MIIabc123"},
+		// A partial capture that has the BEGIN header but not yet the END must STILL mask the key
+		// material after it — otherwise a segmented/partial flow leaks the secret (cp-insC Audit F-1).
+		{"pem-partial", "-----BEGIN EC PRIVATE KEY-----\nMIIdanglingKEYbytes", "MIIdanglingKEYbytes"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

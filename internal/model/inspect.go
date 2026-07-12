@@ -34,6 +34,9 @@ var (
 	reBearer = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
 	reAWSKey = regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)
 	rePEM    = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`)
+	// A dangling BEGIN (a partial/segmented capture with no END yet) must still be masked to the
+	// end of the buffer, or the key material after the header leaks (cp-insC Audit F-1).
+	rePEMOpen = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under
@@ -45,7 +48,8 @@ const redactMark = "[redacted]"
 // spill the very secrets it's hunting (§6). Pure and idempotent: masking an already-masked
 // string is a no-op. It is display masking only — the caller keeps the real bytes for reveal.
 func Redact(s string) string {
-	s = rePEM.ReplaceAllString(s, redactMark)
+	s = rePEM.ReplaceAllString(s, redactMark)     // complete BEGIN…END blocks first
+	s = rePEMOpen.ReplaceAllString(s, redactMark) // then any dangling BEGIN…EOF (partial capture)
 	s = reBearer.ReplaceAllString(s, "Bearer "+redactMark)
 	s = reAWSKey.ReplaceAllString(s, redactMark)
 	return s
