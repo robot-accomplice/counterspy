@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
@@ -32,8 +34,8 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 	}
 	src, err := inspect.OpenLiveCapture(outboundInterface(remote), remote, inspectMaxWait)
 	if err != nil {
-		// Fail loud (§9): a real capture failure (e.g. not root) is surfaced, not hidden.
-		return model.InspectView{Err: err.Error(), Verdict: "capture failed: " + err.Error()}
+		// Fail loud (§9): the raw error stays on Err for diagnostics; Verdict is the human line.
+		return model.InspectView{Err: err.Error(), Verdict: captureFailVerdict(err)}
 	}
 	defer src.Close()
 	res := inspect.Inspect(src, inspect.Flow{PID: conn.PID, Remote: remote}, inspectMaxPackets)
@@ -72,6 +74,18 @@ func sanitizeMultiline(s string) string {
 		lines[i] = model.Clean(ln)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// captureFailVerdict turns an OpenLiveCapture error into the one-line verdict shown in the pane.
+// The monitor (nettop/lsof/ps) runs unprivileged, but reading raw packets off /dev/bpf is gated
+// by macOS behind root — so the common failure is "not root". That gets an actionable message
+// naming the exact fix rather than a raw errno, so inspection reads as the one sudo-only feature,
+// not a broken tool. Any other failure is surfaced verbatim.
+func captureFailVerdict(err error) string {
+	if errors.Is(err, os.ErrPermission) {
+		return "inspection needs packet-capture access — relaunch with `sudo counterspy console`"
+	}
+	return "capture failed: " + err.Error()
 }
 
 func remoteAddrPort(conn model.Conn) (netip.AddrPort, bool) {

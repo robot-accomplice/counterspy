@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"strings"
+	"syscall"
 	"testing"
 
 	"counterspy/internal/inspect"
@@ -56,6 +57,18 @@ func TestSanitizeMultiline(t *testing.T) {
 	}
 	if strings.Count(got, "\n") != 2 {
 		t.Fatalf("newlines must be preserved, got %q", got)
+	}
+}
+
+// A non-root capture failure (the common case — the monitor is unprivileged but /dev/bpf isn't)
+// must read as an actionable "relaunch with sudo", not a raw errno; other failures pass through.
+func TestCaptureFailVerdict(t *testing.T) {
+	perm := captureFailVerdict(syscall.EACCES)
+	if !strings.Contains(perm, "sudo") || strings.Contains(perm, "permission denied") {
+		t.Fatalf("permission error should give the actionable sudo message, got %q", perm)
+	}
+	if got := captureFailVerdict(errors.New("device gone")); got != "capture failed: device gone" {
+		t.Fatalf("a non-permission error should surface verbatim, got %q", got)
 	}
 }
 
