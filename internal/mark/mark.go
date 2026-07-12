@@ -242,6 +242,20 @@ func LegendCompact() []string {
 	return lines
 }
 
+// LegendMarkdown renders the Legend as a Markdown table — the single source the
+// README key must match (enforced by legend_doc_test.go, so the docs can never
+// drift from the marks the app actually emits).
+func LegendMarkdown() string {
+	var b strings.Builder
+	b.WriteString("| Mark | Axis | Meaning |\n|---|---|---|\n")
+	for _, r := range Legend() {
+		b.WriteString("| ")
+		b.WriteRune(r.Glyph)
+		b.WriteString(" | " + r.Axis + " | " + r.Meaning + " |\n")
+	}
+	return b.String()
+}
+
 // LegendLine is a compact one-line key for the CLI footer.
 func LegendLine() string {
 	var b strings.Builder
