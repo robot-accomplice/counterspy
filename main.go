@@ -225,6 +225,13 @@ func codesignAll(paths []string, cs func(string) []model.Evidence, onDone func(d
 		}(i)
 	}
 	wg.Wait()
+	// The per-worker onDone ticks carry unique counts (1..total) but are invoked
+	// concurrently, so the LAST callback the caller observes is not guaranteed to be
+	// the one with done==total. Emit a deterministic final tick after all workers
+	// finish so progress always ends at total/total (fixes a flaky freeze at "N/M").
+	if onDone != nil {
+		onDone(total, total)
+	}
 	var out []model.Evidence
 	for _, r := range results {
 		out = append(out, r...)
