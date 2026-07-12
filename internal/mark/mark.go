@@ -145,3 +145,69 @@ func Classify(assessments []model.Assessment, running map[string]bool) map[strin
 	}
 	return out
 }
+
+// Gap is the single inter-slot separator; markField is one display cell per slot.
+// Uniform cadence is structural: every slot is one glyph or one blank, joined by
+// exactly one Gap (see spec §3.1 — no width library needed, all glyphs are width-1).
+const (
+	Gap       = " "
+	markField = 1
+)
+
+// Cluster renders the four fixed slots [concern][trust][run-state][socket] with
+// uniform cadence. A zero rune renders as a blank slot of the same width.
+func Cluster(concern, trust rune, lv Liveness) string {
+	slots := [...]rune{concern, trust, lv.RunState, lv.Socket}
+	parts := make([]string, len(slots))
+	for i, g := range slots {
+		parts[i] = pad(g)
+	}
+	return strings.Join(parts, Gap)
+}
+
+func pad(g rune) string {
+	if g == 0 {
+		return strings.Repeat(" ", markField)
+	}
+	return string(g)
+}
+
+// LegendRow documents one glyph. Legend is the single source of truth rendered
+// by both the in-app legend and the README key (see legend_doc_test.go).
+type LegendRow struct {
+	Glyph   rune
+	Axis    string
+	Meaning string
+}
+
+// Legend returns the canonical, ordered vocabulary key.
+func Legend() []LegendRow {
+	return []LegendRow{
+		{GlyphQuarantine, "concern", "quarantine"},
+		{GlyphInvestigate, "concern", "investigate"},
+		{GlyphMonitor, "concern", "monitor"},
+		{GlyphApple, "trust", "Apple system code"},
+		{GlyphNotarized, "trust", "notarized (Developer ID, accepted)"},
+		{GlyphSigned, "trust", "signed, not notarized"},
+		{GlyphUnsigned, "trust", "unsigned"},
+		{GlyphRevoked, "trust", "revoked certificate"},
+		{GlyphActive, "liveness", "running"},
+		{GlyphVestigial, "liveness", "vestigial (installed, not running)"},
+		{GlyphSocket, "liveness", "live network socket"},
+	}
+}
+
+// LegendLine is a compact one-line key for the CLI footer.
+func LegendLine() string {
+	var b strings.Builder
+	b.WriteString("key: ")
+	for i, r := range Legend() {
+		if i > 0 {
+			b.WriteString("  ")
+		}
+		b.WriteRune(r.Glyph)
+		b.WriteString(" ")
+		b.WriteString(r.Meaning)
+	}
+	return b.String()
+}
