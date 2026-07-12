@@ -31,3 +31,7 @@
 - [ ] T-12 (sev:low, if-needed)  Async inspection: run inspector.Inspect on a goroutine and deliver the
       Result as a tcell EventInterrupt with a "capturing…" placeholder state, keeping quit/redraw live
       during capture. Only do this if T-11's bounded sync freeze proves annoying. Origin: cp-insC Audit F-2 (deferred half).
+- [ ] T-9-ref (sev:med, refinement)  Tighten the kernel BPF filter from host+TCP to host+remote-PORT+TCP
+      (IPv4 needs LoadMemShift IHL-indexing for the port offset; IPv6 port is at a fixed offset). VM-test
+      port match/mismatch. Marginal §6 gain (same-host-other-port); userspace already enforces the port.
+      Origin: cp-insD Audit F-1. Host-scoping (the bulk of §6) is DONE in cp-insD.

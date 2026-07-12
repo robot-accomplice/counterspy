@@ -303,3 +303,18 @@ Antagonist CLEAN (10× -race stress, no flake). Audit found:
 - **F-3 (low): Coverage duplication has no exhaustiveness guard** — DEFER to cp-insD (the adapter maps
   them there; add an exhaustive switch + test so a future tier forces both files to change).
 No human escalation — engineering calls with recorded justifications.
+
+## cp-insD (live capture wiring) — reviewed 2026-07-12 (session 3)
+Antagonist(haiku)+Audit(sonnet) on the cp-insD diff (vendored x/net excluded). Antagonist CLEAN.
+Audit CLEAN on fd-safety (all paths close, no double-close), BPF jump-skips (independently re-derived),
+dep mechanics (v0.6.0, no cascade), UDP-dial side-effect-freeness. Findings:
+- **F-2 (high, CONFIRMED): read-timeout hang** — setReadTimeout was best-effort, so a swallowed
+  BIOCSRTIMEOUT failure would let a blocking read hang the sync UI past maxWait (defeats T-11). FIX-NOW:
+  replaced with an ESSENTIAL non-blocking fd (unix.SetNonblock, fatal on failure) + EAGAIN-sleep poll,
+  so the deadline loop always runs regardless of any ioctl. Bound now guaranteed.
+- **F-4 (low): spec didn't record the x/net/bpf native-first relaxation** — FIX-NOW: added spec §10.4.
+- **F-1 (med): host-only filter, not 4-tuple** — DEFER (T-9-ref). Not a regression; host-scoping is the
+  bulk of §6, userspace enforces port, true 4-tuple needs the local port (T-8). Port kernel-filter is a refinement.
+- **F-3 (low): default in coverage switch** — WON'T-FIX (Go has no exhaustive-switch; default is the safe honest fallback).
+- **F-5 (info): stale x/net pin** — WON'T-FIX (deliberate, avoids the x/sys 0.38→0.47 cascade).
+No human escalation. cp-insD + remediation is CI-green; the /dev/bpf path awaits the maintainer root smoke test.
