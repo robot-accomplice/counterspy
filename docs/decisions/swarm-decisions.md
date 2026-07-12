@@ -234,3 +234,38 @@ Findings⇄Exfiltration, lazy sampling). All merged & green.
   against a non-hardened target BEFORE building tier 2. Phase C: keylog + proxy. Then #4 highlighting
   (keyword/regex + key/secret heuristics; also drives the mask-by-default redaction) on surfaced plaintext.
 - Grounding confirmed on this host: /dev/bpf* present, dtrace ships, tcpdump present (NOT to be used — native-first).
+
+## RESUME NOTE UPDATE — Phase A engine COMPLETE — 2026-07-12 (session 2)
+
+internal/inspect package built + tested (branch spec/exfil-inspect-interceptor, all pushed):
+- tls.go        — ClientHelloSNI (pure, bounds-checked) ✓ tested
+- framing.go    — ParseIPPacket → TCPSegment (4-tuple via netip + payload) ✓ tested
+- linklayer.go  — stripLinkLayer (Ethernet/null/raw → IP) ✓ tested
+- capture.go    — PacketSource seam + fixtureSource ✓ tested
+- bpf_darwin.go — openLiveCapture: native /dev/bpf via x/sys/unix (root I/O edge; compile+vet
+                  verified; LIVE sudo capture NOT yet run — no interactive sudo in sandbox. TODO:
+                  a maintainer should run a root smoke: sudo go test -run LiveCapture with curl traffic)
+- bpf_other.go  — non-darwin stub
+- inspect.go    — Inspect(src,flow,maxPackets) Result: correlate by remote, SNI, HONEST coverage
+                  verdict (TLS→metadata-only no-payload; plaintext→payload; none). ✓ tested
+
+REMAINING Phase A (checkpoint e), then the Phase A PR:
+1. The `i` inspection VIEW in internal/tui: a new mode/overlay reached by pressing `i` on an
+   Exfiltration connection row. Build a Flow{PID, Remote} from the selected row (the row already
+   carries pid + remote endpoint via model.Conn), call inspect.Inspect over a live capture, render:
+   header (app·pid·local→remote·trust glyph) + the coverage verdict line + metadata (SNI) + the
+   content pane (when plaintext), esc/i returns. Reuse internal/mark for the trust glyph.
+   NOTE: internal/tui may import internal/inspect only if inspect stays a pure-ish leaf (it imports
+   netip + x/sys via bpf_darwin — check the tui decoupling invariant in imports_test.go; inspect is
+   NOT model-shaped, so this likely needs the capture wired in MAIN, not tui: pass an inspect
+   function/result into the tui via a seam, keeping tui importing only model+mark+inspect-types, OR
+   do the capture in main and hand the tui a Result. Decide at implementation — prefer main owns the
+   root capture, tui renders a Result via an injected `inspect func(Flow) Result` seam.)
+2. CONSENT gate: first `i` in a session prompts "capture this flow's packets? [y/N]" before any
+   capture. A --no-inspect flag disables it. (spec §5)
+3. Wire openLiveCapture in main (root); the console's `i` handler builds the Flow, opens capture,
+   runs Inspect with a timeout/packet cap, shows the Result. Capture stops on view close.
+4. Redaction (spec §6): mask obvious secrets in the rendered payload by default (bearer/AKIA/PEM/
+   high-entropy) with a reveal toggle — this overlaps #4 highlighting; can land with #4.
+5. Bundle Phase A into ONE PR → develop; swarm fan-out; CI gate.
+Then Phase B: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
