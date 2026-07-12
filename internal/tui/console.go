@@ -21,7 +21,7 @@ const (
 // (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
 // happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
 // closes `tick` (or exits) to stop.
-func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-chan struct{}, clip func(string) error) error {
+func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error) error {
 	mode := modeFindings
 	em := NewEgress()
 	var lastManifest string
@@ -49,12 +49,19 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 	setSampling := func() { sampling.Store(mode == modeExfil && !em.Paused) }
 
 	draw := func() {
-		if mode == modeFindings {
+		switch {
+		case em.Inspection != nil: // full-screen inspection pane replaces the tree
+			drawInspect(s, em.Inspection, em.Reveal)
+		case mode == modeFindings:
 			view(m, s)
-		} else {
+			drawConsoleTabs(s, mode, m.ReadOnly)
+		default:
 			egressView(em, s)
+			drawConsoleTabs(s, mode, m.ReadOnly)
+			if em.ConsentFor != nil { // consent gate over the tree
+				drawConsentPrompt(s, em.ConsentFor)
+			}
 		}
-		drawConsoleTabs(s, mode, m.ReadOnly)
 		s.Show()
 	}
 	draw()
@@ -62,7 +69,10 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 	for {
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab {
+			// Tab switches faces only when no exfil overlay owns the screen (an open
+			// inspection/consent modal must not be left dangling behind the other face).
+			overlayOpen := em.Inspection != nil || em.ConsentFor != nil
+			if !overlayOpen && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
 				if mode == modeFindings {
 					mode = modeExfil
 					setSampling()
@@ -98,6 +108,16 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 					} else {
 						next.Status = "copy unavailable"
 					}
+				}
+				if next.InspectReq != nil { // capture+inspect I/O off the pure update (§4)
+					target := *next.InspectReq
+					next.InspectReq = nil
+					view := model.InspectView{Verdict: "inspection disabled (--no-inspect)"}
+					if inspector != nil {
+						view = inspector.Inspect(target.conn)
+					}
+					next.Inspection = &inspection{target: target, view: view}
+					next.Reveal = false
 				}
 				em = next
 				setSampling()

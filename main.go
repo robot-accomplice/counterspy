@@ -509,7 +509,9 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 			}
 		}
 	}()
-	err = tui.RunConsole(screen, m, actor, mon, tick, pbcopy)
+	// inspector is nil until Phase A checkpoint (d) wires the native /dev/bpf capture; a nil
+	// inspector disables the `i` inspection overlay (the --no-inspect posture).
+	err = tui.RunConsole(screen, m, actor, mon, nil, tick, pbcopy)
 	if err != nil {
 		fmt.Fprintln(stdout, "console:", err)
 		return 1

@@ -22,7 +22,7 @@ func TestRunConsole_TabSwitchesModeAndLazySamples(t *testing.T) {
 	tick := make(chan struct{})
 
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, m, &fakeActor{}, cs, tick, nil) }()
+	go func() { done <- RunConsole(s, m, &fakeActor{}, cs, nil, tick, nil) }()
 
 	// Findings mode is active: a tick must NOT sample.
 	time.Sleep(20 * time.Millisecond)
@@ -81,7 +81,7 @@ func TestRunConsole_FindingsQuarantineFlow(t *testing.T) {
 	tick := make(chan struct{})
 
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, m, fa, fakeSampler{}, tick, nil) }()
+	go func() { done <- RunConsole(s, m, fa, fakeSampler{}, nil, tick, nil) }()
 
 	inject := func(k tcell.Key, r rune) {
 		time.Sleep(15 * time.Millisecond)
@@ -115,7 +115,7 @@ func TestRunConsole_QuitWhileSampleBlocks(t *testing.T) {
 	block := make(chan struct{})
 	bs := blockingSampler{release: block}
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, bs, make(chan struct{}), nil) }()
+	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, bs, nil, make(chan struct{}), nil) }()
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // to Exfiltration → warm sample blocks
 	time.Sleep(30 * time.Millisecond)
 	s.InjectKey(tcell.KeyRune, 'Q', tcell.ModNone) // must quit despite the blocked sample
@@ -147,7 +147,7 @@ func TestRunConsole_PausedSkipsResample(t *testing.T) {
 	cs := &countingSampler{groups: []model.EgressGroup{eg("x", model.Low, 1)}}
 	tick := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, cs, tick, nil) }()
+	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, cs, nil, tick, nil) }()
 
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // to Exfiltration (warm sample)
 	time.Sleep(30 * time.Millisecond)

@@ -41,6 +41,29 @@ type EgressModel struct {
 
 	expanded    map[string]bool // app name -> expanded (shows instance rows)
 	expandedPID map[int]bool    // pid -> expanded (shows connection rows)
+
+	// Inspection overlay (spec §4/§5): a modal over the tree, driven off the pure update like
+	// CopyReq — egressUpdate only sets requests; RunConsole performs the capture I/O.
+	Consented  bool           // session-wide inspect consent, granted once (§5)
+	ConsentFor *inspectTarget // consent prompt is open for this target (nil = no prompt)
+	InspectReq *inspectTarget // RunConsole should capture+inspect this target, then clear it
+	Inspection *inspection    // result overlay is open (nil = closed)
+	Reveal     bool           // content pane is revealed (redaction off) for the open inspection
+}
+
+// inspectTarget is the flow the user chose to inspect, plus the display context the overlay
+// header needs (resolved from the selected row, which the pure engine result doesn't carry).
+type inspectTarget struct {
+	app   string
+	pid   int
+	trust string // egress trust-label string → mark.TrustLabel for the header glyph
+	conn  model.Conn
+}
+
+// inspection is an open result overlay: the target (for the header) + the rendered view.
+type inspection struct {
+	target inspectTarget
+	view   model.InspectView
 }
 
 // selectedPath returns the full executable path of the selected row (the instance's path for
@@ -122,6 +145,30 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 	if key == tcell.KeyCtrlC {
 		return m, true
 	}
+	// The inspection result overlay is modal: it owns every key until dismissed.
+	if m.Inspection != nil {
+		switch {
+		case key == tcell.KeyEscape, r == 'i':
+			m.Inspection, m.Reveal = nil, false // back to the tree
+		case r == 'r':
+			m.Reveal = !m.Reveal // toggle secret masking (§6)
+		case r == 'Q':
+			return m, true
+		}
+		return m, false
+	}
+	// The consent prompt is modal: nothing is captured until the user answers y (§5).
+	if m.ConsentFor != nil {
+		switch {
+		case r == 'y', r == 'Y':
+			m.Consented, m.InspectReq, m.ConsentFor = true, m.ConsentFor, nil
+		case r == 'n', r == 'N', key == tcell.KeyEscape:
+			m.ConsentFor = nil
+		case r == 'Q':
+			return m, true
+		}
+		return m, false
+	}
 	m.Status = "" // any key clears the previous transient status
 	rows := m.visibleRows()
 	switch key {
@@ -147,11 +194,63 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			if path := m.selectedPath(rows); path != "" {
 				m.CopyReq = path // the run loop performs the clipboard I/O and sets Status
 			}
+		case 'i':
+			m = m.requestInspect(rows) // gate on consent, then let RunConsole capture
 		case 'Q':
 			return m, true
 		}
 	}
 	return m, false
+}
+
+// requestInspect resolves the selected row to a concrete (pid, remote) flow and either opens the
+// consent prompt (first time) or queues the capture request. A row without a resolvable single
+// connection (an app header) sets a status hint instead of guessing a flow.
+func (m EgressModel) requestInspect(rows []egressRow) EgressModel {
+	target, hint := resolveInspectTarget(rows, m.Selected)
+	if target == nil {
+		m.Status = hint
+		return m
+	}
+	if m.Consented {
+		m.InspectReq = target
+	} else {
+		m.ConsentFor = target // spec §5: first inspection in a session must be consented
+	}
+	return m
+}
+
+// resolveInspectTarget picks the flow to inspect from the selected row: a connection row is that
+// connection; an instance row uses its busiest connection; an app header is ambiguous (many pids)
+// so it returns a hint to drill in rather than fabricating a flow (the T-8 over-merge concern).
+func resolveInspectTarget(rows []egressRow, selected int) (*inspectTarget, string) {
+	if selected < 0 || selected >= len(rows) {
+		return nil, ""
+	}
+	row := rows[selected]
+	switch {
+	case row.conn != nil: // connection leaf — exact flow
+		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *row.conn}, ""
+	case row.member != nil: // instance — inspect its busiest connection
+		c := busiestConn(row.member.Conns)
+		if c == nil {
+			return nil, "no connection on this process to inspect"
+		}
+		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *c}, ""
+	default: // app header — spans multiple pids; ambiguous
+		return nil, "expand to a process or connection to inspect"
+	}
+}
+
+// busiestConn returns the highest-out-rate connection (the most likely exfil channel), or nil.
+func busiestConn(conns []model.Conn) *model.Conn {
+	var best *model.Conn
+	for i := range conns {
+		if best == nil || conns[i].OutRate > best.OutRate {
+			best = &conns[i]
+		}
+	}
+	return best
 }
 
 // expandSelected opens the next level of the selected row: an app header reveals its

@@ -36,7 +36,7 @@ const (
 	concernW = 10
 )
 
-const footerHint = "j/k ↑/↓ move · ↵/→ expand · ← collapse · y copy path · s sort · / filter · p pause · Q quit"
+const footerHint = "j/k move · ↵/→ expand · ← collapse · y copy · i inspect · s sort · / filter · p pause · Q quit"
 
 // middleEllipsis renders a long path as "start…/finalBinary": it keeps the leading path and
 // the final component (the binary), collapsing the middle with … so both the location and the
