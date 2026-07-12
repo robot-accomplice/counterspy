@@ -342,3 +342,17 @@ Maintainer runs the /dev/bpf smoke test on a real Mac:
 Then: bundle Phase A into ONE PR → develop (swarm already reviewed each checkpoint), CI gate.
 OPEN TICKETS: T-8 (local-port 4-tuple), T-9-ref (kernel port scoping), T-10 (full reassembly), T-11/T-12 (done/optional).
 Phase B next: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
+
+## cp-insE (root smoke test) — reviewed 2026-07-12 (session 3)
+Built a deterministic root smoke test for the /dev/bpf path (uncoverable in CI). Antagonist(haiku)+
+Audit(sonnet) fan-out. Antagonist CLEAN (SNI comes strictly from captured bytes; no false-pass; empty
+capture FAILS). Audit found:
+- **F-1 (high, CONFIRMED): the SNI test doesn't prove the BIOCSETF filter engaged** — on loopback both
+  ends are 127.0.0.1 so a host filter passes everything regardless. FIX-NOW: added a companion negative
+  test (TestLiveCapture_FilterDropsUnscopedTraffic) — a capture scoped to a bogus TEST-NET host while
+  loopback traffic flows, asserting the RAW source is silent (proves the filter dropped it in-kernel).
+- **F-3 (low): dial goroutine not joined** — FIX-NOW: driveLoopbackTLS returns a WaitGroup-backed wait().
+- **F-4 (low): no discoverable pointer** — FIX-NOW: spec §9 now documents the opt-in root smoke command.
+- **F-2 (med): host-only scope** — subsumed (T-9-ref); the negative test proves the filter engages at all.
+Both tests gated by COUNTERSPY_LIVE_CAPTURE=1; `go test ./...` stays green without root. The maintainer
+runs one sudo command to validate the whole root path; I can't (sudo needs a password).

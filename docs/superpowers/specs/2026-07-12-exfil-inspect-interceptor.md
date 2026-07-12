@@ -186,6 +186,11 @@ and should follow the safe, always-available metadata tier.
 - **Consent gate** tested: no capture is attempted before consent; `--no-inspect`
   disables it.
 - Redaction tested: a bearer token / PEM header is masked by default.
+- **Root path (opt-in, not CI):** the live `/dev/bpf` capture can't run in CI. A deterministic
+  root smoke test (`internal/inspect/live_darwin_test.go`) captures a loopback TLS ClientHello and
+  asserts the SNI is recovered (read path) plus that a filter scoped to a bogus host drops all
+  traffic (BIOCSETF engaged). Run it before shipping a change to the capture/filter path:
+  `sudo COUNTERSPY_LIVE_CAPTURE=1 go test -run LiveCapture -v ./internal/inspect/`
 
 ## 10. Resolved decisions (maintainer review, 2026-07-12)
 
