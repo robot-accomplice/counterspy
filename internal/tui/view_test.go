@@ -350,3 +350,21 @@ func TestDrawModal_ClampsToSmallScreen(t *testing.T) {
 		t.Fatalf("clamped modal should still render:\n%s", screenText(s))
 	}
 }
+
+// cp-T7 review F-1/F-4: the ? overlay must not draw off-screen on a small terminal
+// (the mark legend grew the box). Clamped box + row clipping keep it in bounds.
+func TestView_HelpOverlayFitsSmallTerminal(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(40, 20) // narrower than bw=60 and shorter than the box height
+	m := New([]model.Assessment{mk("x", model.RecInvestigate, 6)}, nil)
+	m.Focus = focusHelp
+	view(m, s) // must not panic / index off-screen
+	s.Show()
+	cells, w, h := s.GetContents()
+	if len(cells) != w*h {
+		t.Fatalf("screen buffer size mismatch: %d != %d*%d", len(cells), w, h)
+	}
+}

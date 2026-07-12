@@ -312,9 +312,20 @@ func drawHelp(s tcell.Screen) {
 	rows = append(rows, mark.LegendCompact()...) // drift-proof: derived from mark.Legend()
 	w, h := s.Size()
 	bw, bh := 60, len(rows)+2
+	// Clamp the box to the screen so it never draws off-screen on a small terminal
+	// (cp-T7 review F-1/F-2: the legend grew the box past 24 rows / 60 cols).
+	if bw > w {
+		bw = w
+	}
+	if bh > h {
+		bh = h
+	}
 	x0, y0 := (w-bw)/2, (h-bh)/2
 	box := drawBox(s, x0, y0, bw, bh)
 	for i, r := range rows {
+		if i >= bh-2 { // clip rows that don't fit inside the clamped box
+			break
+		}
 		st := box
 		if r == "Keys" || r == "Marks" {
 			st = box.Foreground(colAccent).Bold(true)
