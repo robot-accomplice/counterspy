@@ -3,7 +3,22 @@ package mark
 import (
 	"strings"
 	"testing"
+
+	"github.com/rivo/uniseg"
 )
+
+// TestVocabularyGlyphsAreSingleWidth checks in code the assumption Cluster's
+// uniform cadence rests on: every vocabulary glyph occupies exactly markField
+// display cells. Without this, a future wide/zero-width/emoji glyph would break
+// alignment while the rune-count cadence test still passed (cp-T3 review F-1).
+// uniseg is test-only here — the runtime cadence is structural, not measured.
+func TestVocabularyGlyphsAreSingleWidth(t *testing.T) {
+	for _, r := range Legend() {
+		if w := uniseg.StringWidth(string(r.Glyph)); w != markField {
+			t.Errorf("glyph %q (%s) display width %d, want %d — would break uniform cadence", r.Glyph, r.Meaning, w, markField)
+		}
+	}
+}
 
 func TestClusterUniformCadence(t *testing.T) {
 	rows := []string{
