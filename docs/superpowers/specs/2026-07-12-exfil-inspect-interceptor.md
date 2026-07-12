@@ -50,7 +50,7 @@ the target allows, and records which one (if any) yielded plaintext.
 |---|------|--------|-----------------|---------|
 | 0 | **Metadata** | SNI/host, cert (TLS 1.2), packet sizes/timing, JA3/JA3S, DNS names | BPF raw capture (`/dev/bpf`), parse ClientHello/handshake | **Always** (even fully-encrypted flows) |
 | 1 | **Plaintext flows** | full payload | same BPF capture; the flow is unencrypted (plain HTTP, DNS, some IoT/malware C2) | plaintext protocols |
-| 2 | **`SSL_write` hook** | plaintext *before* encryption (bypasses pinning) | intercept `SSL_write`/`SSL_read` (OpenSSL/BoringSSL) or `SSLWrite`/Network.framework in the target via `dtrace` or `DYLD_INSERT_LIBRARIES` | non-hardened / non-SIP targets |
+| 2 | **`SSL_write` hook** | plaintext *before* encryption (bypasses pinning) | **native** in-process interposition — a helper dylib via `DYLD_INSERT_LIBRARIES`, or `task_for_pid` + Mach injection, or `libdtrace` via cgo — NOT a shelled `dtrace`/`frida` child (native-first, §3) | non-hardened / non-SIP targets |
 | 3 | **Key extraction → decrypt** | plaintext (post-hoc) | `SSLKEYLOGFILE` if the app honors it, or session-key scrape via `task_for_pid`; decrypt the BPF-captured ciphertext | apps that cooperate / are debuggable |
 | 4 | **Terminating proxy + consented CA** | plaintext | install a root CA (explicit consent), transparently proxy, re-encrypt | broadest; **breaks pinned apps**, most invasive |
 
@@ -73,11 +73,14 @@ cooperative app or a debuggable process. The view states the outcome for each fl
 ```
 
 - **Capture source: native BPF** (`/dev/bpf`, root) filtered to the selected flow's
-  4-tuple — no third-party dependency (raw BPF via `syscall`/`golang.org/x/sys`,
-  which is already in the module graph via tcell). A **`tcpdump` shell-out is the
-  documented fallback** if native BPF proves too fiddly, kept behind the same
-  `captureSource` seam so tests inject fixtures. **No `gopacket` dependency** unless
-  a review concludes the hand-rolled parsers are worse than the dep.
+  4-tuple — raw BPF via `syscall`/`golang.org/x/sys` (already in the module graph via
+  tcell), no third-party dependency. **Native-first is a hard principle here**
+  (maintainer decision): forking to an external process is a measure of last resort
+  and a highly suspect choice for a counter-surveillance tool — a child `tcpdump`
+  would itself be an odd new process spawning packet capture, exactly the shape we
+  hunt. So **no `tcpdump`/`tshark` shell-out** and **no `gopacket` dependency**; the
+  capture seam exists only so tests inject fixture bytes, not to swap in an external
+  tool. (This matches the native Security.framework codesign direction.)
 - **Parsers are pure and fixture-tested** (the codebase's contract): an
   Ethernet/IP/TCP framing parser and a **TLS ClientHello parser** (SNI, versions,
   JA3) over captured bytes. The BPF read is the untested I/O edge.
@@ -184,13 +187,12 @@ and should follow the safe, always-available metadata tier.
   disables it.
 - Redaction tested: a bearer token / PEM header is masked by default.
 
-## 10. Open questions for review
+## 10. Resolved decisions (maintainer review, 2026-07-12)
 
-1. **BPF native vs `tcpdump` shell-out for Phase A** — native is dependency-free but
-   fiddlier; shell-out is simpler but heavier and parses text. Recommendation:
-   native BPF behind a seam, `tcpdump` fallback. Agree?
-2. **Tier 2 mechanism** — `dtrace` (ships with macOS, SIP-limited) vs
-   `DYLD_INSERT_LIBRARIES` (needs a helper dylib, blocked by hardened runtime) vs
-   Frida (brew dep). The spike decides; do you have a preference to spike first?
-3. **Redaction default** — mask secrets by default with a "reveal" toggle (proposed),
-   or show raw and let the user opt into masking?
+1. **Capture: native BPF, no shell-out.** Forking an external `tcpdump`/`tshark` is a
+   last resort and a suspect choice for a counter-surveillance tool; native `/dev/bpf`
+   only (§3).
+2. **Tier 2: native interposition only** — a helper dylib / Mach injection / `libdtrace`
+   via cgo, never a shelled `frida`/`dtrace` child (§2). The Phase-B spike targets the
+   native mechanism.
+3. **Redaction: mask secrets by default** with a "reveal" toggle (§6). Agreed.
