@@ -23,6 +23,7 @@ import (
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
@@ -124,7 +125,7 @@ func runScan(flags []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled()))
+	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled(), mark.Classify(assessments, nil)))
 	if interactive {
 		quarantineLoop(assessments, stdout, os.Stdin, actQuarantiner{})
 	}

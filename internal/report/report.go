@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
 
@@ -52,22 +53,11 @@ func recStyle(r model.Recommendation) string {
 	}
 }
 
-func glyph(r model.Recommendation) string {
-	switch r {
-	case model.RecQuarantine:
-		return "⚑"
-	case model.RecInvestigate:
-		return "▲"
-	default:
-		return "·"
-	}
-}
-
 // Render produces the human report: a styled executive summary (counts per tier and
 // any collector gaps) followed by the actionable findings (Quarantine + Investigate)
 // as verdict + recommendation + a deduplicated evidence story. Monitor-tier noise is
 // counted, not detailed. Color is applied only when `color` is true.
-func Render(assessments []model.Assessment, gaps []string, color bool) string {
+func Render(assessments []model.Assessment, gaps []string, color bool, live map[string]mark.Liveness) string {
 	p := pen{color}
 	var q, inv, mon int
 	for _, a := range assessments {
@@ -86,9 +76,9 @@ func Render(assessments []model.Assessment, gaps []string, color bool) string {
 		p.s(sBold+sMint, "CounterSpy"),
 		p.s(sDim, fmt.Sprintf("%d actionable of %d scanned", q+inv, len(assessments))))
 	fmt.Fprintf(&b, "  %s   %s   %s\n",
-		p.s(sRed, fmt.Sprintf("● %d Quarantine", q)),
-		p.s(sAmber, fmt.Sprintf("▲ %d Investigate", inv)),
-		p.s(sGray, fmt.Sprintf("· %d Monitor", mon)))
+		p.s(sRed, fmt.Sprintf("%c %d Quarantine", mark.GlyphQuarantine, q)),
+		p.s(sAmber, fmt.Sprintf("%c %d Investigate", mark.GlyphInvestigate, inv)),
+		p.s(sGray, fmt.Sprintf("%c %d Monitor", mark.GlyphMonitor, mon)))
 	for _, g := range gaps {
 		fmt.Fprintf(&b, "  %s\n", p.s(sAmber, "⚠ "+g))
 	}
@@ -105,8 +95,9 @@ func Render(assessments []model.Assessment, gaps []string, color bool) string {
 		}
 		n++
 		rc := recStyle(a.Recommendation)
+		cluster := mark.Cluster(mark.Concern(a.Recommendation), mark.Trust(a.Finding), live[a.Subject.Key()])
 		fmt.Fprintf(&b, "\n  %s %s  %s\n",
-			p.s(rc, glyph(a.Recommendation)+" "+strings.ToUpper(string(a.Recommendation))),
+			p.s(rc, cluster+" "+strings.ToUpper(string(a.Recommendation))),
 			p.s(sBold, Clean(a.Subject.Display())),
 			p.s(sDim, a.Category+" · score "+itoa(a.Score)))
 		fmt.Fprintf(&b, "     %s\n", Clean(a.Verdict))
@@ -129,6 +120,7 @@ func Render(assessments []model.Assessment, gaps []string, color bool) string {
 	}
 	fmt.Fprintf(&b, "\n  %s\n", p.s(sDim,
 		"Quarantine = act now · Investigate = review (may be legitimate) · undo anything with: counterspy restore"))
+	fmt.Fprintf(&b, "  %s\n", p.s(sDim, mark.LegendLine()))
 	return b.String()
 }
 
