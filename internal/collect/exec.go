@@ -11,22 +11,11 @@ import (
 // (ABORT C1).
 const cmdTimeout = 15 * time.Second
 
-// execOutput, execCombined, and execAccepts are package vars (not funcs) so tests
-// can override them with fakes keyed on command name — no shelling out in tests.
+// execOutput is a package var (not a func) so tests can override it with a fake keyed on
+// command name — no shelling out in tests. Code-signature checks no longer shell out (they
+// use Security.framework, see codesign_darwin.go); the remaining collectors still exec.
 var execOutput = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).Output()
-}
-
-var execCombined = func(name string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
-	defer cancel()
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
-}
-
-var execAccepts = func(name string, args ...string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
-	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Run() == nil
 }

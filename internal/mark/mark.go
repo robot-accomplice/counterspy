@@ -49,8 +49,9 @@ func Concern(r model.Recommendation) rune {
 // Trust classifies a finding's code-signing provenance from its codesign
 // evidence Facts. Returns 0 (blank slot) when the finding carries no codesign
 // signal. Apple-authority is checked before Developer-ID so Apple system code
-// reads as ● not ◆. The mapping is written against current develop (spctl-accepted)
-// semantics; see spec §8 for the PR #25 coupling.
+// reads as ● not ◆. ◆ notarized is gated on the explicit `notarized` fact (an
+// offline stapled-ticket check) rather than on `authority` alone, because the
+// native backend sets `authority` for any valid signature (spec §8).
 func Trust(f model.Finding) rune {
 	for _, e := range f.Evidence {
 		if e.Kind != model.KindCodesign {
@@ -67,8 +68,14 @@ func Trust(f model.Finding) rune {
 				return GlyphSigned
 			case isAppleAuthority(a):
 				return GlyphApple
-			default:
+			case e.Facts["notarized"] == "true":
 				return GlyphNotarized
+			default:
+				// A valid, trusted-anchor signature that is NOT notarized (Developer-ID
+				// signed but not stapled). Since the native backend now sets `authority`
+				// for any valid signature (not only Gatekeeper-notarized), ◆ is gated on
+				// the explicit `notarized` fact so it can't over-report (PR #25 coupling).
+				return GlyphSigned
 			}
 		}
 	}

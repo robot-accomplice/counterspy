@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseCodesign_UnsignedFlagged(t *testing.T) {
-	ev := ParseCodesign("/tmp/x", "code object is not signed at all", false, "")
+	ev := ParseCodesign("/tmp/x", "code object is not signed at all", false, "", false)
 	if len(ev) != 1 {
 		t.Fatalf("want 1 evidence, got %d", len(ev))
 	}
@@ -20,7 +20,7 @@ func TestParseCodesign_UnsignedFlagged(t *testing.T) {
 }
 
 func TestParseCodesign_SignedAcceptedCarriesAuthority(t *testing.T) {
-	ev := ParseCodesign("/Applications/Safari.app", "", true, "Software Signing")
+	ev := ParseCodesign("/Applications/Safari.app", "", true, "Software Signing", false)
 	if len(ev) != 1 || ev[0].Weight != 0 {
 		t.Fatalf("want one zero-weight authority marker, got %+v", ev)
 	}
@@ -32,7 +32,7 @@ func TestParseCodesign_SignedAcceptedCarriesAuthority(t *testing.T) {
 // Ticket T-3 / cp-5 F-1: a binary whose signature verifies but that Gatekeeper does
 // NOT accept must not carry an allowlist-trustable authority.
 func TestParseCodesign_SignedButRejectedDropsAuthority(t *testing.T) {
-	ev := ParseCodesign("/tmp/selfsigned", "", false, "Software Signing")
+	ev := ParseCodesign("/tmp/selfsigned", "", false, "Software Signing", false)
 	if len(ev) != 1 {
 		t.Fatalf("want 1 evidence, got %d", len(ev))
 	}
@@ -43,8 +43,21 @@ func TestParseCodesign_SignedButRejectedDropsAuthority(t *testing.T) {
 
 // cp-5 F-2: when verifyErr mentions both, the more severe "revoked" must win.
 func TestParseCodesign_RevokedBeatsUnsigned(t *testing.T) {
-	ev := ParseCodesign("/tmp/x", "certificate revoked, code object is not signed", false, "")
+	ev := ParseCodesign("/tmp/x", "certificate revoked, code object is not signed", false, "", false)
 	if ev[0].Facts["signed"] != "revoked" {
 		t.Fatalf("want revoked to win, got %v", ev[0].Facts)
+	}
+}
+
+// PR #25 reconcile: a notarized signature records the notarized fact so ◆ can be told
+// apart from ◇; a valid-but-not-notarized signature does not.
+func TestParseCodesign_NotarizedFact(t *testing.T) {
+	not := ParseCodesign("/x", "", true, "Developer ID Application: Acme (T1)", true)
+	if not[0].Facts["notarized"] != "true" {
+		t.Errorf("notarized fact missing: %v", not[0].Facts)
+	}
+	plain := ParseCodesign("/x", "", true, "Developer ID Application: Acme (T1)", false)
+	if _, ok := plain[0].Facts["notarized"]; ok {
+		t.Errorf("non-notarized must not set the fact: %v", plain[0].Facts)
 	}
 }

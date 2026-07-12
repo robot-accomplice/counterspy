@@ -30,11 +30,15 @@ func TestTrust(t *testing.T) {
 	}{
 		{"apple", map[string]string{"signed": "true", "authority": "Software Signing"}, GlyphApple},
 		{"apple-named", map[string]string{"signed": "true", "authority": "Apple Mac OS Application Signing"}, GlyphApple},
-		{"notarized-devid", map[string]string{"signed": "true", "authority": "Developer ID Application: Acme (TEAM1)"}, GlyphNotarized},
-		// SECURITY (cp T1 review F-1): a Gatekeeper-accepted Developer-ID cert whose
-		// company name contains "Apple" must NOT forge the ● Apple-system mark.
-		{"devid-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Application: Apple Fan LLC (TEAM9)"}, GlyphNotarized},
-		{"devid-installer-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Installer: Apple Lovers Inc (TEAM8)"}, GlyphNotarized},
+		// ◆ notarized requires the explicit notarized fact (PR #25: native backend sets
+		// authority for ANY valid signature, so ◆ must not be inferred from authority alone).
+		{"notarized-devid", map[string]string{"signed": "true", "authority": "Developer ID Application: Acme (TEAM1)", "notarized": "true"}, GlyphNotarized},
+		// A valid Developer-ID signature that is NOT notarized reads ◇, not ◆.
+		{"signed-not-notarized", map[string]string{"signed": "true", "authority": "Developer ID Application: Acme (TEAM1)"}, GlyphSigned},
+		// SECURITY (cp T1 review F-1): a Developer-ID cert whose company name contains
+		// "Apple" must NOT forge ● Apple-system — it stays ◆ (notarized) / ◇ (not).
+		{"devid-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Application: Apple Fan LLC (TEAM9)", "notarized": "true"}, GlyphNotarized},
+		{"devid-installer-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Installer: Apple Lovers Inc (TEAM8)"}, GlyphSigned},
 		{"signed-not-accepted", map[string]string{"signed": "true"}, GlyphSigned},
 		{"unsigned", map[string]string{"signed": "false"}, GlyphUnsigned},
 		{"revoked", map[string]string{"signed": "revoked"}, GlyphRevoked},

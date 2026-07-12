@@ -154,8 +154,7 @@
         "mod-model",
         "mod-tui",
         "mod-feedback",
-        "mod-egress",
-        "mod-mark"
+        "mod-egress"
       ],
       "dataHandled": [
         "scan-findings"
@@ -267,9 +266,9 @@
       "id": "mod-collect",
       "type": "module",
       "name": "internal/collect",
-      "summary": "Four read-only collectors, each split into a pure parser + an exec edge: persistence, codesign, tcc, proctree+network.",
+      "summary": "Four read-only collectors: persistence, tcc, proctree+network shell out to native tools (each split into a pure parser + an exec edge); codesign is IN-PROCESS via Security.framework (cgo), no codesign/spctl subprocess.",
       "responsibilities": [
-        "Gather evidence from native tools",
+        "Gather evidence from native tools + Security.framework",
         "Parse tool output (unit-tested against fixtures)",
         "Fail loud when a source is unreadable"
       ],
@@ -277,12 +276,14 @@
       "sourcePaths": [
         "internal/collect/persistence.go",
         "internal/collect/codesign.go",
+        "internal/collect/codesign_darwin.go",
         "internal/collect/tcc.go",
         "internal/collect/proctree.go"
       ],
-      "runtime": "in-process + exec",
+      "runtime": "in-process + exec + Security.framework (cgo)",
       "interfaces": [
-        "Collect*() ([]Evidence, error)"
+        "Collect*() ([]Evidence, error)",
+        "sigProbe seam (mockable)"
       ],
       "dependencies": [
         "mod-model",
@@ -295,7 +296,8 @@
       ],
       "security": [
         "argv[0] never used as identity",
-        "authority trusted only on spctl accept"
+        "code signatures checked in-process (SecStaticCodeCheckValidity), no subprocess to spoof",
+        "authority = leaf-cert CN of a valid signature"
       ],
       "observability": [
         "gap errors surfaced by the CLI"
@@ -417,8 +419,7 @@
         "RenderJSON"
       ],
       "dependencies": [
-        "mod-model",
-        "mod-mark"
+        "mod-model"
       ],
       "dataHandled": [
         "scan-findings"
@@ -509,8 +510,7 @@
         "New"
       ],
       "dependencies": [
-        "mod-model",
-        "mod-mark"
+        "mod-model"
       ],
       "dataHandled": [
         "scan-findings",
