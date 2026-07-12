@@ -82,6 +82,26 @@ func Trust(f model.Finding) rune {
 // whose company name merely contains "Apple" (e.g. "Developer ID Application: Apple
 // Fan LLC") would forge the ● Apple-system mark. Only after ruling out Developer-ID
 // do we accept Apple's platform authorities. (swarm cp T1 review F-1, crit.)
+// TrustLabel maps the egress collector's trust-label strings (apple / notarized /
+// signed / unsigned / revoked / unknown / "") to trust glyphs, so the egress view
+// shares the same vocabulary as findings. Returns 0 (blank) for unknown/unclassified.
+func TrustLabel(s string) rune {
+	switch s {
+	case "apple":
+		return GlyphApple
+	case "notarized":
+		return GlyphNotarized
+	case "signed":
+		return GlyphSigned
+	case "unsigned":
+		return GlyphUnsigned
+	case "revoked":
+		return GlyphRevoked
+	default:
+		return 0
+	}
+}
+
 func isAppleAuthority(a string) bool {
 	if strings.HasPrefix(a, "Developer ID") {
 		return false

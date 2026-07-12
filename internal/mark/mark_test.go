@@ -48,3 +48,16 @@ func TestTrust(t *testing.T) {
 		t.Errorf("no codesign signal: got %q want blank(0)", g)
 	}
 }
+
+func TestTrustLabel(t *testing.T) {
+	cases := map[string]rune{
+		"apple": GlyphApple, "notarized": GlyphNotarized, "signed": GlyphSigned,
+		"unsigned": GlyphUnsigned, "revoked": GlyphRevoked,
+		"unknown": 0, "": 0, "bogus": 0,
+	}
+	for in, want := range cases {
+		if got := TrustLabel(in); got != want {
+			t.Errorf("TrustLabel(%q): got %q want %q", in, got, want)
+		}
+	}
+}
