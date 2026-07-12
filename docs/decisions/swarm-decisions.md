@@ -190,3 +190,12 @@ Antagonist(haiku)+Audit(sonnet) read-only fan-out on the diff. CROSS-REVIEWER CO
   emits exactly one codesign Evidence per finding (verified). Revisit only if that invariant changes.
 - **WON'T-FIX (justified): case-sensitive "signed"** (our collector emits canonical lowercase) and
   **Concern default->Monitor** (safe low-noise default by design).
+
+## Symbology & legend feature — SHIPPED to PR — 2026-07-12
+feature/symbology-legend → PR #27 (base develop). 9 plan tasks, each through an Antagonist+Audit
+fan-out. Real catches: cp-T1 ● Apple-spoof (crit), cp-T2 vestigial-mislabel (high), cp-T4/ESC-1
+comm=→full-argv correlation, cp-T5 nil-liveness prod bug (high), cp-T7 ?-overlay off-screen (crit),
+cp-T9 Architext gap (med). CI gate green (-race, coverage ≥83%/pkg). Architext mod-mark recorded.
+OPEN FOLLOW-UPS: (1) PR #25 native-codesign coupling — revisit mark.Trust ◆/◇ mapping on merge (spec §8);
+(2) T-7 interpreter-wrapper: liveness now argv-matches it, but the DETECTION/scoring side (pickTarget
+interpreter-awareness) remains open; (3) cosmetic: egress TRUST column oversized for a 1-glyph value.
