@@ -48,6 +48,7 @@ type EgressInstance struct {
 	InRate   uint64
 	OutTotal uint64
 	Conns    []Conn
+	Spark    []uint64 // per-PID recent out-rate history (this instance's own sparkline)
 }
 
 // EgressGroup aggregates ALL instances (PIDs) and connections (ports/protocols/destinations)

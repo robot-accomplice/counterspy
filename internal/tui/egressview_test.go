@@ -69,6 +69,106 @@ func TestSparkline_AllEqualValues(t *testing.T) {
 	}
 }
 
+func TestHeatColor_BlueToRedRamp(t *testing.T) {
+	cool := tcell.NewRGBColor(60, 130, 246) // blue
+	hot := tcell.NewRGBColor(235, 70, 70)   // red
+	if heatColor(0) != cool {
+		t.Fatalf("frac 0 should be the blue cool stop, got %v", heatColor(0))
+	}
+	if heatColor(-0.5) != cool {
+		t.Fatal("negative frac should clamp to the blue cool stop")
+	}
+	if heatColor(1) != hot {
+		t.Fatalf("frac 1 should be the red hot stop, got %v", heatColor(1))
+	}
+	if heatColor(2) != hot {
+		t.Fatal("frac >1 should clamp to the red hot stop")
+	}
+	// Blue at the cool end, red at the hot end: the cool color is blue-dominant, the hot
+	// color is red-dominant, and they are clearly distinct.
+	cr, _, cb := heatColor(0).RGB()
+	hr, _, hb := heatColor(1).RGB()
+	if cb <= cr {
+		t.Fatalf("cool end should be blue-dominant (b>r), got r=%d b=%d", cr, cb)
+	}
+	if hr <= hb {
+		t.Fatalf("hot end should be red-dominant (r>b), got r=%d b=%d", hr, hb)
+	}
+	// As intensity rises the color gets warmer: red-minus-blue increases end to end.
+	if (hr - hb) <= (cr - cb) {
+		t.Fatal("hot end should be warmer than cool end (higher red-minus-blue)")
+	}
+}
+
+func TestDrawSparkline_GlyphPerValueAndHeatColored(t *testing.T) {
+	glyphset := map[rune]bool{}
+	for _, g := range sparkGlyphs {
+		glyphset[g] = true
+	}
+
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Fini()
+	// Rates spanning the absolute heat scale (cool → hot) so colors are distinct.
+	drawSparkline(s, 0, 0, []uint64{0, 1 << 10, 1 << 13, 1 << 16, 1 << 18, 1 << 20, 1 << 21, 1 << 22}, 8, false)
+	s.Show()
+	cells, w, _ := s.GetContents()
+
+	// Every value draws a glyph — the "sparklines on every line" behavior at the cell level.
+	fgs := map[tcell.Color]bool{}
+	for i := 0; i < 8; i++ {
+		c := cells[0*w+i]
+		if len(c.Runes) == 0 || !glyphset[c.Runes[0]] {
+			t.Fatalf("cell %d should render a spark glyph, got %q", i, string(c.Runes))
+		}
+		fg, _, _ := c.Style.Decompose()
+		fgs[fg] = true
+	}
+	// Heat coloring: the row is not a single flat color — quiet and busy cells differ.
+	if len(fgs) < 2 {
+		t.Fatal("sparkline should be heat-colored (multiple distinct cell colors), got one flat color")
+	}
+
+	// Empty history renders nothing.
+	s2 := tcell.NewSimulationScreen("")
+	if err := s2.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Fini()
+	drawSparkline(s2, 0, 0, nil, 8, false)
+	s2.Show()
+	c2, _, _ := s2.GetContents()
+	if len(c2[0].Runes) > 0 && glyphset[c2[0].Runes[0]] {
+		t.Fatal("empty history should draw no sparkline glyph")
+	}
+}
+
+// The heat color is ABSOLUTE (loud=hot), not scaled to each row's own peak: a quiet 200 B/s
+// app stays cool even at its maximum, while a 1 MB/s app runs hot. Guards against the
+// per-row-relative coloring that would make a trickle flare red (cry-wolf).
+func TestDrawSparkline_ColorIsAbsoluteNotPerRow(t *testing.T) {
+	redOf := func(rate uint64) int32 {
+		s := tcell.NewSimulationScreen("")
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		defer s.Fini()
+		drawSparkline(s, 0, 0, []uint64{rate, rate, rate, rate}, 4, false) // flat row at `rate`
+		s.Show()
+		cells, _, _ := s.GetContents()
+		fg, _, _ := cells[0].Style.Decompose() // flat row — every cell is the same color
+		r, _, _ := fg.RGB()
+		return r
+	}
+	quiet := redOf(200)    // 200 B/s — its own peak, but absolutely quiet
+	loud := redOf(1 << 20) // 1 MB/s
+	if !(loud > quiet) {
+		t.Fatalf("loud row should be hotter (more red) than a quiet row at its own peak: quiet=%d loud=%d", quiet, loud)
+	}
+}
+
 func TestTopDest_ZeroOneMany(t *testing.T) {
 	if got := topDest(model.EgressGroup{}); got != "—" {
 		t.Fatalf("zero destinations should render em-dash, got %q", got)
