@@ -32,6 +32,22 @@ func TestRenderShowsClusterAndKey(t *testing.T) {
 	}
 }
 
+// cp-T5 Audit F-2: a finding with no codesign/liveness evidence renders blank
+// trust + liveness slots at the Render call site, keeping the cluster aligned.
+func TestRenderBlankSlotsCluster(t *testing.T) {
+	a := model.Assessment{
+		Finding:        model.Finding{Subject: model.Subject{Label: "bareproc"}},
+		Recommendation: model.RecInvestigate,
+		Verdict:        "weak isolated signal",
+	}
+	out := Render([]model.Assessment{a}, nil, false, nil)
+	// concern ▲, then three blank slots: "▲      " (glyph + 3×"  " gaps/blanks)
+	want := mark.Cluster(mark.GlyphInvestigate, 0, mark.Liveness{})
+	if !strings.Contains(out, want) {
+		t.Errorf("expected blank-slot cluster %q in output:\n%s", want, out)
+	}
+}
+
 func sample() []model.Assessment {
 	return []model.Assessment{
 		{

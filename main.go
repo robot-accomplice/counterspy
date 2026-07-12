@@ -125,7 +125,7 @@ func runScan(flags []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled(), mark.Classify(assessments, nil)))
+	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled(), livenessFor(assessments)))
 	if interactive {
 		quarantineLoop(assessments, stdout, os.Stdin, actQuarantiner{})
 	}
@@ -149,6 +149,14 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
+// livenessFor resolves the paths referenced by running processes (best-effort)
+// and classifies each assessment's liveness. A ps failure degrades to "nothing
+// known running" — persistence then reads vestigial rather than crashing (T-4/#23).
+func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
+	running, _ := collect.CollectRunningPaths()
+	return mark.Classify(assessments, running)
+}
+
 func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
 
 // collectAllWithProgress runs the collectors, then the per-binary code-signature checks
