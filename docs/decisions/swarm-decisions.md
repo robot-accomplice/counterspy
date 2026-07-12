@@ -199,3 +199,38 @@ cp-T9 Architext gap (med). CI gate green (-race, coverage ≥83%/pkg). Architext
 OPEN FOLLOW-UPS: (1) PR #25 native-codesign coupling — revisit mark.Trust ◆/◇ mapping on merge (spec §8);
 (2) T-7 interpreter-wrapper: liveness now argv-matches it, but the DETECTION/scoring side (pickTarget
 interpreter-awareness) remains open; (3) cosmetic: egress TRUST column oversized for a 1-glyph value.
+
+## RESUME NOTE — Exfiltration inspection interceptor (#3), Phase A in progress — 2026-07-12
+
+Session got large; this note lets a compacted OR fresh session resume identically.
+
+### Operating model (unchanged)
+Single-writer swarm, orchestrator+subagents substrate. Each reviewable unit = a checkpoint:
+implement test-first → commit → spawn read-only Antagonist(haiku)+Audit(sonnet) fan-out on the
+diff → vote/remediate → advance. Ship as gitflow branch → PR → develop, CI-gated (build+cgo,
+vet, gofmt across ALL tracked files, test --race, >=80% coverage/pkg). No spawn_task chips.
+Persist findings to .swarm/bus/inbox/{findings,coding}.md. NATIVE-FIRST principle (maintainer):
+never shell out to an external process when a native/in-process path exists (BPF via syscall, not
+tcpdump; Security.framework, not codesign CLI). Pre-push: gofmt -l over git ls-files '*.go'.
+
+### Where things stand
+develop has: symbology marks, native codesign (◆/◇ reconciled), CI flake fix, spinner, heat
+sparklines, per-connection sparklines, console unification (one `console` command, Tab-switch
+Findings⇄Exfiltration, lazy sampling). All merged & green.
+
+### #3 interceptor — spec APPROVED, on branch `spec/exfil-inspect-interceptor` (pushed):
+- Spec: docs/superpowers/specs/2026-07-12-exfil-inspect-interceptor.md (READ FIRST). Decisions:
+  native BPF only (no tcpdump/gopacket); tier-2 native interposition only (no shelled frida/dtrace);
+  redaction masked-by-default w/ reveal toggle; consent opt-in per session; tiers 2 & 4 need own consent.
+- Tiers: 0 metadata(SNI/JA3/cert/sizes, always) · 1 plaintext flows · 2 SSL_write hook · 3 keylog · 4 proxy+CA.
+- DONE checkpoint 1: internal/inspect/tls.go — pure TLS ClientHello SNI parser + tests (bounds-checked).
+- NEXT checkpoints (in order): (a) Ethernet/IP/TCP framing parser (pure, fixtures) → captured packet to TLS record;
+  (b) native BPF capture of the selected 4-tuple behind an injectable seam (root; /dev/bpf via x/sys); tests mock the seam;
+  (c) flow↔connection correlation (4-tuple ↔ the Exfiltration row's pid+local+remote);
+  (d) tier orchestration + honest per-flow coverage verdict (internal/inspect);
+  (e) the `i` inspection view in internal/tui (new mode off an Exfiltration row) + consent gate;
+  (f) bundle Phase A into ONE PR when the vertical slice renders SNI/metadata for a real flow.
+- Phase B: SSL_write-hook feasibility SPIKE (native DYLD-interpose helper / task_for_pid / libdtrace-cgo)
+  against a non-hardened target BEFORE building tier 2. Phase C: keylog + proxy. Then #4 highlighting
+  (keyword/regex + key/secret heuristics; also drives the mask-by-default redaction) on surfaced plaintext.
+- Grounding confirmed on this host: /dev/bpf* present, dtrace ships, tcpdump present (NOT to be used — native-first).
