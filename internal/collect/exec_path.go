@@ -17,21 +17,23 @@ import (
 //     script is an argv token, so the T-7 payload correlates even though the
 //     process's executable is the interpreter.
 //
-// Ticket T-4. Liveness is DISPLAY-ONLY, so a spoofed argv only mislabels a glyph;
-// it never suppresses a finding or changes a score. Known edge: a path containing
-// spaces is whitespace-split by ps and won't match as a single token.
+// Ticket T-4. Liveness is DISPLAY-ONLY, so imprecision here only mislabels a
+// glyph — it never suppresses a finding or changes a score. Two known limits
+// (accepted at ESC-1): (1) a path passed as a plain ARGUMENT to an unrelated
+// process (e.g. `grep /etc/x`, `tar -C /tmp/x`) is collected too, so a dormant
+// target that merely appears in someone's argv can read false-active; (2) a path
+// containing spaces is whitespace-split by ps and won't match as a single token.
 func ParseRunningPaths(b []byte) map[string]bool {
 	paths := map[string]bool{}
 	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimLeft(line, " \t")
-		sp := strings.IndexByte(line, ' ')
-		if sp < 0 {
+		fields := strings.Fields(line) // tolerant of tabs / repeated spaces
+		if len(fields) < 2 {
 			continue
 		}
-		if _, err := strconv.Atoi(line[:sp]); err != nil {
-			continue // not a "<pid> <args>" line
+		if _, err := strconv.Atoi(fields[0]); err != nil {
+			continue // not a "<pid> <args...>" line
 		}
-		for _, tok := range strings.Fields(line[sp+1:]) {
+		for _, tok := range fields[1:] {
 			if strings.HasPrefix(tok, "/") { // absolute-path token (exec or script arg)
 				paths[tok] = true
 			}

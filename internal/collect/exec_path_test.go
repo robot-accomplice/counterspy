@@ -38,9 +38,19 @@ func TestParseRunningPaths_SkipsMalformed(t *testing.T) {
 	out := []byte("\n" + "notapid /x\n" + "  42 \n" + "\t99 /ok\n")
 	got := ParseRunningPaths(out)
 	if !got["/ok"] {
-		t.Errorf("want /ok collected (leading tab tolerated), got %v", got)
+		t.Errorf("want /ok collected (leading/tab whitespace tolerated), got %v", got)
 	}
 	if got["/x"] {
 		t.Errorf("non-pid line must be skipped, got %v", got)
+	}
+}
+
+// Documents the ACCEPTED display-only limitation (cp-T4 review F-1, ESC-1): a
+// path passed as an argument to an unrelated process is collected, so a dormant
+// target that merely appears in someone's argv reads active. Intended, not a bug.
+func TestParseRunningPaths_ArgPathIsCollected(t *testing.T) {
+	got := ParseRunningPaths([]byte("321 grep -r foo /var/db/dormant.plist\n"))
+	if !got["/var/db/dormant.plist"] {
+		t.Errorf("known limitation: an argv path token is collected — got %v", got)
 	}
 }
