@@ -400,3 +400,17 @@ defensive guards (skip detail/legend at/above the header; clip legend to maxX). 
 F-1 combined label missing "combined" + F-4 duplicate mode switches → FIX-NOW via single-source
 trendGlyph/trendWord (fixes both). F-2/F-3 test gaps → FIX-NOW (per-mode header glyph + color-ramp assertions).
 No human escalation.
+
+## Exfil trend modes — FEATURE COMPLETE (swarm-executed) — 2026-07-13
+Plan docs/superpowers/plans/2026-07-13-exfil-trend-modes.md executed through the orchestrator+subagents
+swarm loop in 3 reviewed checkpoints + a gate:
+- cp-tr1 (data layer, tasks 1-4): in-rate + 3 in-rate rings + InSpark; FIXES Instance.InRate (was 0).
+  Antag CLEAN; Audit F-1 (test gap)→fixed, F-2 (app-ring prune)→T-14.
+- cp-tr2 (toggle + coloring, tasks 5-8): t cycles out/in/combined; tempColor share-of-PEAK (absIntensity
+  removed); directionColor green→amber; drawTrend per mode. Antag CLEAN; Audit F-1 (render-wiring test)→fixed.
+- cp-tr3 (legend+header+footer, task 9): mode glyph ↑/↓/⇅, self-coloring legend, t footer hint.
+  Reviewer CONFLICT on layout → adjudicated (SetContent bounds-checked; cosmetic-degenerate, guarded).
+  Audit F-1/F-4 (single-source trendGlyph/trendWord)→fixed; test gaps→fixed.
+- Gate (task 10): build/vet/test -race/decoupling-invariant/gofmt/architext all GREEN.
+Display-only throughout; no scoring/sort/collector-command change. Open: T-14 (prune app-level spark+sparkIn).
+Awaits Jon's live eyeball (sudo counterspy console → t to cycle modes).
