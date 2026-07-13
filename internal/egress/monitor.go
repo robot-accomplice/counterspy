@@ -11,7 +11,8 @@ import (
 	"counterspy/internal/model"
 )
 
-const sparkLen = 24 // recent out-rate samples kept per app for the sparkline
+const sparkLen = 60 // recent rate samples kept per ring (~2min at the 2s cadence) — wide enough for
+// the zoom graph; the tree's small sparklines downsample this to their column width.
 
 // Monitor holds the sampling state (previous cumulative bytes + per-app spark history) and
 // the injectable exec/join seams. Sample() is called once per tick.
