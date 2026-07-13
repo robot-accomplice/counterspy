@@ -384,3 +384,10 @@ Antagonist(haiku)+Audit(sonnet) on aac1024..65272e1. Antagonist CLEAN. Audit CLE
 mirror correctness, resource safety (per-PID/conn in-rings pruned), the InRate-was-0 fix. Findings:
 F-1 (low): test gap on in-ring prune + conn-level in-history → FIX-NOW (added TestMonitor_InRingsPruneDeadKeys).
 F-2 (low): app-level sparkIn unpruned, mirrors pre-existing unpruned out spark → DEFER (T-14, prune both).
+
+## cp-tr2 (trend toggle + relative/direction coloring) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet) on a69f23d..775adb9. Antagonist: no panics/flake; its F-1/F-2/F-3
+(footer/header/legend) are cp-tr3 (Task 9), not cp-tr2 defects. Audit CLEAN on spec fidelity (share-of-
+PEAK temperature; absIntensity removed cleanly), the plan deviation (dropping drawSparkline shim — sound),
+framePeak cost, display-only. Audit F-1 (med): no render-level mode test → FIX-NOW (added
+TestEgressView_TrendModeReachesTheTree, catches a hardcoded-trendOut wiring regression). No escalation.

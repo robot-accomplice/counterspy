@@ -448,3 +448,35 @@ func TestFramePeak_MaxAcrossRowsPerMode(t *testing.T) {
 		t.Fatalf("combined uses direction color, not temperature — peak should be 0, got %d", p)
 	}
 }
+
+// The mode must actually reach the rendered tree: egressView has to thread m.Trend (and the frame
+// peak) into drawEgressRow → trendSeries. A group whose out and in histories have DIFFERENT shapes
+// must render DIFFERENT trend glyphs in out vs in mode; identical output would mean the view
+// ignores the toggle (the Rule-10 gap the pure trendSeries tests can't catch). (cp-tr2 Audit F-1)
+func TestEgressView_TrendModeReachesTheTree(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(120, 40)
+	g := eg("x", model.Low, 10)
+	g.Spark = []uint64{0, 0, 100}   // out: rising
+	g.InSpark = []uint64{100, 0, 0} // in: falling — a different shape
+	m := NewEgress().withGroups([]model.EgressGroup{g})
+
+	trendGlyphs := func(mode trendMode) string {
+		m.Trend = mode
+		egressView(m, s)
+		s.Show()
+		cells, w, _ := s.GetContents()
+		cols := computeCols(w)
+		var b []rune
+		for i := 0; i < trendW; i++ { // app-header data row is at y=2 (tableTop)
+			b = append(b, cells[2*w+cols.trendX+i].Runes...)
+		}
+		return string(b)
+	}
+	if trendGlyphs(trendOut) == trendGlyphs(trendIn) {
+		t.Fatal("out and in modes must render different trend shapes — egressView must thread m.Trend through")
+	}
+}
