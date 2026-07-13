@@ -52,7 +52,10 @@ func New(interval float64) *Monitor {
 			// Hierarchical output (no -P): process rows carry per-PID totals AND connection
 			// sub-rows carry per-connection bytes, so one call feeds both ParseNettop and
 			// ParseNettopConns. ParseNettop skips the connection rows (no name.pid).
-			b, _ := exec.Command("nettop", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			// -n disables DNS/hostname resolution: WITHOUT it nettop blocks ~5s per sample (making
+			// the live view/zoom graph crawl); WITH it a sample returns in ~10ms and endpoints stay
+			// as IPs, which is exactly what the IP-based parser wants.
+			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
 		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
