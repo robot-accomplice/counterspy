@@ -44,9 +44,9 @@ func TestParseBPFRecords_EthernetHdrlen18(t *testing.T) {
 	ip := ipv4TCP(netip.MustParseAddrPort("10.0.0.2:5"), netip.MustParseAddrPort("3.3.3.3:443"), []byte("x"))
 	buf := bpfRecordHdrlen(ethFrame(0x0800, ip), 18) // en0's real header length
 
-	got, records, _ := parseBPFRecords(buf, dltEN10MB)
-	if records != 1 || len(got) != 1 || !bytes.Equal(got[0], ip) {
-		t.Fatalf("a record with bh_hdrlen=18 must parse (records=%d packets=%d)", records, len(got))
+	got := parseBPFRecords(buf, dltEN10MB)
+	if len(got) != 1 || !bytes.Equal(got[0], ip) {
+		t.Fatalf("a record with bh_hdrlen=18 must parse, got %d packets", len(got))
 	}
 }
 
@@ -63,7 +63,7 @@ func TestParseBPFRecords_MultiRecordRawIP(t *testing.T) {
 	p2 := ipv4TCP(local, netip.MustParseAddrPort("2.2.2.2:80"), []byte("two"))
 	buf := append(bpfRecord(p1), bpfRecord(p2)...)
 
-	got, _, _ := parseBPFRecords(buf, dltRaw)
+	got := parseBPFRecords(buf, dltRaw)
 	if len(got) != 2 || !bytes.Equal(got[0], p1) || !bytes.Equal(got[1], p2) {
 		t.Fatalf("want 2 IP packets in order, got %d", len(got))
 	}
@@ -74,7 +74,7 @@ func TestParseBPFRecords_EthernetStripAndDropNonIP(t *testing.T) {
 	ip := ipv4TCP(netip.MustParseAddrPort("10.0.0.2:5"), netip.MustParseAddrPort("3.3.3.3:443"), []byte("x"))
 	buf := append(bpfRecord(ethFrame(0x0800, ip)), bpfRecord(ethFrame(0x0806, []byte("arp")))...)
 
-	got, _, _ := parseBPFRecords(buf, dltEN10MB)
+	got := parseBPFRecords(buf, dltEN10MB)
 	if len(got) != 1 || !bytes.Equal(got[0], ip) {
 		t.Fatalf("want the IP packet only (ARP dropped), got %d packets", len(got))
 	}
@@ -88,7 +88,7 @@ func TestParseBPFRecords_HostileHeadersDontPanic(t *testing.T) {
 	// the header bytes can't be mistaken for frame data.
 	tooSmall := make([]byte, hdrlen+8)
 	(*unix.BpfHdr)(unsafe.Pointer(&tooSmall[0])).Hdrlen = uint16(minBpfHdr - 1)
-	if got, _, _ := parseBPFRecords(tooSmall, dltRaw); len(got) != 0 {
+	if got := parseBPFRecords(tooSmall, dltRaw); len(got) != 0 {
 		t.Fatalf("under-size Hdrlen must yield nothing, got %d", len(got))
 	}
 
@@ -97,12 +97,12 @@ func TestParseBPFRecords_HostileHeadersDontPanic(t *testing.T) {
 	h := (*unix.BpfHdr)(unsafe.Pointer(&overrun[0]))
 	h.Hdrlen = uint16(hdrlen)
 	h.Caplen = 1 << 20
-	if got, _, _ := parseBPFRecords(overrun, dltRaw); len(got) != 0 {
+	if got := parseBPFRecords(overrun, dltRaw); len(got) != 0 {
 		t.Fatalf("overrun Caplen must yield nothing, got %d", len(got))
 	}
 
 	// A buffer shorter than a header → loop never enters.
-	if got, _, _ := parseBPFRecords(make([]byte, hdrlen-1), dltRaw); len(got) != 0 {
+	if got := parseBPFRecords(make([]byte, hdrlen-1), dltRaw); len(got) != 0 {
 		t.Fatalf("sub-header buffer must yield nothing, got %d", len(got))
 	}
 }

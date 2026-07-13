@@ -40,14 +40,7 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 	}
 	defer src.Close()
 	res := inspect.Inspect(src, inspect.Flow{PID: conn.PID, Remote: remote}, inspectMaxPackets)
-	v := toInspectView(res)
-	if v.Coverage == model.InspectNone && v.Err == "" {
-		v.Verdict += " · iface " + iface // name the bound interface so an empty capture is diagnosable
-		if d, ok := src.(interface{ Diag() string }); ok {
-			v.Verdict += " · " + d.Diag() // dlt + raw-frames-read + frames-kept: which pipeline stage dropped
-		}
-	}
-	return v
+	return toInspectView(res)
 }
 
 // toInspectView maps an engine Result to the pure TUI view. The coverage switch is exhaustive over

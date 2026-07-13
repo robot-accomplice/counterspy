@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
-	"os"
 	"runtime"
 	"strconv"
 	"time"
@@ -40,32 +39,6 @@ type bpfCapture struct {
 	buf      []byte
 	pend     [][]byte
 	deadline time.Time // zero = no wall-clock bound
-
-	readCalls  int    // read() attempts made
-	bytesRead  int    // total bytes returned by successful reads
-	eagains    int    // reads that returned EAGAIN (nothing buffered this instant)
-	framesRead int    // raw BPF records read (before the link-layer strip)
-	framesKept int    // records that survived stripLinkLayer (an IP packet came out)
-	dropSample []byte // first 16 bytes of the first frame stripLinkLayer rejected (link-header dump)
-	firstReadN int    // byte count of the first read that returned data
-	firstBuf   []byte // first 32 bytes of that read (the raw bpf_hdr, for layout inspection)
-}
-
-// Diag reports where the capture pipeline stood, so an empty result is stage-localizable: the DLT
-// the kernel gave us, raw records read, how many survived the link-layer strip, and — when frames
-// were dropped — a hex dump of a rejected frame's link header so the reason is inspectable.
-// framesRead=0 = nothing reached the read (idle, or a kernel filter dropped it upstream);
-// framesRead>0 & framesKept=0 = the link-layer strip rejected everything (drop=... shows why).
-func (c *bpfCapture) Diag() string {
-	s := fmt.Sprintf("dlt=%d szhdr=%d reads=%d bytes=%d eagain=%d frames=%d kept=%d",
-		c.dlt, unix.SizeofBpfHdr, c.readCalls, c.bytesRead, c.eagains, c.framesRead, c.framesKept)
-	if len(c.firstBuf) > 0 {
-		s += fmt.Sprintf(" n0=%d buf0=%x", c.firstReadN, c.firstBuf)
-	}
-	if len(c.dropSample) > 0 {
-		s += fmt.Sprintf(" drop=%x", c.dropSample)
-	}
-	return s
 }
 
 // OpenLiveCapture opens the first free /dev/bpf, binds it to iface in immediate mode, installs a
@@ -139,12 +112,6 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 // unknown datalink or an assembly/ioctl error it returns without installing, leaving the capture
 // unfiltered (never blinded).
 func installFlowFilter(fd int, dlt uint32, remote netip.AddrPort) {
-	// Diagnostic bypass: capture the whole interface (no kernel filter), so an empty result can be
-	// bisected — if unfiltered capture SEES the host's packets, the filter was wrongly dropping
-	// them; if it still sees nothing, the traffic isn't on this interface.
-	if os.Getenv("COUNTERSPY_NO_BPF_FILTER") == "1" {
-		return
-	}
 	hdr, ok := linkHdrLen(dlt)
 	if !ok {
 		return
@@ -184,11 +151,9 @@ func (c *bpfCapture) Next() ([]byte, error) {
 		if !c.deadline.IsZero() && time.Now().After(c.deadline) {
 			return nil, io.EOF // capture window elapsed — a clean end, not a failure
 		}
-		c.readCalls++
 		n, err := unix.Read(c.fd, c.buf)
 		if err != nil {
 			if err == unix.EAGAIN { // no packets buffered — sleep briefly, then re-check the deadline
-				c.eagains++
 				time.Sleep(readPoll)
 				continue
 			}
@@ -197,18 +162,7 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			}
 			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
-		c.bytesRead += n
-		if c.firstBuf == nil && n > 0 { // stash the raw head of the first data read for inspection
-			c.firstReadN = n
-			c.firstBuf = append([]byte(nil), c.buf[:min(n, 32)]...)
-		}
-		pkts, recs, drop := parseBPFRecords(c.buf[:n], c.dlt)
-		c.framesRead += recs
-		c.framesKept += len(pkts)
-		if c.dropSample == nil && drop != nil {
-			c.dropSample = drop
-		}
-		c.pend = pkts
+		c.pend = parseBPFRecords(c.buf[:n], c.dlt)
 	}
 	p := c.pend[0]
 	c.pend = c.pend[1:]
@@ -227,20 +181,16 @@ func (c *bpfCapture) Close() error { return unix.Close(c.fd) }
 // record (read succeeds, zero frames parsed); guard against this field-end minimum instead.
 const minBpfHdr = int(unsafe.Offsetof(unix.BpfHdr{}.Hdrlen)) + 2
 
-func parseBPFRecords(buf []byte, dlt uint32) (out [][]byte, records int, dropSample []byte) {
+func parseBPFRecords(buf []byte, dlt uint32) [][]byte {
+	var out [][]byte
 	for len(buf) >= minBpfHdr {
 		h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
 		hdrlen, caplen := int(h.Hdrlen), int(h.Caplen)
 		if hdrlen < minBpfHdr || caplen < 0 || hdrlen+caplen > len(buf) {
 			break
 		}
-		records++
-		frame := buf[hdrlen : hdrlen+caplen]
-		if ip, ok := stripLinkLayer(dlt, frame); ok {
+		if ip, ok := stripLinkLayer(dlt, buf[hdrlen:hdrlen+caplen]); ok {
 			out = append(out, append([]byte(nil), ip...))
-		} else if dropSample == nil && len(frame) > 0 {
-			n := min(len(frame), 16)
-			dropSample = append([]byte(nil), frame[:n]...) // link header of a rejected frame
 		}
 		adv := bpfWordAlign(hdrlen + caplen)
 		if adv <= 0 || adv > len(buf) {
@@ -248,7 +198,7 @@ func parseBPFRecords(buf []byte, dlt uint32) (out [][]byte, records int, dropSam
 		}
 		buf = buf[adv:]
 	}
-	return out, records, dropSample
+	return out
 }
 
 func bpfWordAlign(n int) int {
