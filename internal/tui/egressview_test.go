@@ -100,72 +100,45 @@ func TestHeatColor_BlueToRedRamp(t *testing.T) {
 	}
 }
 
-func TestDrawSparkline_GlyphPerValueAndHeatColored(t *testing.T) {
-	glyphset := map[rune]bool{}
-	for _, g := range sparkGlyphs {
-		glyphset[g] = true
-	}
-
+func TestDrawTrend_HeightsAndColors(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
 	}
 	defer s.Fini()
-	// Rates spanning the absolute heat scale (cool → hot) so colors are distinct.
-	drawSparkline(s, 0, 0, []uint64{0, 1 << 10, 1 << 13, 1 << 16, 1 << 18, 1 << 20, 1 << 21, 1 << 22}, 8, false)
+	heights := []uint64{0, 100}
+	colors := []tcell.Color{heatColor(0), heatColor(1)}
+	drawTrend(s, 0, 0, heights, colors, 2, false)
 	s.Show()
-	cells, w, _ := s.GetContents()
-
-	// Every value draws a glyph — the "sparklines on every line" behavior at the cell level.
-	fgs := map[tcell.Color]bool{}
-	for i := 0; i < 8; i++ {
-		c := cells[0*w+i]
-		if len(c.Runes) == 0 || !glyphset[c.Runes[0]] {
-			t.Fatalf("cell %d should render a spark glyph, got %q", i, string(c.Runes))
-		}
-		fg, _, _ := c.Style.Decompose()
-		fgs[fg] = true
+	cells, _, _ := s.GetContents()
+	// Height is relative to the series' own max: min → lowest glyph, max → tallest.
+	if cells[0].Runes[0] != sparkGlyphs[0] {
+		t.Fatalf("min height should be the lowest glyph, got %q", string(cells[0].Runes))
 	}
-	// Heat coloring: the row is not a single flat color — quiet and busy cells differ.
-	if len(fgs) < 2 {
-		t.Fatal("sparkline should be heat-colored (multiple distinct cell colors), got one flat color")
+	if cells[1].Runes[0] != sparkGlyphs[len(sparkGlyphs)-1] {
+		t.Fatalf("max height should be the tallest glyph, got %q", string(cells[1].Runes))
 	}
-
-	// Empty history renders nothing.
+	// Each cell wears its own supplied color.
+	fg0, _, _ := cells[0].Style.Decompose()
+	fg1, _, _ := cells[1].Style.Decompose()
+	want0, _, _ := tcell.StyleDefault.Foreground(heatColor(0)).Decompose()
+	want1, _, _ := tcell.StyleDefault.Foreground(heatColor(1)).Decompose()
+	if fg0 != want0 || fg1 != want1 {
+		t.Fatal("drawTrend must apply the per-cell colors it is given")
+	}
+	// Empty heights draw nothing.
 	s2 := tcell.NewSimulationScreen("")
 	if err := s2.Init(); err != nil {
 		t.Fatal(err)
 	}
 	defer s2.Fini()
-	drawSparkline(s2, 0, 0, nil, 8, false)
+	drawTrend(s2, 0, 0, nil, nil, 8, false)
 	s2.Show()
 	c2, _, _ := s2.GetContents()
-	if len(c2[0].Runes) > 0 && glyphset[c2[0].Runes[0]] {
-		t.Fatal("empty history should draw no sparkline glyph")
-	}
-}
-
-// The heat color is ABSOLUTE (loud=hot), not scaled to each row's own peak: a quiet 200 B/s
-// app stays cool even at its maximum, while a 1 MB/s app runs hot. Guards against the
-// per-row-relative coloring that would make a trickle flare red (cry-wolf).
-func TestDrawSparkline_ColorIsAbsoluteNotPerRow(t *testing.T) {
-	redOf := func(rate uint64) int32 {
-		s := tcell.NewSimulationScreen("")
-		if err := s.Init(); err != nil {
-			t.Fatal(err)
+	for _, g := range sparkGlyphs {
+		if len(c2[0].Runes) > 0 && c2[0].Runes[0] == g {
+			t.Fatal("empty heights should draw no glyph")
 		}
-		defer s.Fini()
-		drawSparkline(s, 0, 0, []uint64{rate, rate, rate, rate}, 4, false) // flat row at `rate`
-		s.Show()
-		cells, _, _ := s.GetContents()
-		fg, _, _ := cells[0].Style.Decompose() // flat row — every cell is the same color
-		r, _, _ := fg.RGB()
-		return r
-	}
-	quiet := redOf(200)    // 200 B/s — its own peak, but absolutely quiet
-	loud := redOf(1 << 20) // 1 MB/s
-	if !(loud > quiet) {
-		t.Fatalf("loud row should be hotter (more red) than a quiet row at its own peak: quiet=%d loud=%d", quiet, loud)
 	}
 }
 
@@ -405,5 +378,73 @@ func TestEgressView_ConnLeafRendersSpark(t *testing.T) {
 	s.Show()
 	if !simContains(s, "1.2.3.4") {
 		t.Fatal("connection leaf row (with its own sparkline) should render its destination")
+	}
+}
+
+func TestTempColor_ShareOfPeak(t *testing.T) {
+	hot := tempColor(1000, 1000)
+	cold := tempColor(1, 1000)
+	if hot == cold {
+		t.Fatal("peak and trickle must differ")
+	}
+	if hot != heatColor(1.0) || cold != heatColor(1.0/1000.0) {
+		t.Fatalf("tempColor must be heatColor(rate/peak): hot=%v cold=%v", hot, cold)
+	}
+	_ = tempColor(0, 0) // no traffic — no divide-by-zero
+}
+
+func TestDirectionColor(t *testing.T) {
+	amber := directionColor(1000, 0)
+	green := directionColor(0, 1000)
+	if amber == green {
+		t.Fatal("all-out and all-in must differ (amber vs green)")
+	}
+	if amber != dirColor(1.0) || green != dirColor(0.0) {
+		t.Fatalf("directionColor must map out/(out+in) through dirColor: amber=%v green=%v", amber, green)
+	}
+	_ = directionColor(0, 0) // no traffic — no divide-by-zero
+}
+
+func TestTrendSeries_Combined(t *testing.T) {
+	out := []uint64{100, 200}
+	in := []uint64{50, 0}
+	heights, colors := trendSeries(out, in, trendCombined, 250, 2)
+	if heights[0] != 150 || heights[1] != 200 {
+		t.Fatalf("combined height must be out+in, got %v", heights)
+	}
+	if colors[0] != directionColor(100, 50) || colors[1] != directionColor(200, 0) {
+		t.Fatal("combined color must be directionColor(out,in)")
+	}
+}
+
+func TestTrendSeries_OutAndInUseTemperature(t *testing.T) {
+	out := []uint64{100}
+	in := []uint64{40}
+	// out mode plots out with share-of-peak temperature.
+	oh, oc := trendSeries(out, in, trendOut, 100, 1)
+	if oh[0] != 100 || oc[0] != tempColor(100, 100) {
+		t.Fatalf("out mode: height=out, color=tempColor(out,peak), got h=%v c=%v", oh, oc)
+	}
+	// in mode plots in.
+	ih, ic := trendSeries(out, in, trendIn, 100, 1)
+	if ih[0] != 40 || ic[0] != tempColor(40, 100) {
+		t.Fatalf("in mode: height=in, color=tempColor(in,peak), got h=%v c=%v", ih, ic)
+	}
+}
+
+func TestFramePeak_MaxAcrossRowsPerMode(t *testing.T) {
+	g1 := eg("a", model.Low, 10)
+	g1.Spark, g1.InSpark = []uint64{100}, []uint64{5}
+	g2 := eg("b", model.Low, 10)
+	g2.Spark, g2.InSpark = []uint64{40}, []uint64{500}
+	rows := NewEgress().withGroups([]model.EgressGroup{g1, g2}).visibleRows()
+	if p := framePeak(rows, trendOut); p != 100 {
+		t.Fatalf("out peak = loudest out across rows, got %d", p)
+	}
+	if p := framePeak(rows, trendIn); p != 500 {
+		t.Fatalf("in peak = loudest in across rows, got %d", p)
+	}
+	if p := framePeak(rows, trendCombined); p != 0 {
+		t.Fatalf("combined uses direction color, not temperature — peak should be 0, got %d", p)
 	}
 }

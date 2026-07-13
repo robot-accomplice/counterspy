@@ -19,6 +19,14 @@ const (
 	sortApp
 )
 
+type trendMode int
+
+const (
+	trendOut      trendMode = iota // sparkline plots out-rate (temperature = share-of-peak volume)
+	trendIn                        // sparkline plots in-rate (temperature)
+	trendCombined                  // height = in+out, color = green→amber direction
+)
+
 // egressRow is one rendered line in the 3-level tree:
 //   - group only            -> app header row
 //   - group + member        -> instance (PID) row
@@ -36,8 +44,9 @@ type EgressModel struct {
 	Sort     egressSort
 	Filter   string
 	Paused   bool
-	Status   string // transient feedback line (e.g. "copied path"); cleared on the next key
-	CopyReq  string // full path the run loop should copy to the clipboard, then clear
+	Trend    trendMode // which series/coloring the TREND column shows (cycled by `t`)
+	Status   string    // transient feedback line (e.g. "copied path"); cleared on the next key
+	CopyReq  string    // full path the run loop should copy to the clipboard, then clear
 
 	expanded    map[string]bool // app name -> expanded (shows instance rows)
 	expandedPID map[int]bool    // pid -> expanded (shows connection rows)
@@ -181,6 +190,8 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			m.Sort = (m.Sort + 1) % 4
 		case 'p':
 			m.Paused = !m.Paused
+		case 't':
+			m.Trend = (m.Trend + 1) % 3 // out → in → combined → out
 		case 'y', 'c':
 			if path := m.selectedPath(rows); path != "" {
 				m.CopyReq = path // the run loop performs the clipboard I/O and sets Status

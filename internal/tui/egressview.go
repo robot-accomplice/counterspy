@@ -3,7 +3,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 
@@ -173,28 +172,77 @@ func heatColor(frac float64) tcell.Color {
 	return tcell.NewRGBColor(s.r, s.g, s.b)
 }
 
-// drawSparkline renders vals as a heat-colored sparkline at (x,y): each glyph's height AND
-// color scale with its magnitude relative to the window's local max, so busier samples read
-// both taller and hotter. Empty history draws nothing. Preserves the selected-row background.
-func drawSparkline(s tcell.Screen, x, y int, vals []uint64, width int, selected bool) {
-	vals = downsample(vals, width)
-	if len(vals) == 0 {
+// tempColor is the volume temperature: a rate's share of the loudest flow in view (peak), mapped
+// blue(cold)→red(hot). Replaces the old absolute log scale — an arbitrary anchor. peak==0 → cold.
+func tempColor(rate, peak uint64) tcell.Color {
+	if peak == 0 {
+		return heatColor(0)
+	}
+	return heatColor(float64(rate) / float64(peak))
+}
+
+// dirStops is the direction ramp: green (all inbound / download) → amber (all outbound / exfil).
+var dirStops = []struct {
+	at      float64
+	r, g, b int32
+}{
+	{0.00, 80, 200, 120}, // green — inbound / download
+	{0.50, 210, 200, 90}, // muted yellow — balanced
+	{1.00, 240, 170, 60}, // amber — outbound / exfil
+}
+
+// dirColor maps a 0..1 lean (0 = all in, 1 = all out) to a color along dirStops.
+func dirColor(frac float64) tcell.Color {
+	if frac <= 0 {
+		s := dirStops[0]
+		return tcell.NewRGBColor(s.r, s.g, s.b)
+	}
+	for i := 1; i < len(dirStops); i++ {
+		hi := dirStops[i]
+		if frac <= hi.at {
+			lo := dirStops[i-1]
+			t := (frac - lo.at) / (hi.at - lo.at)
+			return tcell.NewRGBColor(
+				lo.r+int32(t*float64(hi.r-lo.r)),
+				lo.g+int32(t*float64(hi.g-lo.g)),
+				lo.b+int32(t*float64(hi.b-lo.b)),
+			)
+		}
+	}
+	s := dirStops[len(dirStops)-1]
+	return tcell.NewRGBColor(s.r, s.g, s.b)
+}
+
+// directionColor colors a combined cell by which way it leans: out/(out+in) → dirColor. Balanced or
+// empty → mid.
+func directionColor(out, in uint64) tcell.Color {
+	total := out + in
+	if total == 0 {
+		return dirColor(0.5)
+	}
+	return dirColor(float64(out) / float64(total))
+}
+
+// drawTrend renders heights[i] as a sparkline glyph (height relative to heights' OWN max, so the
+// glyph shape reads as this row's temporal trend) colored by colors[i] at (x+i, y). heights and
+// colors are pre-downsampled to width and equal length. Empty draws nothing; preserves the
+// selected-row background.
+func drawTrend(s tcell.Screen, x, y int, heights []uint64, colors []tcell.Color, width int, selected bool) {
+	if len(heights) == 0 {
 		return
 	}
 	var max uint64
-	for _, v := range vals {
+	for _, v := range heights {
 		if v > max {
 			max = v
 		}
 	}
-	for i, v := range vals {
+	for i, v := range heights {
 		idx := 0
 		if max > 0 {
-			idx = int(v * uint64(len(sparkGlyphs)-1) / max) // height: this row's OWN trend shape (relative)
+			idx = int(v * uint64(len(sparkGlyphs)-1) / max)
 		}
-		// color: ABSOLUTE traffic volume (loud=hot) on a fixed scale, so a quiet app never
-		// flares red at its own peak — you can scan the column and spot the real talkers.
-		st := tcell.StyleDefault.Foreground(heatColor(absIntensity(v)))
+		st := tcell.StyleDefault.Foreground(colors[i])
 		if selected {
 			st = st.Background(colSelBg)
 		}
@@ -202,23 +250,71 @@ func drawSparkline(s tcell.Screen, x, y int, vals []uint64, width int, selected 
 	}
 }
 
-// absIntensity maps an absolute out-rate (bytes/sec) to a 0..1 heat position on a FIXED log
-// scale: 2^6=64 B/s reads cool, 2^22≈4 MB/s reads fully hot. Because it's absolute (not scaled
-// to the row's peak), sparkline COLOR reflects real volume across all rows — a 200 B/s trickle
-// stays cool even at its own maximum, while a bulk uploader glows red.
-func absIntensity(rate uint64) float64 {
-	if rate == 0 {
+// rowSpark returns the (out, in) rate history for whichever tree level this row is.
+func rowSpark(row egressRow) (out, in []uint64) {
+	switch {
+	case row.conn != nil:
+		return row.conn.Spark, row.conn.InSpark
+	case row.member != nil:
+		return row.member.Spark, row.member.InSpark
+	default:
+		return row.group.Spark, row.group.InSpark
+	}
+}
+
+// framePeak is the loudest relevant rate across all visible rows this frame — the share-of-peak
+// denominator for temperature coloring. Combined mode colors by direction, not temperature, so 0.
+func framePeak(rows []egressRow, mode trendMode) uint64 {
+	if mode == trendCombined {
 		return 0
 	}
-	const lo, hi = 6.0, 22.0 // log2 anchors
-	f := (math.Log2(float64(rate)) - lo) / (hi - lo)
-	switch {
-	case f < 0:
-		return 0
-	case f > 1:
-		return 1
-	default:
-		return f
+	var peak uint64
+	for _, row := range rows {
+		out, in := rowSpark(row)
+		vals := out
+		if mode == trendIn {
+			vals = in
+		}
+		for _, v := range vals {
+			if v > peak {
+				peak = v
+			}
+		}
+	}
+	return peak
+}
+
+// trendSeries builds the (heights, colors) a row's TREND cell renders for the mode: out/in plot
+// that direction with share-of-peak temperature; combined plots out+in height with direction color.
+func trendSeries(out, in []uint64, mode trendMode, peak, width int) (heights []uint64, colors []tcell.Color) {
+	switch mode {
+	case trendIn:
+		h := downsample(in, width)
+		c := make([]tcell.Color, len(h))
+		for i, v := range h {
+			c[i] = tempColor(v, uint64(peak))
+		}
+		return h, c
+	case trendCombined:
+		ov, iv := downsample(out, width), downsample(in, width)
+		h := make([]uint64, len(ov))
+		c := make([]tcell.Color, len(ov))
+		for i := range ov {
+			var inv uint64
+			if i < len(iv) {
+				inv = iv[i]
+			}
+			h[i] = ov[i] + inv
+			c[i] = directionColor(ov[i], inv)
+		}
+		return h, c
+	default: // trendOut
+		h := downsample(out, width)
+		c := make([]tcell.Color, len(h))
+		for i, v := range h {
+			c[i] = tempColor(v, uint64(peak))
+		}
+		return h, c
 	}
 }
 
@@ -293,12 +389,13 @@ func egressView(m EgressModel, s tcell.Screen) {
 		}
 		drawText(s, cx, cy, tcell.StyleDefault.Foreground(colDim), hint)
 	} else {
+		peak := int(framePeak(rows, m.Trend)) // share-of-peak denominator, once per frame
 		y := tableTop
 		for i, row := range rows {
 			if y > tableBottom {
 				break
 			}
-			drawEgressRow(s, cols, w, y, row, i == m.Selected, m.expanded, m.expandedPID)
+			drawEgressRow(s, cols, w, y, row, i == m.Selected, m.expanded, m.expandedPID, m.Trend, peak)
 			y++
 		}
 	}
@@ -313,12 +410,11 @@ func egressView(m EgressModel, s tcell.Screen) {
 	drawText(s, marginX, footerY, tcell.StyleDefault.Foreground(colDim), truncate(footerHint, w-marginX-marginR))
 }
 
-func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool) {
+func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int) {
 	g := row.group
 	var depth int
 	var marker rune
 	var label, trust, rate, dest string
-	var spark []uint64
 	var concernText string
 	color := concernColor(g.Concern)
 
@@ -329,7 +425,6 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		label = g.App
 		trust = g.Trust
 		rate = human(g.OutRate) + "/s"
-		spark = g.Spark
 		dest = topDest(g)
 		concernText = g.Concern.String()
 	case row.conn == nil: // instance row
@@ -339,7 +434,6 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		label = fmt.Sprintf("pid %d %s", mem.PID, shortPath(mem.Path))
 		trust = mem.Trust
 		rate = human(mem.OutRate) + "/s"
-		spark = mem.Spark
 	default: // connection row (leaf)
 		c := row.conn
 		depth = 2
@@ -348,7 +442,6 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		if c.OutRate > 0 {
 			rate = human(c.OutRate) + "/s"
 		}
-		spark = c.Spark
 	}
 
 	style := tcell.StyleDefault.Foreground(color)
@@ -369,7 +462,9 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	}
 	drawText(s, cols.trustX, y, style, trustGlyph)
 	drawText(s, cols.rateX, y, style, truncate(rate, rateW))
-	drawSparkline(s, cols.trendX, y, spark, trendW, selected)
+	out, in := rowSpark(row)
+	heights, colors := trendSeries(out, in, mode, peak, trendW)
+	drawTrend(s, cols.trendX, y, heights, colors, trendW, selected)
 	drawText(s, cols.destX, y, style, model.Clean(truncate(dest, cols.destW)))
 	drawText(s, cols.concernX, y, style, truncate(concernText, concernW))
 }

@@ -191,3 +191,22 @@ func TestEgressUpdate_SortCyclesAllFourModes(t *testing.T) {
 		}
 	}
 }
+
+func TestEgressUpdate_TrendToggle(t *testing.T) {
+	m := NewEgress()
+	if m.Trend != trendOut {
+		t.Fatal("default trend mode must be out")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendIn {
+		t.Fatal("t → in")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendCombined {
+		t.Fatal("t → combined")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendOut {
+		t.Fatal("t → back to out")
+	}
+}
