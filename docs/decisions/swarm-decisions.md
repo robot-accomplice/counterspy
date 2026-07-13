@@ -391,3 +391,12 @@ Antagonist(haiku)+Audit(sonnet) on a69f23d..775adb9. Antagonist: no panics/flake
 PEAK temperature; absIntensity removed cleanly), the plan deviation (dropping drawSparkline shim — sound),
 framePeak cost, display-only. Audit F-1 (med): no render-level mode test → FIX-NOW (added
 TestEgressView_TrendModeReachesTheTree, catches a hardcoded-trendOut wiring regression). No escalation.
+
+## cp-tr3 (trend legend + header + footer) — reviewed 2026-07-13
+Antagonist(haiku) vs Audit(sonnet) CONFLICTED on the layout (Antag CRITICAL overlap; Audit CLEAN).
+ADJUDICATED from code (Rule 8, not averaged): drawText→tcell SetContent is bounds-checked (OOB = no-op)
+→ no crash; the tiny-terminal overlap is cosmetic + pre-existing, cp-tr3 worsened by one row → added
+defensive guards (skip detail/legend at/above the header; clip legend to maxX). Audit substantive:
+F-1 combined label missing "combined" + F-4 duplicate mode switches → FIX-NOW via single-source
+trendGlyph/trendWord (fixes both). F-2/F-3 test gaps → FIX-NOW (per-mode header glyph + color-ramp assertions).
+No human escalation.

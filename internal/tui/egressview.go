@@ -250,29 +250,53 @@ func drawTrend(s tcell.Screen, x, y int, heights []uint64, colors []tcell.Color,
 	}
 }
 
-// drawTrendLegend draws a one-line, self-coloring key for the active trend mode at row y: the
-// gradient glyphs use the SAME ramp the sparklines do, so the legend is correct by construction and
-// relabels/recolors itself as the user toggles `t`.
-func drawTrendLegend(s tcell.Screen, y int, mode trendMode) {
-	def := tcell.StyleDefault.Foreground(colDim)
-	label, left, right := "TREND ↑ out  ", "quiet ", " loud"
-	ramp := heatColor // blue→red volume temperature (out/in modes)
+// trendGlyph / trendWord are the SINGLE source of the mode's symbol + name, shared by the column
+// header and the legend so the two can't drift (they did in an earlier draft).
+func trendGlyph(mode trendMode) string {
 	switch mode {
 	case trendIn:
-		label = "TREND ↓ in   "
+		return "↓"
 	case trendCombined:
-		label, left, right = "TREND ⇅  ", "◀ in·download ", " out·exfil ▶"
+		return "⇅"
+	default:
+		return "↑"
+	}
+}
+
+func trendWord(mode trendMode) string {
+	switch mode {
+	case trendIn:
+		return "in"
+	case trendCombined:
+		return "combined"
+	default:
+		return "out"
+	}
+}
+
+// drawTrendLegend draws a one-line, self-coloring key for the active trend mode at row y: the
+// gradient glyphs use the SAME ramp the sparklines do, so the legend is correct by construction and
+// relabels/recolors itself as the user toggles `t`. Clipped to maxX so a narrow terminal truncates
+// cleanly rather than running the gradient off the edge.
+func drawTrendLegend(s tcell.Screen, y, maxX int, mode trendMode) {
+	def := tcell.StyleDefault.Foreground(colDim)
+	label := "TREND " + trendGlyph(mode) + " " + trendWord(mode) + "  "
+	left, right := "quiet ", " loud"
+	ramp := heatColor // blue→red volume temperature (out/in modes)
+	if mode == trendCombined {
+		left, right = "◀ in·download ", " out·exfil ▶"
 		ramp = dirColor // green→amber direction
 	}
 	x := drawText(s, marginX, y, def, label)
 	x = drawText(s, x, y, def, left)
-	n := len(sparkGlyphs)
-	for i := 0; i < n; i++ {
+	for i, n := 0, len(sparkGlyphs); i < n && x < maxX; i++ {
 		frac := float64(i) / float64(n-1)
 		drawText(s, x, y, tcell.StyleDefault.Foreground(ramp(frac)), string(sparkGlyphs[i]))
 		x++
 	}
-	drawText(s, x, y, def, right)
+	if x < maxX {
+		drawText(s, x, y, def, right)
+	}
 }
 
 // rowSpark returns the (out, in) rate history for whichever tree level this row is.
@@ -392,14 +416,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 	drawText(s, cols.appX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("APP / PROCESS", cols.appW))
 	drawText(s, cols.trustX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TRUST", trustW))
 	drawText(s, cols.rateX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("OUT↑", rateW))
-	trendHdr := "TREND ↑"
-	switch m.Trend {
-	case trendIn:
-		trendHdr = "TREND ↓"
-	case trendCombined:
-		trendHdr = "TREND ⇅"
-	}
-	drawText(s, cols.trendX, headerY, tcell.StyleDefault.Foreground(colDim), truncate(trendHdr, trendW))
+	drawText(s, cols.trendX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TREND "+trendGlyph(m.Trend), trendW))
 	drawText(s, cols.destX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("DESTINATIONS", cols.destW))
 	drawText(s, cols.concernX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("CONCERN", concernW))
 
@@ -436,11 +453,16 @@ func egressView(m EgressModel, s tcell.Screen) {
 	if len(detail) > 0 {
 		base := legendY - len(detail)
 		for i, line := range detail {
+			if base+i <= headerY { // never draw the detail over the title/column header (tiny terminal)
+				continue
+			}
 			drawText(s, marginX, base+i, tcell.StyleDefault.Foreground(colDim), model.Clean(truncate(line, w-marginX-marginR)))
 		}
 	}
 
-	drawTrendLegend(s, legendY, m.Trend)
+	if legendY > headerY { // skip the legend if there's no room for it above the footer
+		drawTrendLegend(s, legendY, w-marginR, m.Trend)
+	}
 	drawText(s, marginX, footerY, tcell.StyleDefault.Foreground(colDim), truncate(footerHint, w-marginX-marginR))
 }
 

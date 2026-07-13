@@ -481,39 +481,91 @@ func TestEgressView_TrendModeReachesTheTree(t *testing.T) {
 	}
 }
 
+func screenHasColor(s tcell.SimulationScreen, want tcell.Color) bool {
+	cells, _, _ := s.GetContents()
+	for _, c := range cells {
+		fg, _, _ := c.Style.Decompose()
+		if fg == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEgressView_TrendLegendAndHeader(t *testing.T) {
-	newScreen := func() tcell.SimulationScreen {
+	render := func(mode trendMode) tcell.SimulationScreen {
 		s := tcell.NewSimulationScreen("")
 		if err := s.Init(); err != nil {
 			t.Fatal(err)
 		}
 		s.SetSize(120, 40)
+		m := NewEgress().withGroups([]model.EgressGroup{eg("x", model.Low, 10)})
+		m.Trend = mode
+		egressView(m, s)
+		s.Show()
 		return s
 	}
-	// Combined mode: ⇅ header/legend + direction labels + the t-toggle footer hint.
-	s := newScreen()
-	m := NewEgress().withGroups([]model.EgressGroup{eg("x", model.Low, 10)})
-	m.Trend = trendCombined
-	egressView(m, s)
-	s.Show()
-	if !simContains(s, "⇅") {
-		t.Fatal("combined mode must show the ⇅ glyph")
+	out, in, comb := render(trendOut), render(trendIn), render(trendCombined)
+
+	// Header glyph per mode — the single-source trendGlyph reaches the column header.
+	if !simContains(out, "TREND ↑") {
+		t.Fatal("out header must show TREND ↑")
 	}
-	if !simContains(s, "download") || !simContains(s, "exfil") {
-		t.Fatal("combined legend must label the direction ramp (download → exfil)")
+	if !simContains(in, "TREND ↓") {
+		t.Fatal("in header must show TREND ↓")
 	}
-	if !simContains(s, "t trend") {
-		t.Fatal("footer must advertise the t toggle")
+	if !simContains(comb, "TREND ⇅") {
+		t.Fatal("combined header must show TREND ⇅")
 	}
-	// Out mode: legend labels volume (quiet → loud), not direction.
-	s2 := newScreen()
-	m.Trend = trendOut
-	egressView(m, s2)
-	s2.Show()
-	if !simContains(s2, "quiet") || !simContains(s2, "loud") {
+
+	// Legend labels per mode (volume vs direction).
+	if !simContains(out, "quiet") || !simContains(out, "loud") {
 		t.Fatal("out legend must label the volume ramp (quiet → loud)")
 	}
-	if simContains(s2, "download") {
+	if simContains(out, "download") {
 		t.Fatal("out mode must NOT show the direction labels")
+	}
+	if !simContains(comb, "combined") {
+		t.Fatal("combined legend must name the mode (Audit F-1: the word was dropped)")
+	}
+	if !simContains(comb, "download") || !simContains(comb, "exfil") {
+		t.Fatal("combined legend must label the direction ramp (download → exfil)")
+	}
+	if !simContains(out, "t trend") {
+		t.Fatal("footer must advertise the t toggle")
+	}
+
+	// The legend's COLOR ramp actually switches with the mode (Audit F-3): the green direction
+	// stop (dirColor(0)) appears only in combined mode, never in the out/in heat ramp.
+	green := dirColor(0)
+	if !screenHasColor(comb, green) {
+		t.Fatal("combined legend must use the green→amber direction ramp")
+	}
+	if screenHasColor(out, green) {
+		t.Fatal("out legend must use the volume ramp, not the direction ramp")
+	}
+}
+
+// On a degenerate small terminal with a selected row producing several detail lines, the shifted
+// detail/legend must never overwrite the title/header row or panic (cp-tr3 Antagonist: the layout
+// shift + tcell's bounds-checked SetContent; guard skips detail/legend at/above the header).
+func TestEgressView_TinyTerminalNoHeaderClobber(t *testing.T) {
+	for _, h := range []int{6, 7, 8, 10} {
+		s := tcell.NewSimulationScreen("")
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		s.SetSize(80, h)
+		g := eg("agent", model.Elevated, 900)
+		g.Capabilities = []string{"screen", "keystrokes"} // more detail lines
+		g.Candidate = []string{"credentials"}
+		g.Ancestry = "launchd → agent"
+		m := NewEgress().withGroups([]model.EgressGroup{g})
+		m.Selected = 0   // select the app header → detail lines render
+		egressView(m, s) // must not panic
+		s.Show()
+		if !simContains(s, "CounterSpy") {
+			t.Fatalf("h=%d: the title row must survive the shifted detail/legend", h)
+		}
 	}
 }
