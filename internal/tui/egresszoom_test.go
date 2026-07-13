@@ -139,6 +139,42 @@ func TestDrawEgressZoom_RendersPanelsAndSelection(t *testing.T) {
 	}
 }
 
+// The graph plot must NOT depend on the rate-sort order of the PID table: it plots in a stable PID
+// order, so overlapping historical cells keep a deterministic color instead of flickering as rates
+// reshuffle the sort (the observed "historical points change color" bug).
+func TestDrawEgressZoom_GraphStableUnderRateReorder(t *testing.T) {
+	mk := func(out1802, out1990 uint64) tcell.SimulationScreen {
+		s := tcell.NewSimulationScreen("")
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		s.SetSize(120, 40)
+		g := zoomGroupFixture()
+		// Same histories both times; only the CURRENT out-rates differ, which flips the table sort.
+		g.Members[0].Spark = []uint64{200, 900, 300, 1000, 500}
+		g.Members[1].Spark = []uint64{200, 900, 300, 1000, 500}
+		g.Members[0].OutRate, g.Members[1].OutRate = out1802, out1990
+		m := NewEgress().withGroups([]model.EgressGroup{g})
+		m.Zoom = &zoomState{app: "claude", sel: 0, mode: trendOut}
+		drawEgressZoom(s, m)
+		s.Show()
+		return s
+	}
+	a := mk(1400, 100) // 1802 sorts first
+	b := mk(100, 1400) // 1990 sorts first
+	// Compare the graph plot region (top-left interior), which must be identical in rune AND color.
+	for y := 2; y < 18; y++ {
+		for x := 2; x < 60; x++ {
+			ra, _, sta, _ := a.GetContent(x, y)
+			rb, _, stb, _ := b.GetContent(x, y)
+			if ra != rb || sta != stb {
+				t.Fatalf("graph cell (%d,%d) changed with rate order: %q/%v vs %q/%v — plot order not stable",
+					x, y, ra, sta, rb, stb)
+			}
+		}
+	}
+}
+
 func TestDrawEgressZoom_TinyTerminalNoPanic(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
 	if err := s.Init(); err != nil {

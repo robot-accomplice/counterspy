@@ -111,16 +111,26 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	if plotCols < 2 || plotRows < 1 {
 		return
 	}
+	// Plot in a STABLE order (by PID), NOT the rate-sorted members order: where lines overlap a cell,
+	// plotSeries gives it to the last-plotted series, so a rate-driven reshuffle would flip the color
+	// of already-rendered historical cells frame-to-frame (observed flicker). PID order is fixed, so
+	// the overlap winner is deterministic. Emphasis (the selected line, drawn on top) is by PID.
+	selPID := -1
+	if sel >= 0 && sel < len(members) {
+		selPID = members[sel].PID
+	}
+	byPID := append([]model.EgressInstance(nil), members...)
+	sort.SliceStable(byPID, func(i, j int) bool { return byPID[i].PID < byPID[j].PID })
 	var series []graphSeries
 	var maxY uint64
-	for i, mem := range members {
+	for _, mem := range byPID {
 		vals := seriesValues(mem, mode)
 		for _, v := range vals {
 			if v > maxY {
 				maxY = v
 			}
 		}
-		series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: i == sel})
+		series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: mem.PID == selPID})
 	}
 	grid := plotSeries(series, plotCols, plotRows, maxY)
 	for r := 0; r < plotRows; r++ {
