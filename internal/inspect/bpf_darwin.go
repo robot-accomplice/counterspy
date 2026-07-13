@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"time"
 	"unsafe"
@@ -125,6 +126,9 @@ func installFlowFilter(fd int, dlt uint32, remote netip.AddrPort) {
 	}
 	prog := unix.BpfProgram{Len: uint32(len(insns)), Insns: &insns[0]}
 	unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSETF), uintptr(unsafe.Pointer(&prog)))
+	// prog.Insns points into insns, but the syscall machinery only keeps &prog alive — pin insns
+	// across the call so the GC can't reclaim the instruction buffer mid-copyin (T-13).
+	runtime.KeepAlive(insns)
 }
 
 // linkHdrLen maps a datalink type to the byte length of its link header (the offset the IP packet
