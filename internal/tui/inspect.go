@@ -43,7 +43,9 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	}
 	header := fmt.Sprintf("%s · pid %d · → %s %s:%d%s",
 		t.app, t.pid, strings.ToUpper(t.conn.Proto), t.conn.Endpoint.IP, t.conn.Endpoint.Port, glyph)
-	drawText(s, marginX, 2, def.Foreground(colAccent), model.Clean(truncate(header, inner)))
+	y := 2
+	drawWrapped(s, marginX, &y, def.Foreground(colAccent), header, inner)
+	y++ // blank line
 
 	// The coverage verdict is the honest headline: plaintext leaving in the clear reads as alarm
 	// (red), an encrypted flow we could only fingerprint reads amber ("this is itself a finding"
@@ -57,13 +59,11 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	case v.Coverage == model.InspectMetadata:
 		vcolor = colInvestigate
 	}
-	y := 4
-	drawText(s, marginX, y, def.Foreground(vcolor).Bold(true), model.Clean(truncate(v.Verdict, inner)))
-	y += 2
+	drawWrapped(s, marginX, &y, def.Foreground(vcolor).Bold(true), v.Verdict, inner)
+	y++ // blank line
 
 	if v.SNI != "" {
-		drawText(s, marginX, y, def.Foreground(colDim), model.Clean(truncate("SNI   "+v.SNI, inner)))
-		y++
+		drawWrapped(s, marginX, &y, def.Foreground(colDim), "SNI   "+v.SNI, inner)
 	}
 
 	if v.Content != "" {
@@ -81,16 +81,59 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	drawText(s, marginX, h-1, def.Foreground(colDim), truncate(inspectFooter, inner))
 }
 
-// drawContentPane draws the payload line-by-line from y up to (but not including) maxY, cleaning
-// each line so a crafted payload can't inject ANSI/newlines into the terminal (defense in depth
-// over the adapter's sanitize). A payload taller than the pane ends in a truncation marker.
+// drawContentPane draws the payload from y up to (but not including) maxY: each source line is
+// cleaned (so a crafted payload can't inject ANSI/newlines — defense in depth over the adapter's
+// sanitize) then word-wrapped to width so nothing runs off the edge. A payload taller than the
+// pane ends in a truncation marker.
 func drawContentPane(s tcell.Screen, x, y, maxY, width int, content string) {
-	for _, ln := range strings.Split(content, "\n") {
-		if y >= maxY {
-			drawText(s, x, maxY-1, tcell.StyleDefault.Foreground(colDim), "… (payload truncated)")
-			return
+	for _, raw := range strings.Split(content, "\n") {
+		for _, ln := range wrapText(model.Clean(raw), width) {
+			if y >= maxY {
+				drawText(s, x, maxY-1, tcell.StyleDefault.Foreground(colDim), "… (payload truncated)")
+				return
+			}
+			drawText(s, x, y, tcell.StyleDefault.Foreground(colText), ln)
+			y++
 		}
-		drawText(s, x, y, tcell.StyleDefault.Foreground(colText), model.Clean(truncate(ln, width)))
-		y++
+	}
+}
+
+// wrapText word-wraps s to at most width display cells per line, rune-aware: it breaks at the last
+// space that fits, and hard-breaks a token longer than width. Existing newlines start new lines.
+// Prevents long verdicts/payload lines from running off the pane instead of silently truncating.
+func wrapText(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		r := []rune(line)
+		for len(r) > width {
+			cut := -1
+			for i := width - 1; i > 0; i-- {
+				if r[i] == ' ' {
+					cut = i
+					break
+				}
+			}
+			if cut < 1 { // no interior space — hard-break the token
+				out = append(out, string(r[:width]))
+				r = r[width:]
+			} else {
+				out = append(out, string(r[:cut]))
+				r = r[cut+1:] // drop the breaking space
+			}
+		}
+		out = append(out, string(r))
+	}
+	return out
+}
+
+// drawWrapped draws text word-wrapped to width at (x, *y), cleaning it first and advancing *y past
+// the rendered lines so the caller lays out the next block below.
+func drawWrapped(s tcell.Screen, x int, y *int, style tcell.Style, text string, width int) {
+	for _, ln := range wrapText(model.Clean(text), width) {
+		drawText(s, x, *y, style, ln)
+		*y++
 	}
 }

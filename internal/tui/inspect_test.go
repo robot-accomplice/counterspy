@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,8 +11,7 @@ import (
 	"counterspy/internal/model"
 )
 
-// fakeInspector records how many captures were requested and returns a canned view, so a test
-// can assert that NO capture happens before consent (§5).
+// fakeInspector records how many captures were requested and returns a canned view.
 type fakeInspector struct {
 	calls atomic.Int64
 	view  model.InspectView
@@ -180,5 +180,32 @@ func TestRunConsole_InspectEndToEnd(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("RunConsole did not exit")
+	}
+}
+
+func TestWrapText(t *testing.T) {
+	// word-wrap on spaces, no line over width
+	got := wrapText("the quick brown fox jumps", 10)
+	for _, ln := range got {
+		if len([]rune(ln)) > 10 {
+			t.Fatalf("line exceeds width: %q", ln)
+		}
+	}
+	if strings.Join(got, " ") != "the quick brown fox jumps" {
+		t.Fatalf("words must be preserved, got %q", got)
+	}
+	// a token longer than width is hard-broken, never dropped
+	long := wrapText("buf0=deadbeefdeadbeefdeadbeef", 8)
+	if strings.Join(long, "") != "buf0=deadbeefdeadbeefdeadbeef" {
+		t.Fatalf("hard-break must preserve all runes, got %q", long)
+	}
+	for _, ln := range long {
+		if len([]rune(ln)) > 8 {
+			t.Fatalf("hard-break line exceeds width: %q", ln)
+		}
+	}
+	// existing newlines start new lines
+	if got := wrapText("a\nb", 80); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("newlines must split, got %q", got)
 	}
 }
