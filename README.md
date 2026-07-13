@@ -99,6 +99,7 @@ from the code, so it always matches what the tool emits:
 | ▸ | liveness | running |
 | † | liveness | vestigial (installed, not running) |
 | ↔ | liveness | live network socket |
+| ⚿ | encryption | TLS-encrypted flow (a slash through it = cleartext) |
 <!-- END LEGEND -->
 
 ## How it works

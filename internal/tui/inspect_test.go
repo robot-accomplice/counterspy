@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
 
@@ -226,6 +227,12 @@ func TestDrawInspect_EncryptedExplainsWhyNoContent(t *testing.T) {
 	s.Show()
 	if !simContains(s, "Encrypted") || !simContains(s, "nothing to view") {
 		t.Fatal("an encrypted flow must explain why its bytes can't be viewed")
+	}
+	if simContains(s, "🔒") {
+		t.Fatal("must use the glyph vocabulary, not an emoji (🔒)")
+	}
+	if !simContains(s, string(mark.GlyphEncrypted)) {
+		t.Fatal("the encrypted explanation should carry the ⚿ encryption glyph")
 	}
 	if simContains(s, "v view") {
 		t.Fatal("the footer must not offer 'view' when there is no plaintext to view")

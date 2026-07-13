@@ -497,12 +497,25 @@ func drawHRule(s tcell.Screen, y, w int) {
 	drawText(s, marginX, y, tcell.StyleDefault.Foreground(colDivider), strings.Repeat("─", n))
 }
 
+// drawEncGlyph places the encryption annotation for a destination port at (x,y) — a key (⚿) for a
+// TLS port, a slashed key for cleartext, nothing for an unknown port (a port-only heuristic, no
+// capture). Returns the columns consumed (0 or 2) so the caller can shift following text.
+func drawEncGlyph(s tcell.Screen, x, y int, style tcell.Style, port int) int {
+	base, comb := mark.EncGlyph(mark.PortEnc(port))
+	if base == 0 {
+		return 0
+	}
+	s.SetContent(x, y, base, comb, style)
+	return 2
+}
+
 func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int) {
 	g := row.group
 	var depth int
 	var marker rune
 	var label, trust, rate, dest string
 	var concernText string
+	var encPort int // destination port for the row's shown destination (0 = no dest / no glyph)
 	color := concernColor(g.Concern)
 
 	switch {
@@ -514,6 +527,9 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		rate = human(g.OutRate) + "/s"
 		dest = topDest(g)
 		concernText = g.Concern.String()
+		if c := busiestConn(g.Conns); c != nil {
+			encPort = c.Endpoint.Port
+		}
 	case row.conn == nil: // instance row
 		mem := row.member
 		depth = 1
@@ -526,6 +542,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		depth = 2
 		marker = '·'
 		dest = fmt.Sprintf("%s %s:%d", strings.ToUpper(c.Proto), c.Endpoint.IP, c.Endpoint.Port)
+		encPort = c.Endpoint.Port
 		if c.OutRate > 0 {
 			rate = human(c.OutRate) + "/s"
 		}
@@ -552,7 +569,11 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 	out, in := rowSpark(row)
 	heights, colors := trendSeries(out, in, mode, peak, trendW)
 	drawTrend(s, cols.trendX, y, heights, colors, trendW, selected)
-	drawText(s, cols.destX, y, style, model.Clean(truncate(dest, cols.destW)))
+	shift := 0
+	if dest != "" && encPort > 0 {
+		shift = drawEncGlyph(s, cols.destX, y, style, encPort)
+	}
+	drawText(s, cols.destX+shift, y, style, model.Clean(truncate(dest, cols.destW-shift)))
 	drawText(s, cols.concernX, y, style, truncate(concernText, concernW))
 }
 

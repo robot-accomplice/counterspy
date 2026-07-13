@@ -157,14 +157,14 @@ func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members [
 	if iw < 12 {
 		return
 	}
-	drawText(s, ix+2, iy, tcell.StyleDefault.Foreground(colDim), truncate("PID     OUT↑    IN↓  %GRP", iw-2))
+	drawText(s, ix+2, iy, tcell.StyleDefault.Foreground(colDim), truncate("PID     OUT↑    IN↓  %GRP  ⚿", iw-2))
 	for i, mem := range members {
 		row := iy + 1 + i
 		if row >= y+h-1 {
 			break
 		}
 		share := pidShare(mem.OutRate, g.OutRate)
-		line := fmt.Sprintf("%5d  %6s  %5s  %s%3d%%", mem.PID, human(mem.OutRate), human(mem.InRate), shareBar(share, 4), share)
+		line := fmt.Sprintf("%5d  %6s  %5s  %s%3d%%  ", mem.PID, human(mem.OutRate), human(mem.InRate), shareBar(share, 4), share)
 		st := tcell.StyleDefault.Foreground(colText)
 		if i == sel {
 			st = st.Background(colSelBg).Bold(true)
@@ -172,6 +172,12 @@ func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members [
 		}
 		drawText(s, ix, row, tcell.StyleDefault.Foreground(pidLineColor(mem.PID)), "■") // graph-matched swatch
 		drawText(s, ix+2, row, st, truncate(line, iw-2))
+		// Encryption annotation from the PID's busiest connection's port (the flow `i` would inspect).
+		if c := busiestConn(mem.Conns); c != nil {
+			if gx := ix + 2 + len([]rune(line)); gx < ix+iw {
+				drawEncGlyph(s, gx, row, st, c.Endpoint.Port)
+			}
+		}
 	}
 }
 
