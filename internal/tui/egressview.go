@@ -35,7 +35,7 @@ const (
 	concernW = 10
 )
 
-const footerHint = "j/k move · ↵/→ expand · ← collapse · y copy · i inspect · s sort · / filter · p pause · Q quit"
+const footerHint = "j/k move · ↵/→ expand · ← collapse · y copy · i inspect · t trend · s sort · / filter · p pause · Q quit"
 
 // middleEllipsis renders a long path as "start…/finalBinary": it keeps the leading path and
 // the final component (the binary), collapsing the middle with … so both the location and the
@@ -250,6 +250,31 @@ func drawTrend(s tcell.Screen, x, y int, heights []uint64, colors []tcell.Color,
 	}
 }
 
+// drawTrendLegend draws a one-line, self-coloring key for the active trend mode at row y: the
+// gradient glyphs use the SAME ramp the sparklines do, so the legend is correct by construction and
+// relabels/recolors itself as the user toggles `t`.
+func drawTrendLegend(s tcell.Screen, y int, mode trendMode) {
+	def := tcell.StyleDefault.Foreground(colDim)
+	label, left, right := "TREND ↑ out  ", "quiet ", " loud"
+	ramp := heatColor // blue→red volume temperature (out/in modes)
+	switch mode {
+	case trendIn:
+		label = "TREND ↓ in   "
+	case trendCombined:
+		label, left, right = "TREND ⇅  ", "◀ in·download ", " out·exfil ▶"
+		ramp = dirColor // green→amber direction
+	}
+	x := drawText(s, marginX, y, def, label)
+	x = drawText(s, x, y, def, left)
+	n := len(sparkGlyphs)
+	for i := 0; i < n; i++ {
+		frac := float64(i) / float64(n-1)
+		drawText(s, x, y, tcell.StyleDefault.Foreground(ramp(frac)), string(sparkGlyphs[i]))
+		x++
+	}
+	drawText(s, x, y, def, right)
+}
+
 // rowSpark returns the (out, in) rate history for whichever tree level this row is.
 func rowSpark(row egressRow) (out, in []uint64) {
 	switch {
@@ -367,14 +392,22 @@ func egressView(m EgressModel, s tcell.Screen) {
 	drawText(s, cols.appX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("APP / PROCESS", cols.appW))
 	drawText(s, cols.trustX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TRUST", trustW))
 	drawText(s, cols.rateX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("OUT↑", rateW))
-	drawText(s, cols.trendX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TREND", trendW))
+	trendHdr := "TREND ↑"
+	switch m.Trend {
+	case trendIn:
+		trendHdr = "TREND ↓"
+	case trendCombined:
+		trendHdr = "TREND ⇅"
+	}
+	drawText(s, cols.trendX, headerY, tcell.StyleDefault.Foreground(colDim), truncate(trendHdr, trendW))
 	drawText(s, cols.destX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("DESTINATIONS", cols.destW))
 	drawText(s, cols.concernX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("CONCERN", concernW))
 
 	rows := m.visibleRows()
 	footerY := h - 1
+	legendY := footerY - 1 // the contextual trend legend sits directly above the footer
 	detail := detailLines(rows, m.Selected, w-marginX-marginR)
-	tableBottom := footerY - 1 - len(detail)
+	tableBottom := legendY - 1 - len(detail)
 
 	tableTop := headerY + 1
 	if len(rows) == 0 {
@@ -401,12 +434,13 @@ func egressView(m EgressModel, s tcell.Screen) {
 	}
 
 	if len(detail) > 0 {
-		base := footerY - len(detail)
+		base := legendY - len(detail)
 		for i, line := range detail {
 			drawText(s, marginX, base+i, tcell.StyleDefault.Foreground(colDim), model.Clean(truncate(line, w-marginX-marginR)))
 		}
 	}
 
+	drawTrendLegend(s, legendY, m.Trend)
 	drawText(s, marginX, footerY, tcell.StyleDefault.Foreground(colDim), truncate(footerHint, w-marginX-marginR))
 }
 

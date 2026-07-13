@@ -480,3 +480,40 @@ func TestEgressView_TrendModeReachesTheTree(t *testing.T) {
 		t.Fatal("out and in modes must render different trend shapes — egressView must thread m.Trend through")
 	}
 }
+
+func TestEgressView_TrendLegendAndHeader(t *testing.T) {
+	newScreen := func() tcell.SimulationScreen {
+		s := tcell.NewSimulationScreen("")
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		s.SetSize(120, 40)
+		return s
+	}
+	// Combined mode: ⇅ header/legend + direction labels + the t-toggle footer hint.
+	s := newScreen()
+	m := NewEgress().withGroups([]model.EgressGroup{eg("x", model.Low, 10)})
+	m.Trend = trendCombined
+	egressView(m, s)
+	s.Show()
+	if !simContains(s, "⇅") {
+		t.Fatal("combined mode must show the ⇅ glyph")
+	}
+	if !simContains(s, "download") || !simContains(s, "exfil") {
+		t.Fatal("combined legend must label the direction ramp (download → exfil)")
+	}
+	if !simContains(s, "t trend") {
+		t.Fatal("footer must advertise the t toggle")
+	}
+	// Out mode: legend labels volume (quiet → loud), not direction.
+	s2 := newScreen()
+	m.Trend = trendOut
+	egressView(m, s2)
+	s2.Show()
+	if !simContains(s2, "quiet") || !simContains(s2, "loud") {
+		t.Fatal("out legend must label the volume ramp (quiet → loud)")
+	}
+	if simContains(s2, "download") {
+		t.Fatal("out mode must NOT show the direction labels")
+	}
+}
