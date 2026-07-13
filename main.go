@@ -495,11 +495,12 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	m.Liveness = livenessFor(assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 
-	// Exfiltration sampler + a 1s ticker. RunConsole samples LAZILY (only while Exfiltration is
+	// Exfiltration sampler + a ~3Hz ticker. RunConsole samples LAZILY (only while Exfiltration is
 	// the visible mode), so the ticker fires regardless but no nettop/lsof work happens in
 	// Findings mode. The ticker closes `tick` on stop so RunConsole's sample goroutine ends.
-	// 1s (was 2s) keeps the live view — and the zoom graph — advancing at a readable pace.
-	const interval = 1.0
+	// 0.3s keeps the live view — and the zoom graph — advancing briskly (bounded by nettop/lsof
+	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
+	const interval = 0.3
 	mon := newEgressMonitor(interval)
 	tick := make(chan struct{})
 	stop := make(chan struct{})
