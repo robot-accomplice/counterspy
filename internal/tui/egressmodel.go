@@ -186,7 +186,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 				m.CopyReq = path // the run loop performs the clipboard I/O and sets Status
 			}
 		case 'i':
-			m = m.requestInspect(rows) // gate on consent, then let RunConsole capture
+			m = m.requestInspect(rows) // queue the capture; RunConsole performs the I/O
 		case 'Q':
 			return m, true
 		}
@@ -194,9 +194,9 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 	return m, false
 }
 
-// requestInspect resolves the selected row to a concrete (pid, remote) flow and either opens the
-// consent prompt (first time) or queues the capture request. A row without a resolvable single
-// connection (an app header) sets a status hint instead of guessing a flow.
+// requestInspect resolves the selected row to a concrete (pid, remote) flow and queues the capture
+// request. A row without a resolvable single connection (an app header) sets a status hint instead
+// of guessing a flow.
 func (m EgressModel) requestInspect(rows []egressRow) EgressModel {
 	target, hint := resolveInspectTarget(rows, m.Selected)
 	if target == nil {

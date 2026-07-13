@@ -13,7 +13,7 @@ import (
 	"counterspy/internal/tui"
 )
 
-// Inspection capture bounds: a consented `i` capture is a modal action, so it must return quickly.
+// Inspection capture bounds: an `i` capture is a modal action, so it must return quickly.
 // maxWait caps the wall-clock window (an idle flow can't hang the UI, T-11); maxPackets caps how
 // many packets we accumulate (a ClientHello / first plaintext request lands in the first few).
 const (
