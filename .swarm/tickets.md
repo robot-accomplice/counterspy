@@ -47,3 +47,12 @@
 - [x] T-15 (DONE cp-hk1 — reserved space keeps RECEIVED visible) When both SENT and RECEIVED content panes are present and the terminal is
       short, the second (RECEIVED) pane can be silently skipped for lack of rows — show a "… (received
       hidden — resize)" marker or split the space so the user knows it exists. Origin: cp-insE-bidir Antag F-3.
+- [ ] T-13 (sev:low, deferred cp-t7)  Arbitrary-renamed interpreter symlink evasion: `/opt/x -c <src>`
+      where /opt/x -> /usr/bin/py3 defeats name-based isTrustedShim/inline detection (basename
+      "x" is unknown), so the interpreter's Apple signature can still whitewash via the symlink.
+      Deferred: closing it needs readlink/stat resolution of argv[0], which is filesystem I/O and
+      breaks the pure-over-bytes persistence parser -- belongs in the codesign I/O collector (resolve
+      the real signed binary vs the argv path). Attacker also needs write to a PATH dir. Origin: cp-t7 Antagonist A3.
+- [ ] T-14b (sev:low, deferred cp-t7)  Render Facts["inline_code"] in the text report (report.dedupe
+      only surfaces ancestry/argv today); the source is captured for RCA via JSON but not shown in the
+      primary human surface. Deferred: reporting UX, separate from detection correctness. Origin: cp-t7 Audit F-4.

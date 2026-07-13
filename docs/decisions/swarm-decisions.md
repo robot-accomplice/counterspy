@@ -428,3 +428,16 @@ Antagonist(haiku)+Audit(sonnet). Audit CLEAN (T-14 prune correctness/determinism
 T-9/T-11 implemented in code before the reconcile). Antag F-1 (med): T-15 split clamp y+2 had no upper
 bound → could draw past the footer on a tiny terminal → FIX-NOW (cap sentMaxY at h-1) + F-2 tiny-terminal
 test. No escalation.
+
+## cp-t7 (T-7 inline-interpreter LOLBin persistence) -- reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet), both NOT-CLEAN. Reviewers' findings shared ONE root cause -- any
+Apple-signed shim (interpreter OR env) landing as Subject.Path imports its trusted signature onto
+attacker code -- so remediated SYSTEMICALLY via isTrustedShim(target) rather than patching each shape:
+  - A1 env-wrapper + Audit-F1 relative-script (no inline flag): isTrustedShim redirects any shim subject to the plist.
+  - A2 case-sensitivity: lowercased basename.
+  - Audit-F3 false positives (node -r = require): per-interpreter inline-flag map.
+  - Audit-F2 (verified from interpret.recommend + score thresholds + report.dedupe): wInlineCode=2 buried the
+    flagship case at Monitor-tier -> OVERRODE the earlier user-approved "2" to 5 (reaches Investigate standalone;
+    weak-category cap still prevents auto-Quarantine). User informed of the override with the evidence.
+Deferred with justification (Rule 16): T-13 arbitrary-renamed symlink (needs readlink I/O, wrong layer),
+T-14b inline_code text-render (reporting UX; state already recorded for RCA). No human escalation beyond the weight note.
