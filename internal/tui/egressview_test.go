@@ -10,8 +10,8 @@ import (
 	"counterspy/internal/model"
 )
 
-// The encryption annotation: a TLS port draws a bare key (2 cols), a cleartext port draws the key
-// with a combining slash, and an unknown port draws nothing (0 cols) — a port-only heuristic.
+// The encryption annotation: a TLS port draws the sealed box (2 cols), a cleartext port the open
+// box, and an unknown port nothing (0 cols) — a port-only heuristic.
 func TestDrawEncGlyph(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
 	if err := s.Init(); err != nil {
@@ -23,12 +23,12 @@ func TestDrawEncGlyph(t *testing.T) {
 	if n := drawEncGlyph(s, 0, 0, st, 443); n != 2 {
 		t.Fatalf("a TLS port must consume 2 columns, got %d", n)
 	}
-	if r, comb, _, _ := s.GetContent(0, 0); r != mark.GlyphEncrypted || len(comb) != 0 {
-		t.Fatalf("TLS = bare key, got %q comb=%v", r, comb)
+	if r, _, _, _ := s.GetContent(0, 0); r != mark.GlyphEncrypted {
+		t.Fatalf("TLS = sealed box, got %q", r)
 	}
 	drawEncGlyph(s, 0, 1, st, 80)
-	if r, comb, _, _ := s.GetContent(0, 1); r != mark.GlyphEncrypted || len(comb) != 1 {
-		t.Fatalf("cleartext = key + combining slash, got %q comb=%v", r, comb)
+	if r, _, _, _ := s.GetContent(0, 1); r != mark.GlyphCleartext {
+		t.Fatalf("cleartext = the open-box glyph, got %q", r)
 	}
 	if n := drawEncGlyph(s, 0, 2, st, 27123); n != 0 {
 		t.Fatalf("an unknown port must draw nothing (0 cols), got %d", n)

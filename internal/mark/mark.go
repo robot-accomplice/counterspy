@@ -34,13 +34,15 @@ const (
 	GlyphSocket    = '↔' // holds a network listener
 )
 
-// GlyphEncrypted is the encryption annotation: a key (⚿) marks a TLS/encrypted flow; the same key
-// with a combining slash (⚿̸, via EncGlyph) marks cleartext. Absent = unknown. In the tree and zoom
-// this is a HEURISTIC from the destination port only (no capture); in the inspection pane it
-// reflects the real captured verdict.
-const GlyphEncrypted = '⚿'
-
-const encClearOverlay = '̸' // combining long solidus: a slashed key = cleartext
+// Encryption annotation: a sealed box (▣) marks a TLS/encrypted flow, an open box (□) marks
+// cleartext, absent = unknown. Both are single runes from the Geometric Shapes block (like the
+// trust glyphs), so they render where a padlock/key emoji would tofu. In the tree and zoom this is
+// a HEURISTIC from the destination port only (no capture); the inspection pane reflects the real
+// captured verdict.
+const (
+	GlyphEncrypted = '▣'
+	GlyphCleartext = '□'
+)
 
 // EncKind is the encryption classification of a flow.
 type EncKind int
@@ -79,7 +81,7 @@ func EncGlyph(k EncKind) (rune, []rune) {
 	case EncTLS:
 		return GlyphEncrypted, nil
 	case EncClear:
-		return GlyphEncrypted, []rune{encClearOverlay}
+		return GlyphCleartext, nil
 	default:
 		return 0, nil
 	}
@@ -275,7 +277,7 @@ func Legend() []LegendRow {
 		{GlyphActive, "liveness", "running", "running"},
 		{GlyphVestigial, "liveness", "vestigial (installed, not running)", "vestigial"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
-		{GlyphEncrypted, "encryption", "TLS-encrypted flow (a slash through it = cleartext)", "encrypted"},
+		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
 	}
 }
 

@@ -234,7 +234,7 @@ func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members [
 	if iw < 12 {
 		return
 	}
-	drawText(s, ix+2, iy, tcell.StyleDefault.Foreground(colDim), truncate("PID     OUT↑    IN↓  %GRP  ⚿", iw-2))
+	drawText(s, ix+2, iy, tcell.StyleDefault.Foreground(colDim), truncate("PID     OUT↑    IN↓  %GRP  ▣", iw-2))
 	for i, mem := range members {
 		row := iy + 1 + i
 		if row >= y+h-1 {

@@ -85,8 +85,8 @@ func TestPortEnc(t *testing.T) {
 	if r, comb := EncGlyph(EncTLS); r != GlyphEncrypted || len(comb) != 0 {
 		t.Errorf("EncTLS glyph should be a bare key, got %q %v", r, comb)
 	}
-	if r, comb := EncGlyph(EncClear); r != GlyphEncrypted || len(comb) != 1 {
-		t.Errorf("EncClear glyph should be the key + one combining rune, got %q %v", r, comb)
+	if r, comb := EncGlyph(EncClear); r != GlyphCleartext || len(comb) != 0 {
+		t.Errorf("EncClear glyph should be the cleartext box, got %q %v", r, comb)
 	}
 	if r, comb := EncGlyph(EncUnknown); r != 0 || comb != nil {
 		t.Errorf("EncUnknown must render nothing, got %q %v", r, comb)
