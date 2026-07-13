@@ -18,18 +18,62 @@ const (
 	wHiddenPath = 1
 	wUserAgent  = 1
 	wMissingTgt = 2
+	// inline interpreter code in a LaunchAgent is a recognised LOLBin persistence technique
+	// (`osascript -e` / `python3 -c`): the payload never touches disk and argv[0] is an
+	// Apple-signed interpreter, so the entry reads trusted. Weighted like a missing target — the
+	// payload is not a verifiable on-disk binary (T-7; tuning tick).
+	wInlineCode = 2
 )
+
+// inlineInterpreters are argv[0] binaries whose inline-code flag turns an Apple-signed
+// interpreter into an arbitrary-code LOLBin (T-7). inlineCodeFlags are the flags whose
+// following token is inline source rather than a file path.
+var inlineInterpreters = map[string]bool{
+	"osascript": true, "python": true, "python2": true, "python3": true,
+	"bash": true, "sh": true, "zsh": true, "ruby": true, "perl": true, "node": true, "php": true,
+}
+var inlineCodeFlags = map[string]bool{"-e": true, "-c": true, "-r": true, "--eval": true, "-p": true}
+
+// inlineInterpreterPayload reports whether args invoke a known interpreter with an inline-code
+// flag, returning the inline source. argv[0] resolves to the interpreter (e.g. /usr/bin/osascript),
+// so persistence scoring must treat the source — not the trusted interpreter — as the payload.
+func inlineInterpreterPayload(args []string) (src string, ok bool) {
+	if len(args) == 0 || !inlineInterpreters[filepath.Base(args[0])] {
+		return "", false
+	}
+	for i := 1; i < len(args); i++ {
+		if inlineCodeFlags[args[i]] {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true // flag present but no following token — still inline execution
+		}
+	}
+	return "", false
+}
 
 // ParsePersistencePlist turns one launchd plist (already `plutil -convert xml1`)
 // into evidence. Pure over its byte input except a stat() existence check.
 func ParsePersistencePlist(xmlBytes []byte, path string) ([]model.Evidence, error) {
-	label, target := extractLabelAndTarget(xmlBytes)
+	label, args := extractLabelAndArgs(xmlBytes)
+	target := pickTarget(args)
 	sub := model.Subject{Path: target, Label: label}
-	if target == "" {
-		sub.Path = path
-	}
 	var ev []model.Evidence
 	facts := map[string]string{"plist": path, "target": target}
+
+	// Interpreter-wrapped inline code (T-7): argv[0] is an Apple-signed interpreter, so keeping it
+	// as Subject.Path would let codesign whitewash the entry as trusted. Treat the inline source as
+	// the payload — fall back to the plist as the subject (so the trusted interpreter is not
+	// codesigned) and emit a dedicated finding carrying the interpreter + source for RCA.
+	src, inline := inlineInterpreterPayload(args)
+	if target == "" || inline {
+		sub.Path = path
+	}
+	if inline {
+		f := map[string]string{"plist": path, "interpreter": filepath.Base(args[0]), "inline_code": src}
+		ev = append(ev, model.Evidence{Subject: sub, Kind: model.KindPersistence,
+			Summary: "persistence runs inline interpreter code", Weight: wInlineCode, Facts: f})
+	}
 
 	if strings.Contains(target, "/.") || strings.HasPrefix(filepath.Base(target), ".") {
 		ev = append(ev, model.Evidence{Subject: sub, Kind: model.KindPersistence,
@@ -52,10 +96,16 @@ func ParsePersistencePlist(xmlBytes []byte, path string) ([]model.Evidence, erro
 // absolute-path ProgramArguments entry so interpreter wrappers like
 // `/usr/bin/env <payload>` resolve to the real payload, not the wrapper (cp-5 F-1).
 func extractLabelAndTarget(b []byte) (label, target string) {
+	label, args := extractLabelAndArgs(b)
+	return label, pickTarget(args)
+}
+
+// extractLabelAndArgs scans the xml1 dict for the Label and the raw ProgramArguments, so callers
+// can both pick a payload target and inspect the argv (interpreter-awareness — T-7).
+func extractLabelAndArgs(b []byte) (label string, args []string) {
 	dec := xml.NewDecoder(strings.NewReader(string(b)))
 	var curElem, pendingKey string
 	var inArgs bool
-	var args []string
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -90,7 +140,7 @@ func extractLabelAndTarget(b []byte) (label, target string) {
 			}
 		}
 	}
-	return label, pickTarget(args)
+	return label, args
 }
 
 // pickTarget returns the last absolute-path argument (defeating interpreter
