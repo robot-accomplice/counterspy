@@ -11,11 +11,14 @@ import (
 	"counterspy/internal/model"
 )
 
-// pidPalette is the stable per-PID line colors, shared between the graph lines and the PID table
-// swatches so a row and its line always read as the same PID.
+// pidPalette is the per-PID line colors, shared between the graph lines and the PID table swatches.
+// Keyed by PID (not row position) so a PID keeps its color even as the rate-sorted order reshuffles
+// between ticks — a row and its line always read as the same PID (cp-zoom Audit F2).
 var pidPalette = []tcell.Color{colInvestigate, colAccent, colQuarantine, colMonitor, colWarn, colText}
 
-func pidLineColor(i int) tcell.Color { return pidPalette[i%len(pidPalette)] }
+func pidLineColor(pid int) tcell.Color {
+	return pidPalette[((pid%len(pidPalette))+len(pidPalette))%len(pidPalette)]
+}
 
 // seriesValues returns a PID's samples for the active graph metric.
 func seriesValues(mem model.EgressInstance, mode trendMode) []uint64 {
@@ -103,7 +106,7 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	if iw < 10 || ih < 3 {
 		return
 	}
-	const labelW = 6 // "1.4M┤" axis gutter
+	const labelW = 6 // gutter for the Y-axis value label (e.g. "1.4M")
 	plotCols, plotRows := iw-labelW, ih-1
 	if plotCols < 2 || plotRows < 1 {
 		return
@@ -117,7 +120,7 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 				maxY = v
 			}
 		}
-		series = append(series, graphSeries{values: vals, color: pidLineColor(i), emphasized: i == sel})
+		series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: i == sel})
 	}
 	grid := plotSeries(series, plotCols, plotRows, maxY)
 	for r := 0; r < plotRows; r++ {
@@ -130,8 +133,10 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	// Y-axis: peak at the top, 0 at the bottom plot row.
 	drawText(s, ix, iy, tcell.StyleDefault.Foreground(colDim), truncate(human(maxY), labelW-1))
 	drawText(s, ix, iy+plotRows-1, tcell.StyleDefault.Foreground(colDim), "0")
-	// X-axis + live totals on the last interior row.
-	drawText(s, ix, iy+ih-1, tcell.StyleDefault.Foreground(colDim), "60s")
+	// X-axis + live totals on the last interior row. Newest sample is right-aligned; the exact
+	// window depends on the sample cadence (which the view layer doesn't know), so label the
+	// direction rather than assert a duration the tui can't compute (cp-zoom Audit F1).
+	drawText(s, ix+labelW, iy+ih-1, tcell.StyleDefault.Foreground(colDim), "◄ older")
 	totals := fmt.Sprintf("↑%s ↓%s", human(g.OutRate), human(g.InRate))
 	drawText(s, ix+iw-len([]rune(totals)), iy+ih-1, tcell.StyleDefault.Foreground(colDim), totals)
 }
@@ -155,7 +160,7 @@ func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members [
 			st = st.Background(colSelBg).Bold(true)
 			s.SetContent(x+1, row, '▸', nil, tcell.StyleDefault.Foreground(colSelBar))
 		}
-		drawText(s, ix, row, tcell.StyleDefault.Foreground(pidLineColor(i)), "■") // graph-matched swatch
+		drawText(s, ix, row, tcell.StyleDefault.Foreground(pidLineColor(mem.PID)), "■") // graph-matched swatch
 		drawText(s, ix+2, row, st, truncate(line, iw-2))
 	}
 }

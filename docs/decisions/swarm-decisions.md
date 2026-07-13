@@ -441,3 +441,12 @@ attacker code -- so remediated SYSTEMICALLY via isTrustedShim(target) rather tha
     weak-category cap still prevents auto-Quarantine). User informed of the override with the evidence.
 Deferred with justification (Rule 16): T-13 arbitrary-renamed symlink (needs readlink I/O, wrong layer),
 T-14b inline_code text-render (reporting UX; state already recorded for RCA). No human escalation beyond the weight note.
+
+## cp-zoom (egress group zoom dashboard) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet). Cross-confirmed 4 fixes: (1) graph colors keyed by PID not sort-rank
+(Audit F2) — was untested, colors swapped on rate crossings; (2) x-axis labeled "◄ older" instead of a
+false "60s" — the view layer can't know the sample cadence, so it must not assert a duration (Audit F1);
+(3) systemic Zoom.sel re-clamp on every keypress — fixes silent-i-no-op (Audit F3), negative sel and
+one-frame drift (Antag F1/F3) in one place; (4) pidShare clamps to 100 for sample jitter (Antag F2).
+Deferred (justified): height() overflow (Antag F4) needs ~10 PB/s — unrealistic. Braille math, precedence,
+decoupling all verified clean. No human escalation.

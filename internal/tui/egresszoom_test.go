@@ -158,6 +158,34 @@ func TestPidShare(t *testing.T) {
 	if got := pidShare(5, 0); got != 0 {
 		t.Fatalf("divide-by-zero group rate must be 0%%, got %d", got)
 	}
+	if got := pidShare(1400, 1300); got != 100 { // sampling jitter: member > group → clamp
+		t.Fatalf("share must clamp to 100%%, got %d", got)
+	}
+}
+
+// A PID keeps its color across a rate-sorted reshuffle: the palette is keyed by PID, not row index.
+func TestPidLineColor_StableByPID(t *testing.T) {
+	if pidLineColor(1802) != pidLineColor(1802) {
+		t.Fatal("same PID must map to the same color")
+	}
+}
+
+// i on a stale selection (group shrank between ticks) must still act, not silently no-op: the sel
+// re-clamps against fresh members every keypress.
+func TestZoom_StaleSelectionReclampsForInspect(t *testing.T) {
+	full := zoomGroupFixture()
+	m := NewEgress().withGroups([]model.EgressGroup{full})
+	m, _ = egressUpdate(m, tcell.KeyRune, 'z')
+	m, _ = egressUpdate(m, tcell.KeyDown, 0) // sel = 1 (PID 1990)
+	// The group loses the 2nd PID between ticks; sel=1 is now out of range.
+	shrunk := full
+	shrunk.Members = full.Members[:1]
+	shrunk.Conns = full.Conns[:1]
+	m = m.withGroups([]model.EgressGroup{shrunk})
+	m, _ = egressUpdate(m, tcell.KeyRune, 'i')
+	if m.InspectReq == nil || m.InspectReq.pid != 1802 {
+		t.Fatalf("i on a stale sel must re-clamp and inspect the remaining PID 1802, got %+v", m.InspectReq)
+	}
 }
 
 func TestZoomedMembers_SortedByOutDesc(t *testing.T) {

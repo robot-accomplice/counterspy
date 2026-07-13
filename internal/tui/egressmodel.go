@@ -102,12 +102,17 @@ func (m EgressModel) zoomGroup() (model.EgressGroup, bool) {
 	return model.EgressGroup{}, false
 }
 
-// pidShare is a member's percentage of the group's total out-rate (0..100), 0 when the group is idle.
+// pidShare is a member's percentage of the group's total out-rate (0..100), 0 when the group is
+// idle. Clamped to 100: per-PID and group rates are sampled independently, so jitter can briefly
+// make a member's rate exceed the group sum (cp-zoom Antagonist F2).
 func pidShare(memberOut, groupOut uint64) int {
 	if groupOut == 0 {
 		return 0
 	}
-	return int(memberOut * 100 / groupOut)
+	if p := int(memberOut * 100 / groupOut); p < 100 {
+		return p
+	}
+	return 100
 }
 
 // inspectTarget is the flow the user chose to inspect, plus the display context the overlay
@@ -226,6 +231,10 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			return m, false
 		}
 		members := zoomedMembers(g)
+		// Re-clamp the selection against the freshly-resolved members EVERY keypress, not only on
+		// up/down: a group can gain/lose PIDs between ticks, and a stale sel would make `i` a silent
+		// no-op or leave sel negative (cp-zoom Audit F3 / Antagonist F1). Single source of truth.
+		m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel, len(members)))
 		switch {
 		case key == tcell.KeyEscape, r == 'z':
 			m.Zoom = nil
