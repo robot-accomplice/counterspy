@@ -235,3 +235,28 @@ func TestWrapText(t *testing.T) {
 		t.Fatalf("newlines must split, got %q", got)
 	}
 }
+
+// T-15: a long SENT must not swallow the whole pane and silently hide RECEIVED — reserved space
+// keeps RECEIVED visible (its label and at least some content), even on a short terminal.
+func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(60, 14) // short: a naive layout would let SENT consume everything
+	insp := &inspection{
+		target: inspectTarget{app: "x", pid: 1, conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 80}, Proto: "tcp"}},
+		view: model.InspectView{
+			Verdict: "plaintext — readable (not encrypted)", Coverage: model.InspectPlaintext,
+			Sent: strings.Repeat("a line of sent data\n", 30), Received: "RECVMARKER body",
+		},
+	}
+	drawInspect(s, insp, true)
+	s.Show()
+	if !simContains(s, "RECEIVED") {
+		t.Fatal("RECEIVED label must remain visible under a long SENT (not silently swallowed)")
+	}
+	if !simContains(s, "RECVMARKER") {
+		t.Fatal("RECEIVED content must get its reserved space")
+	}
+}

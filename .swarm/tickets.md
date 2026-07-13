@@ -18,14 +18,14 @@
       (nettop/lsof in internal/egress) → thread into model.Conn + inspect.Flow.Src, match seg.Src too,
       and use it in the T-9 BPF filter. Trigger: any multi-local-port-same-remote inspection confusion.
       Origin: cp-insA QA F-1 = Audit F-2 (cross-confirmed high). Deferred: needs new collector data, not a code slip.
-- [ ] T-9  (sev:high, Phase-A checkpoint)  Install a scoped cBPF filter in openLiveCapture
+- [x] T-9  (DONE cp-insD — host-scoped BIOCSETF filter installed)  Install a scoped cBPF filter in openLiveCapture
       (`host <remote-ip> and port <remote-port> and tcp`) via BIOCSETF so capture is NOT whole-interface
       (spec §6 least-privilege). Land WITH the live capture wiring + the maintainer sudo smoke test.
       Origin: cp-insA Audit F-1 (crit→high). MUST land before the Phase A PR.
 - [ ] T-10 (sev:med, deferred cp-insA)  Full TCP segment reassembly (seq tracking + reordering) for
       ClientHello/payload spanning many out-of-order segments. Phase-A ships best-effort concat-in-order.
       Origin: cp-insA Audit F-4. Deferred: stateful reassembly is a distinct feature; concat handles the common split.
-- [ ] T-11 (sev:med, cp-insD)  main's Inspector adapter MUST bound the live capture: a BPF read
+- [x] T-11 (DONE cp-insD — non-blocking fd + deadline + packet cap)  main's Inspector adapter MUST bound the live capture: a BPF read
       deadline + packet cap + a hard wall-clock cap, so a consented inspection of an idle flow can't
       freeze the TUI event loop for more than ~1.5s. Origin: cp-insC Audit F-2.
 - [ ] T-12 (sev:low, if-needed)  Async inspection: run inspector.Inspect on a goroutine and deliver the
@@ -40,10 +40,10 @@
       hazard that can EFAULT/corrupt the BIOCSETF filter install (currently swallowed → would silently
       defeat the T-9 filter). Add runtime.KeepAlive(insns) after the syscall. Separate from the
       BIOCSBLEN fix; address as its own change. The filter-drop smoke test may surface it.
-- [ ] T-14 (sev:low, pre-existing) Prune the app-level out+in spark maps (monitor.spark + sparkIn,
+- [x] T-14 (DONE cp-hk1) Prune the app-level out+in spark maps (monitor.spark + sparkIn,
       keyed by path) on dead app keys, like the per-PID/conn rings. Pre-existing for `spark`; cp-tr1
       doubled the surface with `sparkIn`. Bounded by distinct app-paths seen in a session (small), so low.
       Origin: cp-tr1 Audit F-2.
-- [ ] T-15 (sev:low, UX) When both SENT and RECEIVED content panes are present and the terminal is
+- [x] T-15 (DONE cp-hk1 — reserved space keeps RECEIVED visible) When both SENT and RECEIVED content panes are present and the terminal is
       short, the second (RECEIVED) pane can be silently skipped for lack of rows — show a "… (received
       hidden — resize)" marker or split the space so the user knows it exists. Origin: cp-insE-bidir Antag F-3.

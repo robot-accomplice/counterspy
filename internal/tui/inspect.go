@@ -80,7 +80,17 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 			hint = "revealed — r to mask"
 		}
 		y++
-		y = drawDirection(s, marginX, y, h-1, inner, "SENT →", hint, v.Sent, !reveal)
+		// When both directions have content, reserve rows at the bottom for RECEIVED so a long
+		// SENT can't swallow the whole pane and silently hide it (T-15). RECEIVED gets those rows;
+		// each pane truncates within its budget.
+		sentMaxY := h - 1
+		if v.Sent != "" && v.Received != "" {
+			sentMaxY = (y + h - 1) / 2 // split the remaining space between the two directions
+			if sentMaxY < y+2 {
+				sentMaxY = y + 2 // guarantee SENT at least a label + one line before RECEIVED
+			}
+		}
+		y = drawDirection(s, marginX, y, sentMaxY, inner, "SENT →", hint, v.Sent, !reveal)
 		drawDirection(s, marginX, y, h-1, inner, "RECEIVED ←", hint, v.Received, !reveal)
 	}
 
@@ -109,7 +119,13 @@ func drawContentPane(s tcell.Screen, x, y, maxY, width int, content string) int 
 // at y, and returns the y below it so a second direction can stack beneath. A no-op for empty
 // content or when there's no room left above the footer.
 func drawDirection(s tcell.Screen, x, y, maxY, width int, label, hint, content string, masked bool) int {
-	if content == "" || y >= maxY-1 {
+	if content == "" {
+		return y
+	}
+	if y >= maxY-1 { // no room for a pane — still tell the user this direction has data (T-15)
+		if y < maxY {
+			drawText(s, x, y, tcell.StyleDefault.Foreground(colDim), truncate(label+" · hidden — resize", width))
+		}
 		return y
 	}
 	if masked {

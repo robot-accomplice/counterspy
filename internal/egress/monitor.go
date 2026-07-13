@@ -200,6 +200,18 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		}
 		m.sparkIn[k] = s
 	}
+	// Prune app keys gone this tick (every live instance seeds `summed`), so the app-level maps
+	// stay bounded like the per-PID/conn rings instead of growing per distinct app-path ever seen (T-14).
+	for k := range m.spark {
+		if _, live := summed[k]; !live {
+			delete(m.spark, k)
+		}
+	}
+	for k := range m.sparkIn {
+		if _, live := summed[k]; !live {
+			delete(m.sparkIn, k)
+		}
+	}
 	// Advance per-PID spark ring buffers so each instance row has its own sparkline. Prune
 	// PIDs absent this tick (process gone / no established connections) to keep the map bounded.
 	livePID := make(map[int]bool, len(insts))

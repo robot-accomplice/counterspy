@@ -348,3 +348,42 @@ func TestMonitor_InRingsPruneDeadKeys(t *testing.T) {
 		t.Fatalf("dead connKey must be pruned from sparkInConn, still have %d", len(m.sparkInConn))
 	}
 }
+
+// The app-level spark maps must be bounded like the per-PID/conn rings: an app gone this tick is
+// pruned from both m.spark and m.sparkIn (T-14 — otherwise they grow per distinct app-path ever seen).
+func TestMonitor_AppSparkPrunesDeadApps(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,100000,200000\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.spark) != 1 || len(m.sparkIn) != 1 {
+		t.Fatalf("app rings should track the live app: out=%d in=%d", len(m.spark), len(m.sparkIn))
+	}
+	present = false
+	m.Sample()
+	if len(m.spark) != 0 {
+		t.Fatalf("dead app must be pruned from m.spark, still have %d", len(m.spark))
+	}
+	if len(m.sparkIn) != 0 {
+		t.Fatalf("dead app must be pruned from m.sparkIn, still have %d", len(m.sparkIn))
+	}
+}
