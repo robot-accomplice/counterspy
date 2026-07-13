@@ -58,8 +58,11 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 	}
 	// Each step names itself so a failure localizes the exact ioctl + interface (RCA): a bare
 	// errno like "bad address" (EFAULT) is otherwise ambiguous across six syscalls and two paths.
+	// BIOCSBLEN/BIOCIMMEDIATE are _IOWR/_IOW over a u_int: the kernel reads the value THROUGH a
+	// pointer, so they need IoctlSetPointerInt, not IoctlSetInt (which passes the value by value —
+	// the kernel then dereferences the value AS an address → EFAULT "bad address").
 	blen := 1 << 16
-	if err := unix.IoctlSetInt(fd, unix.BIOCSBLEN, blen); err != nil {
+	if err := unix.IoctlSetPointerInt(fd, unix.BIOCSBLEN, blen); err != nil {
 		unix.Close(fd)
 		return nil, fmt.Errorf("bpf %s BIOCSBLEN: %w", iface, err)
 	}
@@ -74,7 +77,7 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 		unix.Close(fd)
 		return nil, fmt.Errorf("bpf %s BIOCSETIF: %w", iface, e)
 	}
-	if err := unix.IoctlSetInt(fd, unix.BIOCIMMEDIATE, 1); err != nil {
+	if err := unix.IoctlSetPointerInt(fd, unix.BIOCIMMEDIATE, 1); err != nil {
 		unix.Close(fd)
 		return nil, fmt.Errorf("bpf %s BIOCIMMEDIATE: %w", iface, err)
 	}
