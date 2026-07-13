@@ -267,7 +267,8 @@ func TestEgressView_FooterKeybindsPresent(t *testing.T) {
 	egressView(m, s)
 	s.Show()
 	out := screenText(s)
-	for _, want := range []string{"j/k", "↵/→ expand", "← collapse", "s sort", "/ filter", "p pause", "Q quit"} {
+	// ⇥ switch lives here with the other hints (moved off the top tab bar), and the whole hint fits.
+	for _, want := range []string{"⇥ switch", "j/k", "↵/→ expand", "← collapse", "s sort", "/ filter", "p pause", "Q quit"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("footer keybind hint missing %q:\n%s", want, out)
 		}

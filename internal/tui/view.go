@@ -103,7 +103,7 @@ func view(m Model, s tcell.Screen) {
 	}
 
 	drawText(s, 2, h-1, def.Foreground(colDim), truncate(
-		"j/k move · q quarantine · u restore · s sort · / filter · ? help · Q quit", w-3))
+		"⇥ switch · j/k move · q quarantine · u restore · s sort · / filter · ? help · Q quit", w-3))
 	if m.Focus == focusFilter {
 		drawText(s, 2, h-1, def.Foreground(colAccent), truncate("/"+m.Filter+"_  (esc clears)", w-3))
 	}

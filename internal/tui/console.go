@@ -215,7 +215,7 @@ func drawConsoleTabs(s tcell.Screen, mode consoleMode, readOnly bool) {
 	x = tab(x, "Findings", mode == modeFindings)
 	x = drawText(s, x, 0, def.Foreground(colDivider), " ⇄ ")
 	x = tab(x, "Exfiltration", mode == modeExfil)
-	x = drawText(s, x+1, 0, def.Foreground(colDim), "⇥")
+	// The ⇥ switch hint lives in the footer with the other key hints, not up here.
 	if readOnly && mode == modeFindings {
 		drawText(s, x+2, 0, def.Foreground(colWarn), "· read-only")
 	}
