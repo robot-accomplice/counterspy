@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"os"
 	"runtime"
 	"strconv"
 	"time"
@@ -112,6 +113,12 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 // unknown datalink or an assembly/ioctl error it returns without installing, leaving the capture
 // unfiltered (never blinded).
 func installFlowFilter(fd int, dlt uint32, remote netip.AddrPort) {
+	// Diagnostic bypass: capture the whole interface (no kernel filter), so an empty result can be
+	// bisected — if unfiltered capture SEES the host's packets, the filter was wrongly dropping
+	// them; if it still sees nothing, the traffic isn't on this interface.
+	if os.Getenv("COUNTERSPY_NO_BPF_FILTER") == "1" {
+		return
+	}
 	hdr, ok := linkHdrLen(dlt)
 	if !ok {
 		return
