@@ -67,13 +67,15 @@ type EgressModel struct {
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
 // samples flow in), the selected PID index within the sorted members, and the graph metric mode.
 type zoomState struct {
-	app  string
-	sel  int
-	mode trendMode
+	app    string
+	sel    int
+	mode   trendMode
+	byDest bool // graph groups lines by destination (g) instead of by PID
 }
 
 func (z *zoomState) withSel(sel int) *zoomState      { c := *z; c.sel = sel; return &c }
 func (z *zoomState) withMode(m trendMode) *zoomState { c := *z; c.mode = m; return &c }
+func (z *zoomState) withByDest(b bool) *zoomState    { c := *z; c.byDest = b; return &c }
 
 // zoomedMembers returns a group's members sorted by out-rate desc (loud talkers first), stable by
 // PID — the shared order for the PID panel and the graph's colored lines.
@@ -244,6 +246,8 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel+1, len(members)))
 		case r == 't':
 			m.Zoom = m.Zoom.withMode((m.Zoom.mode + 1) % 3)
+		case r == 'g':
+			m.Zoom = m.Zoom.withByDest(!m.Zoom.byDest) // toggle graph grouping: by PID ⇄ by destination
 		case r == 'i':
 			if m.Zoom.sel < len(members) {
 				mem := members[m.Zoom.sel]

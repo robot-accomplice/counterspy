@@ -20,30 +20,77 @@ func pidLineColor(pid int) tcell.Color {
 	return pidPalette[((pid%len(pidPalette))+len(pidPalette))%len(pidPalette)]
 }
 
-// seriesValues returns a PID's samples for the active graph metric.
-func seriesValues(mem model.EgressInstance, mode trendMode) []uint64 {
+// destLineColor keys the palette by the destination string so an endpoint keeps its color across
+// re-sorts, matching the graph line to the destinations-panel swatch (as pidLineColor does for PIDs).
+func destLineColor(ep string) tcell.Color {
+	var h int
+	for _, r := range ep {
+		h = h*31 + int(r)
+	}
+	return pidPalette[((h%len(pidPalette))+len(pidPalette))%len(pidPalette)]
+}
+
+// metricSamples selects/combines a flow's out/in history for the active graph metric.
+func metricSamples(out, in []uint64, mode trendMode) []uint64 {
 	switch mode {
 	case trendIn:
-		return mem.InSpark
+		return in
 	case trendCombined:
-		out, in := mem.Spark, mem.InSpark
-		n := len(out)
-		if len(in) > n {
-			n = len(in)
-		}
-		sum := make([]uint64, n)
-		for i := 0; i < n; i++ {
-			if j := i - (n - len(out)); j >= 0 && j < len(out) {
-				sum[i] += out[j]
-			}
-			if j := i - (n - len(in)); j >= 0 && j < len(in) {
-				sum[i] += in[j]
-			}
-		}
-		return sum
+		return addAligned(out, in)
 	default:
-		return mem.Spark
+		return out
 	}
+}
+
+func seriesValues(mem model.EgressInstance, mode trendMode) []uint64 {
+	return metricSamples(mem.Spark, mem.InSpark, mode)
+}
+
+// addAligned sums two rate-history slices aligned at their NEWEST (right) end — histories can differ
+// in length (a younger connection has fewer samples), so a left-aligned sum would misattribute time.
+func addAligned(a, b []uint64) []uint64 {
+	n := len(a)
+	if len(b) > n {
+		n = len(b)
+	}
+	out := make([]uint64, n)
+	for i := 0; i < n; i++ {
+		if j := i - (n - len(a)); j >= 0 && j < len(a) {
+			out[i] += a[j]
+		}
+		if j := i - (n - len(b)); j >= 0 && j < len(b) {
+			out[i] += b[j]
+		}
+	}
+	return out
+}
+
+// destAgg is one destination's aggregated series for the by-destination graph.
+type destAgg struct {
+	ep   string
+	vals []uint64
+}
+
+// destSeriesList aggregates the group's connections by endpoint, summing each endpoint's metric
+// history across the PIDs that talk to it. Ordered by endpoint string for a stable plot order (so
+// overlapping cells don't flicker color as rates reshuffle — same rule as the PID graph).
+func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
+	agg := map[string]*destAgg{}
+	for _, c := range g.Conns {
+		ep := fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)
+		vals := metricSamples(c.Spark, c.InSpark, mode)
+		if a, ok := agg[ep]; ok {
+			a.vals = addAligned(a.vals, vals)
+		} else {
+			agg[ep] = &destAgg{ep: ep, vals: vals}
+		}
+	}
+	out := make([]destAgg, 0, len(agg))
+	for _, a := range agg {
+		out = append(out, *a)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ep < out[j].ep })
+	return out
 }
 
 // drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border (divider color)
@@ -93,15 +140,31 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	}
 	leftW := w * 62 / 100
 
-	drawZoomGraph(s, 0, 0, leftW, topH, g, members, sel, m.Zoom.mode)
+	drawZoomGraph(s, 0, 0, leftW, topH, g, members, sel, m.Zoom.mode, m.Zoom.byDest)
 	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, sel)
 	botY, botH := topH, h-topH
-	drawZoomDests(s, 0, botY, leftW, botH, g)
+	drawZoomDests(s, 0, botY, leftW, botH, g, members, sel, m.Zoom.byDest)
 	drawZoomMeta(s, leftW, botY, w-leftW, botH, g)
 }
 
-func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, mode trendMode) {
-	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · egress · %d pid(s) · %s", g.App, len(members), trendWord(mode)))
+// selectedDestKey is the "ip:port" the selected PID sends the most to — the destination the graph
+// emphasizes in by-destination mode, so the table selection stays meaningful in both graph modes.
+func selectedDestKey(members []model.EgressInstance, sel int) string {
+	if sel < 0 || sel >= len(members) {
+		return ""
+	}
+	if c := busiestConn(members[sel].Conns); c != nil {
+		return fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)
+	}
+	return ""
+}
+
+func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, mode trendMode, byDest bool) {
+	noun, grouping, nLines := "pid(s)", "by pid", len(members)
+	if byDest {
+		noun, grouping, nLines = "dest(s)", "by dest", len(destSeriesList(g, mode))
+	}
+	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · egress · %d %s · %s · %s", g.App, nLines, noun, grouping, trendWord(mode)))
 	ix, iy, iw, ih := x+1, y+1, w-2, h-2
 	if iw < 10 || ih < 3 {
 		return
@@ -111,26 +174,38 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	if plotCols < 2 || plotRows < 1 {
 		return
 	}
-	// Plot in a STABLE order (by PID), NOT the rate-sorted members order: where lines overlap a cell,
-	// plotSeries gives it to the last-plotted series, so a rate-driven reshuffle would flip the color
-	// of already-rendered historical cells frame-to-frame (observed flicker). PID order is fixed, so
-	// the overlap winner is deterministic. Emphasis (the selected line, drawn on top) is by PID.
-	selPID := -1
-	if sel >= 0 && sel < len(members) {
-		selPID = members[sel].PID
-	}
-	byPID := append([]model.EgressInstance(nil), members...)
-	sort.SliceStable(byPID, func(i, j int) bool { return byPID[i].PID < byPID[j].PID })
+	// Build the lines in a STABLE order (by PID, or by endpoint string for destinations): where lines
+	// overlap a cell, plotSeries gives it to the last-plotted series, so a rate-driven reshuffle would
+	// flip the color of already-rendered historical cells (observed flicker). A fixed order makes the
+	// overlap winner deterministic. Emphasis (drawn on top) follows the table selection in both modes.
 	var series []graphSeries
 	var maxY uint64
-	for _, mem := range byPID {
-		vals := seriesValues(mem, mode)
-		for _, v := range vals {
-			if v > maxY {
-				maxY = v
+	if byDest {
+		selDest := selectedDestKey(members, sel)
+		for _, d := range destSeriesList(g, mode) {
+			for _, v := range d.vals {
+				if v > maxY {
+					maxY = v
+				}
 			}
+			series = append(series, graphSeries{values: d.vals, color: destLineColor(d.ep), emphasized: d.ep == selDest})
 		}
-		series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: mem.PID == selPID})
+	} else {
+		selPID := -1
+		if sel >= 0 && sel < len(members) {
+			selPID = members[sel].PID
+		}
+		byPID := append([]model.EgressInstance(nil), members...)
+		sort.SliceStable(byPID, func(i, j int) bool { return byPID[i].PID < byPID[j].PID })
+		for _, mem := range byPID {
+			vals := seriesValues(mem, mode)
+			for _, v := range vals {
+				if v > maxY {
+					maxY = v
+				}
+			}
+			series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: mem.PID == selPID})
+		}
 	}
 	grid := plotSeries(series, plotCols, plotRows, maxY)
 	for r := 0; r < plotRows; r++ {
@@ -195,7 +270,7 @@ func shareBar(pct, n int) string {
 	return string(b)
 }
 
-func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
+func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, byDest bool) {
 	drawPanel(s, x, y, w, h, "destinations")
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
@@ -219,14 +294,29 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
 		}
 		return ds[i].ep < ds[j].ep
 	})
+	// In by-destination graph mode this panel is the color legend: swatch each row to its graph line
+	// and highlight the endpoint the graph emphasizes (the selected PID's busiest destination).
+	selDest := ""
+	if byDest {
+		selDest = selectedDestKey(members, sel)
+	}
 	for i, d := range ds {
 		row := iy + i
 		if row >= y+h-1 {
 			break
 		}
 		share := pidShare(d.rate, g.OutRate)
-		drawText(s, ix, row, tcell.StyleDefault.Foreground(colText),
-			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(d.ep, 24), human(d.rate), share), iw))
+		st := tcell.StyleDefault.Foreground(colText)
+		tx := ix
+		if byDest {
+			drawText(s, ix, row, tcell.StyleDefault.Foreground(destLineColor(d.ep)), "■")
+			tx = ix + 2
+			if d.ep == selDest {
+				st = st.Background(colSelBg).Bold(true)
+			}
+		}
+		drawText(s, tx, row, st,
+			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(d.ep, 24), human(d.rate), share), iw-(tx-ix)))
 	}
 }
 
@@ -246,5 +336,5 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
 	}
 	// Key hints on the bottom border, like the tree footer.
 	drawText(s, x+2, y+h-1, tcell.StyleDefault.Foreground(colDim),
-		truncate(" i inspect · ↑/↓ pid · t out/in · z back ", w-4))
+		truncate(" i inspect · ↑/↓ pid · t out/in · g pid/dest · z back ", w-4))
 }

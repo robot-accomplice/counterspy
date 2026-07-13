@@ -187,6 +187,61 @@ func TestDrawEgressZoom_TinyTerminalNoPanic(t *testing.T) {
 	s.Show()
 }
 
+// g toggles the graph grouping between by-PID and by-destination.
+func TestZoom_ToggleGraphByDest(t *testing.T) {
+	m := NewEgress().withGroups([]model.EgressGroup{zoomGroupFixture()})
+	m, _ = egressUpdate(m, tcell.KeyRune, 'z')
+	if m.Zoom.byDest {
+		t.Fatal("the graph starts grouped by PID")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 'g')
+	if !m.Zoom.byDest {
+		t.Fatal("g must toggle the graph to by-destination")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 'g')
+	if m.Zoom.byDest {
+		t.Fatal("g must toggle back to by-PID")
+	}
+}
+
+// The by-destination graph aggregates connections by endpoint, summing each endpoint's history
+// across the PIDs that talk to it (aligned at the newest sample).
+func TestDestSeriesList_AggregatesByEndpoint(t *testing.T) {
+	g := model.EgressGroup{Conns: []model.Conn{
+		{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Spark: []uint64{10, 20}},
+		{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Spark: []uint64{5, 5}},
+		{Endpoint: model.Endpoint{IP: "5.6.7.8", Port: 443}, Spark: []uint64{1, 1}},
+	}}
+	ds := destSeriesList(g, trendOut)
+	if len(ds) != 2 {
+		t.Fatalf("two unique endpoints expected, got %d", len(ds))
+	}
+	var got []uint64
+	for _, d := range ds {
+		if d.ep == "1.2.3.4:443" {
+			got = d.vals
+		}
+	}
+	if len(got) != 2 || got[0] != 15 || got[1] != 25 {
+		t.Fatalf("1.2.3.4:443 history must sum to [15 25], got %v", got)
+	}
+}
+
+func TestDrawEgressZoom_ByDestGraphTitle(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(120, 40)
+	m := NewEgress().withGroups([]model.EgressGroup{zoomGroupFixture()})
+	m.Zoom = &zoomState{app: "claude", sel: 0, mode: trendOut, byDest: true}
+	drawEgressZoom(s, m)
+	s.Show()
+	if !simContains(s, "by dest") {
+		t.Fatal("the graph title must reflect by-destination grouping")
+	}
+}
+
 func TestPidShare(t *testing.T) {
 	if got := pidShare(1400, 1500); got != 93 {
 		t.Fatalf("share 1400/1500 = %d, want 93", got)
