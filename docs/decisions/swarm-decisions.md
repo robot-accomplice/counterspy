@@ -368,3 +368,13 @@ Jon ran the feature live; `i` on an IPv6 flow → "capture failed: bad address".
 - Live capture had NEVER worked; invisible in CI because nothing exercises BIOCSBLEN without root — this
   is exactly why the root smoke test earns its keep. Fix committed; awaiting Jon's GREEN smoke run.
 - Found during RCA (not bundled): T-13 — the BIOCSETF insns KeepAlive hazard (separate change).
+
+## Phase A VALIDATED LIVE — 2026-07-13 (session 3)
+Jon ran the root smoke test after the BIOCSBLEN fix: BOTH tests GREEN.
+- TestLiveCapture_LoopbackTLS_SNI PASS — recovered SNI="counterspy.smoke.test", coverage=metadata,
+  honest verdict. The full /dev/bpf read path works end to end.
+- TestLiveCapture_FilterDropsUnscopedTraffic PASS — raw source silent → BIOCSETF filter engaged.
+The interceptor's live capture is now proven, not just compiled. T-13 (KeepAlive) closed as a
+follow-up. REMAINING before the Phase A PR: Jon's eyeball on the real interactive console
+(`sudo counterspy console` → i on live TLS), then bundle Phase A → develop (already swarm-reviewed
+per checkpoint) + CI gate. Nothing pushed yet.
