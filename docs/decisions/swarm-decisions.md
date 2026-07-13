@@ -356,3 +356,15 @@ capture FAILS). Audit found:
 - **F-2 (med): host-only scope** — subsumed (T-9-ref); the negative test proves the filter engages at all.
 Both tests gated by COUNTERSPY_LIVE_CAPTURE=1; `go test ./...` stays green without root. The maintainer
 runs one sudo command to validate the whole root path; I can't (sudo needs a password).
+
+## RCA — live capture EFAULT "bad address" — 2026-07-13 (session 3)
+Jon ran the feature live; `i` on an IPv6 flow → "capture failed: bad address". Systematic-debugging:
+- The bare EFAULT was ambiguous across 6 syscalls + 2 paths → added per-syscall+interface diagnostics
+  (Phase 1). Jon re-ran the loopback smoke test → deterministic repro, localized to `bpf lo0
+  BIOCSBLEN: bad address`. IPv6 was a red herring — the bug is general capture SETUP.
+- Root cause (verified in vendored x/sys source, not guessed): BIOCSBLEN/BIOCIMMEDIATE are pointer-
+  passing u_int ioctls on macOS; IoctlSetInt passes BY VALUE → kernel derefs the length as an address
+  → EFAULT. BIOCGBLEN worked (IoctlGetInt passes a pointer). Fix: IoctlSetPointerInt for both.
+- Live capture had NEVER worked; invisible in CI because nothing exercises BIOCSBLEN without root — this
+  is exactly why the root smoke test earns its keep. Fix committed; awaiting Jon's GREEN smoke run.
+- Found during RCA (not bundled): T-13 — the BIOCSETF insns KeepAlive hazard (separate change).

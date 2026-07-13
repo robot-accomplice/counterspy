@@ -35,3 +35,8 @@
       (IPv4 needs LoadMemShift IHL-indexing for the port offset; IPv6 port is at a fixed offset). VM-test
       port match/mismatch. Marginal §6 gain (same-host-other-port); userspace already enforces the port.
       Origin: cp-insD Audit F-1. Host-scoping (the bulk of §6) is DONE in cp-insD.
+- [ ] T-13 (sev:med, found during cp-insD RCA)  installFlowFilter passes BpfProgram{Insns:&insns[0]}
+      into a raw Syscall but nothing keeps `insns` alive across the call — a runtime.KeepAlive-class
+      hazard that can EFAULT/corrupt the BIOCSETF filter install (currently swallowed → would silently
+      defeat the T-9 filter). Add runtime.KeepAlive(insns) after the syscall. Separate from the
+      BIOCSBLEN fix; address as its own change. The filter-drop smoke test may surface it.
