@@ -50,8 +50,10 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 
 	draw := func() {
 		switch {
-		case em.Inspection != nil: // full-screen inspection pane replaces the tree
+		case em.Inspection != nil: // full-screen inspection pane replaces everything
 			drawInspect(s, em.Inspection, em.Reveal)
+		case em.Zoom != nil: // group-zoom dashboard replaces the tree (inspection stacks above it)
+			drawEgressZoom(s, em)
 		case mode == modeFindings:
 			view(m, s)
 			drawConsoleTabs(s, mode, m.ReadOnly)
@@ -68,7 +70,7 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 		case *tcell.EventKey:
 			// Tab switches faces only when the inspection overlay isn't owning the screen (it
 			// must not be left dangling behind the other face).
-			if em.Inspection == nil && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
+			if em.Inspection == nil && em.Zoom == nil && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
 				if mode == modeFindings {
 					mode = modeExfil
 					setSampling()

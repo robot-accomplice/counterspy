@@ -60,6 +60,54 @@ type EgressModel struct {
 	InspectReq *inspectTarget // RunConsole should capture+inspect this target, then clear it
 	Inspection *inspection    // result overlay is open (nil = closed)
 	Reveal     bool           // content pane is revealed (redaction off) for the open inspection
+
+	Zoom *zoomState // group-zoom dashboard is open (nil = closed); rendered under any Inspection
+}
+
+// zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
+// samples flow in), the selected PID index within the sorted members, and the graph metric mode.
+type zoomState struct {
+	app  string
+	sel  int
+	mode trendMode
+}
+
+func (z *zoomState) withSel(sel int) *zoomState      { c := *z; c.sel = sel; return &c }
+func (z *zoomState) withMode(m trendMode) *zoomState { c := *z; c.mode = m; return &c }
+
+// zoomedMembers returns a group's members sorted by out-rate desc (loud talkers first), stable by
+// PID — the shared order for the PID panel and the graph's colored lines.
+func zoomedMembers(g model.EgressGroup) []model.EgressInstance {
+	ms := append([]model.EgressInstance(nil), g.Members...)
+	sort.SliceStable(ms, func(i, j int) bool {
+		if ms[i].OutRate != ms[j].OutRate {
+			return ms[i].OutRate > ms[j].OutRate
+		}
+		return ms[i].PID < ms[j].PID
+	})
+	return ms
+}
+
+// zoomGroup resolves the currently-zoomed group by name from the live groups. ok=false if it has
+// vanished between ticks (the caller then closes the zoom).
+func (m EgressModel) zoomGroup() (model.EgressGroup, bool) {
+	if m.Zoom == nil {
+		return model.EgressGroup{}, false
+	}
+	for _, g := range m.orderedGroups() {
+		if g.App == m.Zoom.app {
+			return g, true
+		}
+	}
+	return model.EgressGroup{}, false
+}
+
+// pidShare is a member's percentage of the group's total out-rate (0..100), 0 when the group is idle.
+func pidShare(memberOut, groupOut uint64) int {
+	if groupOut == 0 {
+		return 0
+	}
+	return int(memberOut * 100 / groupOut)
 }
 
 // inspectTarget is the flow the user chose to inspect, plus the display context the overlay
@@ -169,6 +217,36 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 		}
 		return m, false
 	}
+	// The zoom dashboard is modal under any inspection: it owns keys until dismissed. `i` here
+	// requests inspection for the SELECTED pid, which then stacks on top.
+	if m.Zoom != nil {
+		g, ok := m.zoomGroup()
+		if !ok { // the group vanished between ticks — fall back to the tree
+			m.Zoom = nil
+			return m, false
+		}
+		members := zoomedMembers(g)
+		switch {
+		case key == tcell.KeyEscape, r == 'z':
+			m.Zoom = nil
+		case key == tcell.KeyUp, r == 'k':
+			m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel-1, len(members)))
+		case key == tcell.KeyDown, r == 'j':
+			m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel+1, len(members)))
+		case r == 't':
+			m.Zoom = m.Zoom.withMode((m.Zoom.mode + 1) % 3)
+		case r == 'i':
+			if m.Zoom.sel < len(members) {
+				mem := members[m.Zoom.sel]
+				if c := busiestConn(mem.Conns); c != nil {
+					m.InspectReq = &inspectTarget{app: g.App, pid: mem.PID, trust: mem.Trust, conn: *c}
+				}
+			}
+		case r == 'Q':
+			return m, true
+		}
+		return m, false
+	}
 	m.Status = "" // any key clears the previous transient status
 	rows := m.visibleRows()
 	switch key {
@@ -198,6 +276,10 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			}
 		case 'i':
 			m = m.requestInspect(rows) // queue the capture; RunConsole performs the I/O
+		case 'z':
+			if m.Selected >= 0 && m.Selected < len(rows) {
+				m.Zoom = &zoomState{app: rows[m.Selected].group.App, sel: 0, mode: m.Trend}
+			}
 		case 'Q':
 			return m, true
 		}
