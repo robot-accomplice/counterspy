@@ -70,11 +70,30 @@ func simScreen(t *testing.T) tcell.SimulationScreen {
 	return s
 }
 
-func TestView_RendersSummaryAndHidesMonitor(t *testing.T) {
+// The findings view carries the same pane structure as the exfil view: a rule closes the header
+// band and another sits directly above the footer (row h-3 at the 120x40 sim size).
+func TestView_SectionRules(t *testing.T) {
+	s := simScreen(t)
+	m := New([]model.Assessment{mk("evil.updater", model.RecQuarantine, 14)}, nil)
+	view(m, s)
+	s.Show()
+	isRule := func(y int) bool {
+		r, _, _, _ := s.GetContent(marginX, y)
+		return r == '─'
+	}
+	if !isRule(2) { // rows 0 title, 1 counts, then the header band is closed by a rule at row 2
+		t.Error("expected a rule closing the header band")
+	}
+	if !isRule(40 - 3) { // rule directly above the footer (h-3; toast h-2, footer h-1)
+		t.Error("expected a rule directly above the footer (row h-3)")
+	}
+}
+
+func TestView_RendersSummaryAndShowsMonitor(t *testing.T) {
 	s := simScreen(t)
 	m := New([]model.Assessment{
 		mk("evil.updater", model.RecQuarantine, 14),
-		mk("zoom", model.RecMonitor, 2),
+		mk("lowbeacon", model.RecMonitor, 2),
 	}, nil)
 	view(m, s)
 	s.Show()
@@ -82,8 +101,8 @@ func TestView_RendersSummaryAndHidesMonitor(t *testing.T) {
 	if !strings.Contains(out, "CounterSpy") || !strings.Contains(out, "evil.updater") {
 		t.Fatalf("summary/finding missing:\n%s", out)
 	}
-	if strings.Contains(out, "zoom") {
-		t.Fatalf("monitor item should be hidden by default:\n%s", out)
+	if !strings.Contains(out, "lowbeacon") {
+		t.Fatalf("Monitor-tier item must be visible by default (no hide toggle):\n%s", out)
 	}
 }
 
@@ -269,16 +288,6 @@ func TestView_NoFindingsMatchMessage(t *testing.T) {
 	s.Show()
 	if !strings.Contains(screenText(s), "no findings match") {
 		t.Fatalf("empty filtered list should say no findings match:\n%s", screenText(s))
-	}
-}
-
-func TestView_MonitorHiddenMessage(t *testing.T) {
-	s := simScreen(t)
-	m := New([]model.Assessment{mk("zoom", model.RecMonitor, 2)}, nil)
-	view(m, s)
-	s.Show()
-	if !strings.Contains(screenText(s), "monitored item(s) hidden") {
-		t.Fatalf("all-monitor list should explain the hidden items:\n%s", screenText(s))
 	}
 }
 

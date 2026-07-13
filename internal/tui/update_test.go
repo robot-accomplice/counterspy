@@ -32,15 +32,11 @@ func TestUpdate_NavClampsAtEnds(t *testing.T) {
 	}
 }
 
-func TestUpdate_ToggleSortAndMonitor(t *testing.T) {
+func TestUpdate_ToggleSort(t *testing.T) {
 	m := threeQ()
 	m, _ = update(m, tcell.KeyRune, 's')
 	if !m.SortByRec {
 		t.Fatal("s should enable sort-by-rec")
-	}
-	m, _ = update(m, tcell.KeyRune, 'm')
-	if !m.ShowMonitor {
-		t.Fatal("m should show monitor")
 	}
 }
 
@@ -183,7 +179,6 @@ func TestUpdate_ArrowKeysMoveSelection(t *testing.T) {
 
 func TestUpdate_QuarantineBlockedOnMonitorSelection(t *testing.T) {
 	m := New([]model.Assessment{mk("z", model.RecMonitor, 2)}, nil)
-	m.ShowMonitor = true // so the monitor item is visible and selectable
 	m, cmds := update(m, tcell.KeyRune, 'q')
 	if m.Focus == focusModal || len(cmds) != 0 {
 		t.Fatalf("quarantining a Monitor-tier item should be a no-op, got focus=%v cmds=%v", m.Focus, cmds)
