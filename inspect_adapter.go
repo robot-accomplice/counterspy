@@ -48,7 +48,10 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 // is shown honestly as "not decrypted" rather than silently mislabeled (cp-insC Audit F-3). The
 // mapping is pinned by TestToInspectView_CoverageMapping so adding a tier forces a decision here.
 func toInspectView(r inspect.Result) model.InspectView {
-	v := model.InspectView{SNI: r.SNI, Verdict: r.Verdict}
+	v := model.InspectView{
+		SNI: r.SNI, Verdict: r.Verdict,
+		SentBytes: len(r.Outbound), RecvBytes: len(r.Inbound), // volumes shown for any coverage
+	}
 	if r.Err != nil {
 		v.Err = r.Err.Error()
 	}
@@ -56,10 +59,11 @@ func toInspectView(r inspect.Result) model.InspectView {
 	case inspect.CoverageNone:
 		v.Coverage = model.InspectNone
 	case inspect.CoverageMetadata:
-		v.Coverage = model.InspectMetadata
+		v.Coverage = model.InspectMetadata // encrypted — volumes only, no readable content exposed
 	case inspect.CoveragePlaintext:
 		v.Coverage = model.InspectPlaintext
-		v.Content = sanitizeMultiline(string(r.Payload))
+		v.Sent = sanitizeMultiline(string(r.Outbound))
+		v.Received = sanitizeMultiline(string(r.Inbound))
 	default:
 		v.Coverage = model.InspectNone // unknown/newer tier — honest, never an overclaim
 	}

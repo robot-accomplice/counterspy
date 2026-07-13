@@ -42,9 +42,8 @@ func TestInspect_TLSFlowMetadataAndSNI(t *testing.T) {
 	if !strings.Contains(r.Verdict, "ENCRYPTED") || !strings.Contains(r.Verdict, "api.evil.example.com") {
 		t.Fatalf("verdict should name the encryption + SNI: %q", r.Verdict)
 	}
-	if len(r.Payload) != 0 {
-		t.Fatal("metadata tier must not expose payload for an encrypted flow")
-	}
+	// The engine keeps the raw (encrypted) bytes for the byte-count summary; NOT exposing them as
+	// readable content is the adapter's job (see TestToInspectView_CoverageMapping).
 }
 
 // A plaintext (HTTP) flow: the interceptor surfaces the readable payload.
@@ -53,11 +52,31 @@ func TestInspect_PlaintextFlowShowsPayload(t *testing.T) {
 	body := []byte("POST /upload HTTP/1.1\r\nHost: drop.example\r\n\r\nsecret=hunter2")
 	src := &fixtureSource{packets: [][]byte{ipv4TCP(local, flow.Remote, body)}}
 	r := Inspect(src, flow, 20)
-	if r.Coverage != CoveragePlaintext || !strings.Contains(string(r.Payload), "secret=hunter2") {
-		t.Fatalf("want plaintext payload, got coverage=%d payload=%q", r.Coverage, r.Payload)
+	if r.Coverage != CoveragePlaintext || !strings.Contains(string(r.Outbound), "secret=hunter2") {
+		t.Fatalf("want plaintext payload, got coverage=%d payload=%q", r.Coverage, r.Outbound)
 	}
 	if !strings.Contains(r.Verdict, "plaintext") {
 		t.Fatalf("verdict should say plaintext: %q", r.Verdict)
+	}
+}
+
+// Bidirectional: a flow whose live activity is INBOUND (the remote sending to us — e.g. a server
+// streaming a response) must still be surfaced. An established connection is often only active this
+// way; capturing only the outbound direction would wrongly read as "no data".
+func TestInspect_InboundReceivedTraffic(t *testing.T) {
+	flow, local := flowTo("1.2.3.4:80")
+	body := []byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhere is your data")
+	// src = remote, dst = local → this is RECEIVED traffic.
+	src := &fixtureSource{packets: [][]byte{ipv4TCP(flow.Remote, local, body)}}
+	r := Inspect(src, flow, 20)
+	if r.Coverage != CoveragePlaintext {
+		t.Fatalf("an inbound plaintext response must be readable, got coverage=%d", r.Coverage)
+	}
+	if !strings.Contains(string(r.Inbound), "here is your data") {
+		t.Fatalf("received bytes must be captured, got %q", r.Inbound)
+	}
+	if len(r.Outbound) != 0 {
+		t.Fatal("nothing was sent — Outbound must be empty")
 	}
 }
 

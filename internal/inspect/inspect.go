@@ -24,27 +24,33 @@ const (
 	// hook / keylog / proxy tiers add more values in later phases.
 )
 
-// Result is what the inspection view renders for a flow.
+// Result is what the inspection view renders for a flow. Both directions are captured: Outbound
+// (what the app SENDS — the exfil concern) and Inbound (what it RECEIVES — the response). A flow is
+// often active in only one direction at a time (an established TLS connection receiving is inbound-
+// heavy; its ClientHello/SNI is already in the past), so showing both is what makes on-demand
+// inspection useful, not just handshake-time.
 type Result struct {
 	Flow     Flow
-	SNI      string // hostname from the TLS ClientHello, if seen
+	SNI      string // hostname from the TLS ClientHello (outbound), if seen
 	Coverage Coverage
 	Tier     string // which tier yielded the result: "metadata" | "plaintext" | "none"
 	Verdict  string // the honest one-line coverage verdict shown to the user
-	Payload  []byte // outbound application bytes, when a tier surfaced plaintext
+	Outbound []byte // application bytes sent to the remote (client → target)
+	Inbound  []byte // application bytes received from the remote (target → client)
 	Err      error  // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
 }
 
-// maxInspectBytes bounds how much outbound payload we accumulate for one inspection.
+// maxInspectBytes bounds how much payload we accumulate for one inspection, across both directions.
 const maxInspectBytes = 8 << 10
 
-// Inspect reads up to maxPackets from src, correlates the target flow by its remote endpoint,
-// and produces a tier-0/1 result: the SNI + an honest "encrypted, metadata only" verdict for
-// TLS, or the payload for a plaintext flow. Pure given the PacketSource (tests inject fixtures).
+// Inspect reads up to maxPackets from src, correlates the target flow by its remote endpoint in
+// BOTH directions, and produces a tier-0/1 result: the SNI + an honest "encrypted, metadata only"
+// verdict for TLS, or the readable payload (either direction) for a plaintext flow. Pure given the
+// PacketSource (tests inject fixtures).
 func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	r := Result{Flow: flow, Coverage: CoverageNone, Tier: "none"}
-	var outbound []byte
-	var seen, matched int // seen = TCP packets on this host past the kernel filter; matched = outbound-to-remote
+	var outbound, inbound []byte
+	var seen int // TCP packets on this flow past the kernel filter (either direction, incl. ACKs)
 	for i := 0; i < maxPackets; i++ {
 		pkt, err := src.Next()
 		if err == io.EOF {
@@ -58,29 +64,34 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		if !ok {
 			continue
 		}
-		seen++ // a TCP packet that passed the kernel host filter (either direction)
-		if seg.Dst != flow.Remote || len(seg.Payload) == 0 {
-			continue // only outbound (client → target) application segments
+		seen++
+		if len(seg.Payload) == 0 {
+			continue // ACK / control segment — seen, but no application bytes to accumulate
 		}
-		matched++
-		outbound = append(outbound, seg.Payload...)
-		// SNI is parsed over the accumulated in-order outbound bytes, so a ClientHello split
-		// across TCP segments still resolves (best-effort reassembly; full reordering is T-10).
-		if r.SNI == "" {
-			if host, ok := ClientHelloSNI(outbound); ok {
-				r.SNI = host
+		switch {
+		case seg.Dst == flow.Remote: // client → target (sent)
+			outbound = append(outbound, seg.Payload...)
+			// SNI is parsed over the accumulated in-order outbound bytes, so a ClientHello split
+			// across TCP segments still resolves (best-effort reassembly; full reordering is T-10).
+			if r.SNI == "" {
+				if host, ok := ClientHelloSNI(outbound); ok {
+					r.SNI = host
+				}
 			}
+		case seg.Src == flow.Remote: // target → client (received)
+			inbound = append(inbound, seg.Payload...)
 		}
-		if len(outbound) >= maxInspectBytes {
+		if len(outbound)+len(inbound) >= maxInspectBytes {
 			break
 		}
 	}
+	r.Outbound, r.Inbound = outbound, inbound
 
 	switch {
-	case looksPlaintext(outbound):
-		r.Coverage, r.Tier, r.Payload = CoveragePlaintext, "plaintext", outbound
+	case looksPlaintext(outbound) || looksPlaintext(inbound):
+		r.Coverage, r.Tier = CoveragePlaintext, "plaintext"
 		r.Verdict = "plaintext — readable (not encrypted)"
-	case len(outbound) > 0:
+	case len(outbound) > 0 || len(inbound) > 0:
 		r.Coverage, r.Tier = CoverageMetadata, "metadata"
 		if r.SNI != "" {
 			r.Verdict = "ENCRYPTED · SNI " + r.SNI + " · not decrypted (metadata only)"
@@ -90,10 +101,9 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	case r.Err != nil:
 		r.Verdict = "capture failed: " + r.Err.Error() // honest failure, not a clean "no data"
 	default:
-		// Report what the wire showed so an empty result is diagnosable: 0 seen = the flow was
-		// silent during the window (an established connection's ClientHello/SNI is already in the
-		// past); seen>0 but 0 matched = traffic to the host but no fresh outbound payload to read.
-		r.Verdict = fmt.Sprintf("no application data captured (%d packets seen · %d outbound for this flow)", seen, matched)
+		// An established connection can be silent in the capture window (its handshake/SNI is in the
+		// past); report what the wire showed so an empty result is honest, not misread as "clean".
+		r.Verdict = fmt.Sprintf("no application data captured (%d packets seen)", seen)
 	}
 	return r
 }

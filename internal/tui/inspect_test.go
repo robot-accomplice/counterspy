@@ -105,7 +105,7 @@ func TestDrawInspect_MasksSecretUntilRevealed(t *testing.T) {
 			SNI:      "api.evil.example.com",
 			Verdict:  "ENCRYPTED · SNI api.evil.example.com · not decrypted (metadata only)",
 			Coverage: model.InspectMetadata,
-			Content:  "GET /x HTTP/1.1\nAuthorization: Bearer ya29.SECRETTOKENvalue\n",
+			Sent:     "GET /x HTTP/1.1\nAuthorization: Bearer ya29.SECRETTOKENvalue\n",
 		},
 	}
 	drawInspect(s, insp, false)
@@ -134,7 +134,7 @@ func TestRunConsole_InspectEndToEnd(t *testing.T) {
 	fi := &fakeInspector{view: model.InspectView{
 		Verdict:  "plaintext — readable (not encrypted)",
 		Coverage: model.InspectPlaintext,
-		Content:  "POST /steal\nAuthorization: Bearer tok_hunter2exfil_SECRET",
+		Sent:     "POST /steal\nAuthorization: Bearer tok_hunter2exfil_SECRET",
 	}}
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("backuptool", model.Elevated, 900)}}
 	tick := make(chan struct{})
@@ -180,6 +180,32 @@ func TestRunConsole_InspectEndToEnd(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("RunConsole did not exit")
+	}
+}
+
+// Both directions render: the byte-volume activity line for any coverage, and a labelled pane for
+// each non-empty direction. An inbound-active flow (what an established connection usually is) shows
+// its received content, not just "no data".
+func TestDrawInspect_BothDirections(t *testing.T) {
+	s := simInit(t)
+	insp := &inspection{
+		target: inspectTarget{app: "claude", pid: 1, trust: "notarized",
+			conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Proto: "tcp"}},
+		view: model.InspectView{
+			Verdict:   "plaintext — readable (not encrypted)",
+			Coverage:  model.InspectPlaintext,
+			Sent:      "GET /answer HTTP/1.1\n",
+			Received:  "HTTP/1.1 200 OK\n\nhere is the response body",
+			SentBytes: 21,
+			RecvBytes: 4096,
+		},
+	}
+	drawInspect(s, insp, true) // revealed
+	s.Show()
+	for _, want := range []string{"sent", "received", "SENT", "RECEIVED", "here is the response body"} {
+		if !simContains(s, want) {
+			t.Fatalf("bidirectional pane must show %q", want)
+		}
 	}
 }
 

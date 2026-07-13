@@ -66,16 +66,22 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 		drawWrapped(s, marginX, &y, def.Foreground(colDim), "SNI   "+v.SNI, inner)
 	}
 
-	if v.Content != "" {
-		y++
-		label := "CONTENT · masked — r to reveal"
-		content := model.Redact(v.Content)
+	// Activity line: byte volume each direction, shown for ANY coverage so an encrypted flow still
+	// conveys its shape (e.g. a mostly-inbound response stream).
+	if v.SentBytes > 0 || v.RecvBytes > 0 {
+		drawWrapped(s, marginX, &y, def.Foreground(colDim),
+			fmt.Sprintf("↑ %s sent   ↓ %s received", human(uint64(v.SentBytes)), human(uint64(v.RecvBytes))), inner)
+	}
+
+	// Readable content, one pane per non-empty direction, masked by default (§6).
+	if v.Sent != "" || v.Received != "" {
+		hint := "masked — r to reveal"
 		if reveal {
-			label, content = "CONTENT · revealed — r to mask", v.Content
+			hint = "revealed — r to mask"
 		}
-		drawText(s, marginX, y, def.Foreground(colDim).Bold(true), label)
 		y++
-		drawContentPane(s, marginX, y, h-1, inner, content)
+		y = drawDirection(s, marginX, y, h-1, inner, "SENT →", hint, v.Sent, !reveal)
+		drawDirection(s, marginX, y, h-1, inner, "RECEIVED ←", hint, v.Received, !reveal)
 	}
 
 	drawText(s, marginX, h-1, def.Foreground(colDim), truncate(inspectFooter, inner))
@@ -85,17 +91,32 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 // cleaned (so a crafted payload can't inject ANSI/newlines — defense in depth over the adapter's
 // sanitize) then word-wrapped to width so nothing runs off the edge. A payload taller than the
 // pane ends in a truncation marker.
-func drawContentPane(s tcell.Screen, x, y, maxY, width int, content string) {
+func drawContentPane(s tcell.Screen, x, y, maxY, width int, content string) int {
 	for _, raw := range strings.Split(content, "\n") {
 		for _, ln := range wrapText(model.Clean(raw), width) {
 			if y >= maxY {
 				drawText(s, x, maxY-1, tcell.StyleDefault.Foreground(colDim), "… (payload truncated)")
-				return
+				return maxY
 			}
 			drawText(s, x, y, tcell.StyleDefault.Foreground(colText), ln)
 			y++
 		}
 	}
+	return y
+}
+
+// drawDirection draws a labelled content pane for one direction (masked unless revealed) starting
+// at y, and returns the y below it so a second direction can stack beneath. A no-op for empty
+// content or when there's no room left above the footer.
+func drawDirection(s tcell.Screen, x, y, maxY, width int, label, hint, content string, masked bool) int {
+	if content == "" || y >= maxY-1 {
+		return y
+	}
+	if masked {
+		content = model.Redact(content)
+	}
+	drawText(s, x, y, tcell.StyleDefault.Foreground(colDim).Bold(true), label+" · "+hint)
+	return drawContentPane(s, x, y+1, maxY, width, content)
 }
 
 // wrapText word-wraps s to at most width display cells per line, rune-aware: it breaks at the last

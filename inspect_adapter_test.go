@@ -11,27 +11,33 @@ import (
 )
 
 // The coverage mapping is pinned so a future tier added to inspect.Coverage forces a deliberate
-// decision in toInspectView rather than silently defaulting (cp-insC Audit F-3). Payload becomes
-// content ONLY for the plaintext tier; an encrypted/metadata flow never exposes bytes.
+// decision in toInspectView rather than silently defaulting (cp-insC Audit F-3). Readable content
+// is populated ONLY for the plaintext tier; an encrypted/metadata flow exposes byte volumes but
+// never the (cipher)text.
 func TestToInspectView_CoverageMapping(t *testing.T) {
 	cases := []struct {
-		in         inspect.Coverage
-		payload    string
-		want       model.InspectCoverage
-		wantContnt bool
+		in          inspect.Coverage
+		want        model.InspectCoverage
+		wantContent bool
 	}{
-		{inspect.CoverageNone, "", model.InspectNone, false},
-		{inspect.CoverageMetadata, "", model.InspectMetadata, false},
-		{inspect.CoveragePlaintext, "GET / HTTP/1.1\r\n", model.InspectPlaintext, true},
+		{inspect.CoverageNone, model.InspectNone, false},
+		{inspect.CoverageMetadata, model.InspectMetadata, false},
+		{inspect.CoveragePlaintext, model.InspectPlaintext, true},
 	}
 	for _, c := range cases {
-		r := inspect.Result{Coverage: c.in, SNI: "api.example.com", Verdict: "v", Payload: []byte(c.payload)}
+		r := inspect.Result{Coverage: c.in, SNI: "api.example.com", Verdict: "v",
+			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n")}
 		v := toInspectView(r)
 		if v.Coverage != c.want {
 			t.Errorf("coverage %d → %d, want %d", c.in, v.Coverage, c.want)
 		}
-		if (v.Content != "") != c.wantContnt {
-			t.Errorf("coverage %d: content present=%v, want %v", c.in, v.Content != "", c.wantContnt)
+		hasContent := v.Sent != "" || v.Received != ""
+		if hasContent != c.wantContent {
+			t.Errorf("coverage %d: content present=%v, want %v", c.in, hasContent, c.wantContent)
+		}
+		// Byte volumes are always reported, even for encrypted, so the flow's shape is visible.
+		if v.SentBytes == 0 || v.RecvBytes == 0 {
+			t.Errorf("coverage %d: byte volumes must always be reported", c.in)
 		}
 		if v.SNI != "api.example.com" {
 			t.Errorf("SNI must pass through, got %q", v.SNI)

@@ -23,8 +23,15 @@ type InspectView struct {
 	SNI      string
 	Verdict  string // the honest one-line coverage verdict
 	Coverage InspectCoverage
-	Content  string // sanitized plaintext (already through Clean), "" when no tier surfaced any
-	Err      string // capture-failure text, "" when capture succeeded
+	// Sent/Received are the readable payloads each direction (sanitized, already through Clean),
+	// populated only for a plaintext flow — encrypted content is never exposed as text.
+	Sent     string
+	Received string
+	// SentBytes/RecvBytes are the byte volumes each direction, shown for ANY coverage so an
+	// encrypted flow still conveys its shape (e.g. a mostly-inbound response stream).
+	SentBytes int
+	RecvBytes int
+	Err       string // capture-failure text, "" when capture succeeded
 }
 
 // Redaction patterns for the obvious, unambiguous secrets named in spec §6. High-entropy blob
