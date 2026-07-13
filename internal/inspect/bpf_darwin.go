@@ -41,15 +41,22 @@ type bpfCapture struct {
 	pend     [][]byte
 	deadline time.Time // zero = no wall-clock bound
 
-	framesRead int // raw BPF records read (before the link-layer strip)
-	framesKept int // records that survived stripLinkLayer (an IP packet came out)
+	framesRead int    // raw BPF records read (before the link-layer strip)
+	framesKept int    // records that survived stripLinkLayer (an IP packet came out)
+	dropSample []byte // first 16 bytes of the first frame stripLinkLayer rejected (link-header dump)
 }
 
 // Diag reports where the capture pipeline stood, so an empty result is stage-localizable: the DLT
-// the kernel gave us, raw records read, and how many survived the link-layer strip. framesRead=0
-// = nothing off the wire; framesRead>0 & framesKept=0 = the link-layer strip (DLT) dropped it all.
+// the kernel gave us, raw records read, how many survived the link-layer strip, and — when frames
+// were dropped — a hex dump of a rejected frame's link header so the reason is inspectable.
+// framesRead=0 = nothing reached the read (idle, or a kernel filter dropped it upstream);
+// framesRead>0 & framesKept=0 = the link-layer strip rejected everything (drop=... shows why).
 func (c *bpfCapture) Diag() string {
-	return fmt.Sprintf("dlt=%d frames=%d kept=%d", c.dlt, c.framesRead, c.framesKept)
+	s := fmt.Sprintf("dlt=%d frames=%d kept=%d", c.dlt, c.framesRead, c.framesKept)
+	if len(c.dropSample) > 0 {
+		s += fmt.Sprintf(" drop=%x", c.dropSample)
+	}
+	return s
 }
 
 // OpenLiveCapture opens the first free /dev/bpf, binds it to iface in immediate mode, installs a
@@ -179,9 +186,12 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			}
 			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
-		pkts, recs := parseBPFRecords(c.buf[:n], c.dlt)
+		pkts, recs, drop := parseBPFRecords(c.buf[:n], c.dlt)
 		c.framesRead += recs
 		c.framesKept += len(pkts)
+		if c.dropSample == nil && drop != nil {
+			c.dropSample = drop
+		}
 		c.pend = pkts
 	}
 	p := c.pend[0]
@@ -194,9 +204,7 @@ func (c *bpfCapture) Close() error { return unix.Close(c.fd) }
 // parseBPFRecords walks a BPF read buffer (a sequence of bpf_hdr-prefixed, word-aligned frames),
 // strips each frame's link layer, and returns the IP packets plus the total record count walked
 // (records >= len(out); the gap is frames stripLinkLayer rejected — a link-layer/DLT mismatch).
-func parseBPFRecords(buf []byte, dlt uint32) ([][]byte, int) {
-	var out [][]byte
-	records := 0
+func parseBPFRecords(buf []byte, dlt uint32) (out [][]byte, records int, dropSample []byte) {
 	for len(buf) >= int(unix.SizeofBpfHdr) {
 		h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
 		hdrlen, caplen := int(h.Hdrlen), int(h.Caplen)
@@ -204,8 +212,12 @@ func parseBPFRecords(buf []byte, dlt uint32) ([][]byte, int) {
 			break
 		}
 		records++
-		if ip, ok := stripLinkLayer(dlt, buf[hdrlen:hdrlen+caplen]); ok {
+		frame := buf[hdrlen : hdrlen+caplen]
+		if ip, ok := stripLinkLayer(dlt, frame); ok {
 			out = append(out, append([]byte(nil), ip...))
+		} else if dropSample == nil && len(frame) > 0 {
+			n := min(len(frame), 16)
+			dropSample = append([]byte(nil), frame[:n]...) // link header of a rejected frame
 		}
 		adv := bpfWordAlign(hdrlen + caplen)
 		if adv <= 0 || adv > len(buf) {
@@ -213,7 +225,7 @@ func parseBPFRecords(buf []byte, dlt uint32) ([][]byte, int) {
 		}
 		buf = buf[adv:]
 	}
-	return out, records
+	return out, records, dropSample
 }
 
 func bpfWordAlign(n int) int {
