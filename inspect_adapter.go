@@ -32,14 +32,19 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 	if !ok {
 		return model.InspectView{Verdict: "cannot inspect: unparseable remote endpoint"}
 	}
-	src, err := inspect.OpenLiveCapture(outboundInterface(remote), remote, inspectMaxWait)
+	iface := outboundInterface(remote)
+	src, err := inspect.OpenLiveCapture(iface, remote, inspectMaxWait)
 	if err != nil {
 		// Fail loud (§9): the raw error stays on Err for diagnostics; Verdict is the human line.
 		return model.InspectView{Err: err.Error(), Verdict: captureFailVerdict(err)}
 	}
 	defer src.Close()
 	res := inspect.Inspect(src, inspect.Flow{PID: conn.PID, Remote: remote}, inspectMaxPackets)
-	return toInspectView(res)
+	v := toInspectView(res)
+	if v.Coverage == model.InspectNone && v.Err == "" {
+		v.Verdict += " · iface " + iface // name the bound interface so an empty capture is diagnosable
+	}
+	return v
 }
 
 // toInspectView maps an engine Result to the pure TUI view. The coverage switch is exhaustive over

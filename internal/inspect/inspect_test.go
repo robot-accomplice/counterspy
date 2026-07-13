@@ -117,7 +117,7 @@ func TestInspect_NoMatchingTraffic(t *testing.T) {
 	other := netip.MustParseAddrPort("8.8.8.8:443")
 	src := &fixtureSource{packets: [][]byte{ipv4TCP(local, other, []byte("GET / HTTP/1.1\r\n"))}}
 	r := Inspect(src, flow, 20)
-	if r.Coverage != CoverageNone || r.Verdict != "no application data captured" {
+	if r.Coverage != CoverageNone || !strings.Contains(r.Verdict, "no application data captured") {
 		t.Fatalf("want none/no-data, got coverage=%d verdict=%q", r.Coverage, r.Verdict)
 	}
 }

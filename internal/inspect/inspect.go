@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"fmt"
 	"io"
 	"net/netip"
 )
@@ -43,6 +44,7 @@ const maxInspectBytes = 8 << 10
 func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	r := Result{Flow: flow, Coverage: CoverageNone, Tier: "none"}
 	var outbound []byte
+	var seen, matched int // seen = TCP packets on this host past the kernel filter; matched = outbound-to-remote
 	for i := 0; i < maxPackets; i++ {
 		pkt, err := src.Next()
 		if err == io.EOF {
@@ -53,9 +55,14 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 			break
 		}
 		seg, ok := ParseIPPacket(pkt)
-		if !ok || seg.Dst != flow.Remote || len(seg.Payload) == 0 {
+		if !ok {
+			continue
+		}
+		seen++ // a TCP packet that passed the kernel host filter (either direction)
+		if seg.Dst != flow.Remote || len(seg.Payload) == 0 {
 			continue // only outbound (client → target) application segments
 		}
+		matched++
 		outbound = append(outbound, seg.Payload...)
 		// SNI is parsed over the accumulated in-order outbound bytes, so a ClientHello split
 		// across TCP segments still resolves (best-effort reassembly; full reordering is T-10).
@@ -83,7 +90,10 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	case r.Err != nil:
 		r.Verdict = "capture failed: " + r.Err.Error() // honest failure, not a clean "no data"
 	default:
-		r.Verdict = "no application data captured"
+		// Report what the wire showed so an empty result is diagnosable: 0 seen = the flow was
+		// silent during the window (an established connection's ClientHello/SNI is already in the
+		// past); seen>0 but 0 matched = traffic to the host but no fresh outbound payload to read.
+		r.Verdict = fmt.Sprintf("no application data captured (%d packets seen · %d outbound for this flow)", seen, matched)
 	}
 	return r
 }

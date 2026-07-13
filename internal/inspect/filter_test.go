@@ -97,6 +97,17 @@ func TestFlowFilter_EthernetOffset(t *testing.T) {
 	}
 }
 
+// The real-world case: an IPv6 flow behind a 14-byte Ethernet header (en0). This offset+family
+// combination wasn't covered before, and it's exactly the flow that returned no data live.
+func TestFlowFilter_IPv6EthernetOffset(t *testing.T) {
+	host := netip.MustParseAddr("2607:6bc0::10")
+	ip := ipv6TCP(local6(), netip.AddrPortFrom(host, 443), []byte("hi"))
+	eth := append(make([]byte, 14), ip...) // 14-byte Ethernet header + IPv6 packet
+	if !accepts(t, ipv6HostFilter(14, host.As16()), eth) {
+		t.Error("IPv6 filter must match an IPv6 flow behind a 14-byte Ethernet header (the en0 case)")
+	}
+}
+
 // buildFlowFilter dispatches on the remote's family and assembles without error for both.
 func TestBuildFlowFilter_AssemblesBothFamilies(t *testing.T) {
 	for _, ap := range []string{"93.184.216.34:443", "[2606:2800::1]:443"} {
