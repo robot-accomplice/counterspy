@@ -80,13 +80,13 @@ func TestEgressInspect_RevealAndClose(t *testing.T) {
 	m := NewEgress()
 	m.Inspection = &inspection{view: model.InspectView{Verdict: "plaintext — readable (not encrypted)"}}
 
-	m, _ = egressUpdate(m, tcell.KeyRune, 'r')
+	m, _ = egressUpdate(m, tcell.KeyRune, 'v')
 	if !m.Reveal {
-		t.Fatal("`r` should reveal")
+		t.Fatal("`v` should view (reveal)")
 	}
-	m, _ = egressUpdate(m, tcell.KeyRune, 'r')
+	m, _ = egressUpdate(m, tcell.KeyRune, 'v')
 	if m.Reveal {
-		t.Fatal("`r` should toggle back to masked")
+		t.Fatal("`v` should toggle back to masked")
 	}
 	m, _ = egressUpdate(m, tcell.KeyEscape, 0)
 	if m.Inspection != nil {
@@ -160,10 +160,10 @@ func TestRunConsole_InspectEndToEnd(t *testing.T) {
 		t.Fatal("a bearer token must be masked by default (§6)")
 	}
 
-	s.InjectKey(tcell.KeyRune, 'r', tcell.ModNone) // reveal
+	s.InjectKey(tcell.KeyRune, 'v', tcell.ModNone) // view (reveal)
 	step()
 	if !simContains(s, "tok_hunter2exfil_SECRET") {
-		t.Fatal("reveal should expose the content")
+		t.Fatal("view should expose the content")
 	}
 
 	s.InjectKey(tcell.KeyEscape, 0, tcell.ModNone) // back to the tree
@@ -206,6 +206,32 @@ func TestDrawInspect_BothDirections(t *testing.T) {
 		if !simContains(s, want) {
 			t.Fatalf("bidirectional pane must show %q", want)
 		}
+	}
+}
+
+// An encrypted (metadata-only) flow shows byte volume but no readable content. The pane must
+// explain WHY — the bytes are ciphertext, nothing to view — so the volume isn't a silent mystery,
+// and the footer must NOT offer a 'view' action there's nothing to act on.
+func TestDrawInspect_EncryptedExplainsWhyNoContent(t *testing.T) {
+	s := simInit(t)
+	insp := &inspection{
+		target: inspectTarget{app: "claude", pid: 1802, trust: "notarized",
+			conn: model.Conn{Endpoint: model.Endpoint{IP: "2607:6bc0::10", Port: 443}, Proto: "tcp"}},
+		view: model.InspectView{
+			Verdict: "ENCRYPTED · not decrypted (metadata only)", Coverage: model.InspectMetadata,
+			SentBytes: 9216,
+		},
+	}
+	drawInspect(s, insp, false)
+	s.Show()
+	if !simContains(s, "Encrypted") || !simContains(s, "nothing to view") {
+		t.Fatal("an encrypted flow must explain why its bytes can't be viewed")
+	}
+	if simContains(s, "v view") {
+		t.Fatal("the footer must not offer 'view' when there is no plaintext to view")
+	}
+	if !simContains(s, "esc/i back") {
+		t.Fatal("the footer must still offer back/quit")
 	}
 }
 

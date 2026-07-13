@@ -162,8 +162,8 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 		switch {
 		case key == tcell.KeyEscape, r == 'i':
 			m.Inspection, m.Reveal = nil, false // back to the tree
-		case r == 'r':
-			m.Reveal = !m.Reveal // toggle secret masking (§6)
+		case r == 'v':
+			m.Reveal = !m.Reveal // toggle secret masking — view/hide the plaintext (§6)
 		case r == 'Q':
 			return m, true
 		}

@@ -19,11 +19,10 @@ type Inspector interface {
 	Inspect(conn model.Conn) model.InspectView
 }
 
-const inspectFooter = "r reveal · esc/i back · Q quit"
-
-// drawInspect renders the full-screen inspection pane for one flow: header, the honest coverage
-// verdict, metadata (SNI), and — when a tier surfaced plaintext — the content pane, masked by
-// default (§6). It replaces the tree while open.
+// drawInspect renders the full-screen inspection pane for one flow, split into rule-separated
+// sections: the identity header, the honest coverage verdict + metadata (SNI, byte volume), and a
+// content pane — either the plaintext (masked by default, §6) or, when the flow is encrypted, a
+// plain explanation of why there is nothing to view. It replaces the tree while open.
 func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	s.Clear()
 	w, h := s.Size()
@@ -33,10 +32,13 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	}
 	def := tcell.StyleDefault
 	t, v := insp.target, insp.view
-	inner := w - 2*marginX
+	inner := w - marginX - marginR
 
+	// Title band.
 	drawText(s, marginX, 0, def.Foreground(colAccent).Bold(true), "CounterSpy · Inspect")
+	drawHRule(s, 1, w)
 
+	// Identity: which process, to where.
 	glyph := ""
 	if tg := mark.TrustLabel(t.trust); tg != 0 {
 		glyph = " " + string(tg)
@@ -45,11 +47,12 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 		t.app, t.pid, strings.ToUpper(t.conn.Proto), t.conn.Endpoint.IP, t.conn.Endpoint.Port, glyph)
 	y := 2
 	drawWrapped(s, marginX, &y, def.Foreground(colAccent), header, inner)
-	y++ // blank line
+	drawHRule(s, y, w)
+	y++
 
-	// The coverage verdict is the honest headline: plaintext leaving in the clear reads as alarm
-	// (red), an encrypted flow we could only fingerprint reads amber ("this is itself a finding"
-	// per §4), a capture failure reads amber, and a clean no-data reads dim.
+	// Assessment: the coverage verdict is the honest headline — plaintext leaving in the clear reads
+	// as alarm (red), an encrypted flow we could only fingerprint reads amber ("this is itself a
+	// finding" per §4), a capture failure reads amber, a clean no-data reads dim — plus metadata.
 	vcolor := colDim
 	switch {
 	case v.Err != "":
@@ -60,44 +63,76 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 		vcolor = colInvestigate
 	}
 	drawWrapped(s, marginX, &y, def.Foreground(vcolor).Bold(true), v.Verdict, inner)
-	y++ // blank line
-
 	if v.SNI != "" {
 		drawWrapped(s, marginX, &y, def.Foreground(colDim), "SNI   "+v.SNI, inner)
 	}
-
-	// Activity line: byte volume each direction, shown for ANY coverage so an encrypted flow still
-	// conveys its shape (e.g. a mostly-inbound response stream).
+	// Byte volume each direction, shown for ANY coverage so an encrypted flow still conveys its
+	// shape (e.g. a mostly-inbound response stream).
 	if v.SentBytes > 0 || v.RecvBytes > 0 {
 		drawWrapped(s, marginX, &y, def.Foreground(colDim),
 			fmt.Sprintf("↑ %s sent   ↓ %s received", human(uint64(v.SentBytes)), human(uint64(v.RecvBytes))), inner)
 	}
 
-	// Readable content, one pane per non-empty direction, masked by default (§6).
-	if v.Sent != "" || v.Received != "" {
-		hint := "masked — r to reveal"
+	// Content section: a rule opens it, the footer (with its own rule) closes it; the payload lives
+	// between. Whether there is anything to view is the reader's core question, so answer it here.
+	hasContent := v.Sent != "" || v.Received != ""
+	footer := "esc/i back · Q quit"
+	if hasContent {
+		footer = "v view · esc/i back · Q quit"
+	}
+	footerY := h - 1
+	footerRuleY := footerY - 1
+	drawText(s, marginX, footerY, def.Foreground(colDim), truncate(footer, inner))
+	drawHRule(s, footerRuleY, w)
+
+	contentTop := y + 1
+	if contentTop >= footerRuleY {
+		return // no room for a content pane on a short terminal (footer already drawn)
+	}
+	drawHRule(s, y, w) // separate the assessment from the content
+
+	if hasContent {
+		hint := "masked — v to view"
 		if reveal {
-			hint = "revealed — r to mask"
+			hint = "shown — v to hide"
 		}
-		y++
-		// When both directions have content, reserve rows at the bottom for RECEIVED so a long
-		// SENT can't swallow the whole pane and silently hide it (T-15). RECEIVED gets those rows;
-		// each pane truncates within its budget.
-		sentMaxY := h - 1
+		// When both directions have content, split the region so a long SENT can't swallow the pane
+		// and silently hide RECEIVED (T-15); each pane truncates within its budget.
+		sentMaxY := footerRuleY
 		if v.Sent != "" && v.Received != "" {
-			sentMaxY = (y + h - 1) / 2 // split the remaining space between the two directions
-			if sentMaxY < y+2 {
-				sentMaxY = y + 2 // guarantee SENT at least a label + one line before RECEIVED
+			sentMaxY = (contentTop + footerRuleY) / 2
+			if sentMaxY < contentTop+2 {
+				sentMaxY = contentTop + 2
 			}
-			if sentMaxY > h-1 {
-				sentMaxY = h - 1 // never draw past the footer, even on a tiny terminal (cp-hk1 F-1)
+			if sentMaxY > footerRuleY {
+				sentMaxY = footerRuleY
 			}
 		}
-		y = drawDirection(s, marginX, y, sentMaxY, inner, "SENT →", hint, v.Sent, !reveal)
-		drawDirection(s, marginX, y, h-1, inner, "RECEIVED ←", hint, v.Received, !reveal)
+		ny := drawDirection(s, marginX, contentTop, sentMaxY, inner, "SENT →", hint, v.Sent, !reveal)
+		drawDirection(s, marginX, ny, footerRuleY, inner, "RECEIVED ←", hint, v.Received, !reveal)
+		return
 	}
 
-	drawText(s, marginX, h-1, def.Foreground(colDim), truncate(inspectFooter, inner))
+	// No plaintext to show — say so, and why, so the byte volume above isn't a silent mystery.
+	cy := contentTop
+	if why := noContentReason(v); why != "" {
+		drawWrapped(s, marginX, &cy, def.Foreground(colText), why, inner)
+	}
+}
+
+// noContentReason explains, in plain language, why an inspected flow has no viewable payload — the
+// reader's implicit question when they see byte volume but no content. Empty when the verdict itself
+// already carries the reason (a capture error).
+func noContentReason(v model.InspectView) string {
+	switch {
+	case v.Err != "":
+		return "" // the verdict line already states the capture failure
+	case v.Coverage == model.InspectMetadata:
+		return "🔒 Encrypted (TLS): the payload is ciphertext. CounterSpy can measure this flow — how much " +
+			"left and where it went, shown above — but it cannot read the contents, so there is nothing to view."
+	default:
+		return "No application data was captured for this flow."
+	}
 }
 
 // drawContentPane draws the payload from y up to (but not including) maxY: each source line is
