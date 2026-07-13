@@ -422,3 +422,9 @@ directions once plaintext → an encrypted direction could render as text (§6).
 plaintext flags gate each pane; mixed-direction test added. Audit F-3 (process): bidirectional scope was
 maintainer-approved in chat but unrecorded → spec §10.5 + trail. Antag F-3 (RECEIVED pane silent-skip)→T-15.
 Antag F-2 / Audit F-4 (soft cap / shared budget) ACCEPT (bounded/low-risk). No human escalation.
+
+## cp-hk1 (T-14 app-spark prune + T-15 RECEIVED-pane) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet). Audit CLEAN (T-14 prune correctness/determinism, §6, and VERIFIED
+T-9/T-11 implemented in code before the reconcile). Antag F-1 (med): T-15 split clamp y+2 had no upper
+bound → could draw past the footer on a tiny terminal → FIX-NOW (cap sentMaxY at h-1) + F-2 tiny-terminal
+test. No escalation.

@@ -89,6 +89,9 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 			if sentMaxY < y+2 {
 				sentMaxY = y + 2 // guarantee SENT at least a label + one line before RECEIVED
 			}
+			if sentMaxY > h-1 {
+				sentMaxY = h - 1 // never draw past the footer, even on a tiny terminal (cp-hk1 F-1)
+			}
 		}
 		y = drawDirection(s, marginX, y, sentMaxY, inner, "SENT →", hint, v.Sent, !reveal)
 		drawDirection(s, marginX, y, h-1, inner, "RECEIVED ←", hint, v.Received, !reveal)

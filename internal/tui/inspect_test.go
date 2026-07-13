@@ -259,4 +259,23 @@ func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
 	if !simContains(s, "RECVMARKER") {
 		t.Fatal("RECEIVED content must get its reserved space")
 	}
+
+	// At the minimum height (h=6) with both directions, the split must not draw past the footer or
+	// panic — the footer hint must survive (cp-hk1 Antagonist F-1: sentMaxY capped at h-1).
+	for _, h := range []int{6, 7, 8} {
+		s2 := tcell.NewSimulationScreen("")
+		if err := s2.Init(); err != nil {
+			t.Fatal(err)
+		}
+		s2.SetSize(60, h)
+		insp2 := &inspection{
+			target: inspectTarget{app: "x", pid: 1, conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 80}, Proto: "tcp"}},
+			view:   model.InspectView{Verdict: "plaintext — readable", Coverage: model.InspectPlaintext, Sent: strings.Repeat("x\n", 20), Received: "y"},
+		}
+		drawInspect(s2, insp2, true) // must not panic
+		s2.Show()
+		if !simContains(s2, "esc/i back") { // the footer must not be overwritten
+			t.Fatalf("h=%d: the footer must survive the split (not drawn over)", h)
+		}
+	}
 }
