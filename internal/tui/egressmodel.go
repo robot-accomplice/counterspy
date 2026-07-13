@@ -44,10 +44,10 @@ type EgressModel struct {
 	sampled     bool            // a sampler result has arrived at least once (gates the empty-state
 	//                             remediation: before the first sample we're "collecting", not empty)
 
-	// Inspection overlay (spec §4/§5): a modal over the tree, driven off the pure update like
-	// CopyReq — egressUpdate only sets requests; RunConsole performs the capture I/O.
-	Consented  bool           // session-wide inspect consent, granted once (§5)
-	ConsentFor *inspectTarget // consent prompt is open for this target (nil = no prompt)
+	// Inspection overlay (spec §4): a modal over the tree, driven off the pure update like CopyReq —
+	// egressUpdate only sets the request; RunConsole performs the capture I/O. There is NO consent
+	// gate: pressing `i` on your own machine's own flow IS the intent — the boundary that keeps this
+	// counter-spy (own-machine-only) is architectural, not a runtime prompt (maintainer decision).
 	InspectReq *inspectTarget // RunConsole should capture+inspect this target, then clear it
 	Inspection *inspection    // result overlay is open (nil = closed)
 	Reveal     bool           // content pane is revealed (redaction off) for the open inspection
@@ -160,18 +160,6 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 		}
 		return m, false
 	}
-	// The consent prompt is modal: nothing is captured until the user answers y (§5).
-	if m.ConsentFor != nil {
-		switch {
-		case r == 'y', r == 'Y':
-			m.Consented, m.InspectReq, m.ConsentFor = true, m.ConsentFor, nil
-		case r == 'n', r == 'N', key == tcell.KeyEscape:
-			m.ConsentFor = nil
-		case r == 'Q':
-			return m, true
-		}
-		return m, false
-	}
 	m.Status = "" // any key clears the previous transient status
 	rows := m.visibleRows()
 	switch key {
@@ -215,11 +203,7 @@ func (m EgressModel) requestInspect(rows []egressRow) EgressModel {
 		m.Status = hint
 		return m
 	}
-	if m.Consented {
-		m.InspectReq = target
-	} else {
-		m.ConsentFor = target // spec §5: first inspection in a session must be consented
-	}
+	m.InspectReq = target // `i` captures directly — no consent gate (own machine, own data)
 	return m
 }
 

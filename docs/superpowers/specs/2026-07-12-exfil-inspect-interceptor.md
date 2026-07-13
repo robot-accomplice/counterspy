@@ -32,8 +32,10 @@ explicit consent — the same thing EDR, DLP, and developer proxies (Charles,
 Proxyman, mitmproxy) do. It is **not** intercepting third parties' traffic, and it
 is **not** silent. Concretely:
 
-- Inspection is **off by default** and **opt-in per session** (a consent gate before
-  any capture starts), mirroring the feedback loop's posture.
+- Inspection needs no per-use consent: the owner inspecting their own machine's own
+  traffic is the whole point (see §5). It can be disabled wholesale for locked-down
+  deployments via `--no-inspect`. (The feedback-loop analogy does NOT apply — feedback
+  sends data *off* the machine; inspection is local-only, §6.)
 - The most invasive tier (a TLS-terminating proxy + a locally-installed root CA) is
   **never enabled silently** — it requires an explicit, separate consent step that
   states plainly that a CA will be installed and that pinned apps will break.
@@ -118,11 +120,23 @@ the findings/scoring path entirely (observe-only, like the rest of egress).
 
 ## 5. Consent & lifecycle
 
-1. First `i` in a session shows a **consent gate**: "Inspection captures this flow's
-   packets on your own machine. Continue? [y/N]". Nothing is captured before `y`.
-2. Tier 2 (process hooking) and tier 4 (CA + proxy) each require their **own**
-   additional, explicit consent the first time they'd be used, naming the concrete
-   risk (injecting into a process / installing a root CA that breaks pinned apps).
+**No inspection-consent gate (maintainer decision, 2026-07-13).** There is no ethical
+permission to obtain: this is the owner inspecting the exfiltration of *their own* data
+from *their own* machine — the entire purpose of a counter-surveillance tool. Pressing
+`i` on a flow IS the intent; a "do you consent to inspect?" prompt gets the moral
+structure backwards (it treats the owner as the suspect) and only adds friction. The
+boundary that keeps this *counter*-spy — **you inspect your own endpoint, never a third
+party's** — is enforced **architecturally** (endpoint-only, your own NIC, local-only per
+§6), not by a runtime prompt. This supersedes the earlier per-session consent gate and
+the §1.1 "ethical boundary" framing.
+
+1. `i` captures the selected flow directly — no confirmation.
+2. Tiers 2 (process hooking) and 4 (CA + proxy) are *not* an ethics question either, but
+   they DO change system state — injecting a dylib can destabilize the target app; a root
+   CA is system-wide and breaks pinned apps. If they warrant a prompt, it is an
+   **operational-risk confirmation on that specific action** (the class of the quarantine
+   confirmation — "this modifies your system, proceed?"), naming the concrete consequence,
+   **not** a consent-to-inspect gate.
 3. A **`--no-inspect`** flag and a config toggle disable inspection entirely for
    locked-down environments.
 4. Capture stops when the inspection view closes; no background capture persists.

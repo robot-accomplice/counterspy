@@ -32,36 +32,16 @@ func simInit(t *testing.T) tcell.SimulationScreen {
 	return s
 }
 
-// The pure transition gates inspection on consent: the first `i` opens the prompt and requests
-// NOTHING; `y` grants session consent and queues the capture; a later `i` skips the prompt.
-func TestEgressInspect_ConsentGate(t *testing.T) {
-	base := NewEgress().withGroups([]model.EgressGroup{eg("backuptool", model.Elevated, 900)})
-	base, _ = egressUpdate(base, tcell.KeyRight, 0) // expand app → reveals the instance row
-	base.Selected = 1                               // select the instance row
+// `i` on a resolvable row requests the capture directly — there is no consent gate (the user is
+// inspecting their own machine's own traffic; the own-machine-only boundary is architectural).
+func TestEgressInspect_RequestsDirectly(t *testing.T) {
+	m := NewEgress().withGroups([]model.EgressGroup{eg("backuptool", model.Elevated, 900)})
+	m, _ = egressUpdate(m, tcell.KeyRight, 0) // expand app → reveals the instance row
+	m.Selected = 1                            // select the instance row
 
-	prompted, _ := egressUpdate(base, tcell.KeyRune, 'i')
-	if prompted.ConsentFor == nil {
-		t.Fatal("first `i` must open the consent prompt")
-	}
-	if prompted.InspectReq != nil || prompted.Consented {
-		t.Fatal("nothing may be captured before consent (§5)")
-	}
-
-	declined, _ := egressUpdate(prompted, tcell.KeyRune, 'n')
-	if declined.ConsentFor != nil || declined.Consented || declined.InspectReq != nil {
-		t.Fatal("declining consent must cancel with no capture and no standing consent")
-	}
-
-	granted, _ := egressUpdate(prompted, tcell.KeyRune, 'y')
-	if !granted.Consented || granted.InspectReq == nil || granted.ConsentFor != nil {
-		t.Fatal("granting consent must set session consent and queue the capture")
-	}
-
-	// A consented session inspects again with no prompt.
-	granted.InspectReq = nil
-	again, _ := egressUpdate(granted, tcell.KeyRune, 'i')
-	if again.ConsentFor != nil || again.InspectReq == nil {
-		t.Fatal("a consented session must skip the prompt and queue directly")
+	m, _ = egressUpdate(m, tcell.KeyRune, 'i')
+	if m.InspectReq == nil {
+		t.Fatal("`i` on a resolvable row must queue the capture request directly")
 	}
 }
 
@@ -147,9 +127,9 @@ func TestDrawInspect_MasksSecretUntilRevealed(t *testing.T) {
 	}
 }
 
-// End-to-end through RunConsole: no capture is attempted before consent; `y` triggers exactly
-// one capture; the verdict renders; the secret is masked until `r`; esc returns to the tree.
-func TestRunConsole_InspectConsentGateEndToEnd(t *testing.T) {
+// End-to-end through RunConsole: `i` captures directly (no consent gate); the verdict renders;
+// the secret is masked until `r`; esc returns to the tree.
+func TestRunConsole_InspectEndToEnd(t *testing.T) {
 	s := simInit(t)
 	fi := &fakeInspector{view: model.InspectView{
 		Verdict:  "plaintext — readable (not encrypted)",
@@ -168,19 +148,10 @@ func TestRunConsole_InspectConsentGateEndToEnd(t *testing.T) {
 	step()
 	s.InjectKey(tcell.KeyDown, 0, tcell.ModNone) // select the instance row
 	step()
-	s.InjectKey(tcell.KeyRune, 'i', tcell.ModNone) // request inspection → consent prompt
-	step()
-	if fi.calls.Load() != 0 {
-		t.Fatal("capture must not run before consent (§5)")
-	}
-	if !simContains(s, "Inspect this flow?") {
-		t.Fatal("consent prompt should be visible")
-	}
-
-	s.InjectKey(tcell.KeyRune, 'y', tcell.ModNone) // consent → capture
+	s.InjectKey(tcell.KeyRune, 'i', tcell.ModNone) // request inspection → captures immediately
 	step()
 	if fi.calls.Load() != 1 {
-		t.Fatalf("consent must trigger exactly one capture, got %d", fi.calls.Load())
+		t.Fatalf("`i` must trigger exactly one capture (no consent gate), got %d", fi.calls.Load())
 	}
 	if !simContains(s, "plaintext") {
 		t.Fatal("the coverage verdict should render")

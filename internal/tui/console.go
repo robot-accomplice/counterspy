@@ -58,9 +58,6 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 		default:
 			egressView(em, s)
 			drawConsoleTabs(s, mode, m.ReadOnly)
-			if em.ConsentFor != nil { // consent gate over the tree
-				drawConsentPrompt(s, em.ConsentFor)
-			}
 		}
 		s.Show()
 	}
@@ -69,10 +66,9 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 	for {
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventKey:
-			// Tab switches faces only when no exfil overlay owns the screen (an open
-			// inspection/consent modal must not be left dangling behind the other face).
-			overlayOpen := em.Inspection != nil || em.ConsentFor != nil
-			if !overlayOpen && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
+			// Tab switches faces only when the inspection overlay isn't owning the screen (it
+			// must not be left dangling behind the other face).
+			if em.Inspection == nil && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
 				if mode == modeFindings {
 					mode = modeExfil
 					setSampling()
