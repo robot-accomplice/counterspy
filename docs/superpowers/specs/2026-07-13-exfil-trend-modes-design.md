@@ -28,10 +28,10 @@ The core rule: a color family always means the same thing, so toggling never re-
 
 - **Volume → temperature (cold blue → hot red).** Used in **out-only** and **in-only** modes. The
   sparkline's *height* is that direction's rate over time (relative to the row's own recent max, as
-  today), and its *color* is the flow's magnitude **relative to the total volume across all visible
-  flows in the current sample** — the loudest talkers glow red, minor flows stay blue. This
-  **replaces** the current `absIntensity` absolute (fixed bytes/sec) scale, which is an arbitrary
-  anchor that conveys nothing about what's loud *right now*.
+  today), and its *color* is the flow's magnitude **relative to the loudest flow in view (share of
+  peak)** — the biggest talker glows red, minor flows stay blue. This **replaces** the current
+  `absIntensity` absolute (fixed bytes/sec) scale, which is an arbitrary anchor that conveys nothing
+  about what's loud *right now*.
 - **Direction → green → amber.** Used in **combined** mode. Height = **total (in+out)** rate over
   time; color = the flow's lean, `out / (in + out)`, on a **green (inbound / download) → amber
   (outbound / exfil)** ramp. A tall amber bar = a loud uploader (the hunt target); a tall green bar
@@ -40,11 +40,14 @@ The core rule: a color family always means the same thing, so toggling never re-
 Temperature *always* answers "how much," green↔amber *always* answers "which way." Combined never
 uses temperature and single-direction modes never use green↔amber.
 
-### Relative-volume reference
-"Relative to total volume" is computed per rendered frame: the color denominator is the summed rate
-across all visible rows for that sample (a flow doing a large share of all current traffic is hot).
+### Relative-volume reference (share of peak)
+The temperature color is normalized per rendered frame to the **loudest flow in view**: the
+denominator is the maximum rate across all visible rows' sparkline cells that frame, and each cell
+colors as `rate / peak`. The single biggest talker runs red and everything scales beneath it, so a
+lonely trickle stays cold instead of flaring just because it briefly dominates a near-zero total.
 The existing per-row height normalization (relative to the row's own window max) is unchanged — only
-the *color* basis moves from absolute to share-of-total.
+the *color* basis moves from an absolute bytes/sec anchor to share-of-peak. (Combined mode's color is
+direction, not temperature, so this applies only to out-only and in-only modes.)
 
 ## 4. The legend (contextual, colored)
 
