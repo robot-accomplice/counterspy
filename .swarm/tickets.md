@@ -44,3 +44,6 @@
       keyed by path) on dead app keys, like the per-PID/conn rings. Pre-existing for `spark`; cp-tr1
       doubled the surface with `sparkIn`. Bounded by distinct app-paths seen in a session (small), so low.
       Origin: cp-tr1 Audit F-2.
+- [ ] T-15 (sev:low, UX) When both SENT and RECEIVED content panes are present and the terminal is
+      short, the second (RECEIVED) pane can be silently skipped for lack of rows — show a "… (received
+      hidden — resize)" marker or split the space so the user knows it exists. Origin: cp-insE-bidir Antag F-3.

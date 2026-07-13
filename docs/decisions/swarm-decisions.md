@@ -414,3 +414,11 @@ swarm loop in 3 reviewed checkpoints + a gate:
 - Gate (task 10): build/vet/test -race/decoupling-invariant/gofmt/architext all GREEN.
 Display-only throughout; no scoring/sort/collector-command change. Open: T-14 (prune app-level spark+sparkIn).
 Awaits Jon's live eyeball (sudo counterspy console → t to cycle modes).
+
+## cp-insE-bidir (bidirectional inspection) — reviewed 2026-07-13
+Deferred fan-out on the bidirectional change (0a85d8e), run per the standing obligation. Antag CLEAN on
+direction-matching/SNI; Audit found F-1 (HIGH): coverage OR is flow-wide but content was shown for BOTH
+directions once plaintext → an encrypted direction could render as text (§6). FIX-NOW: per-direction
+plaintext flags gate each pane; mixed-direction test added. Audit F-3 (process): bidirectional scope was
+maintainer-approved in chat but unrecorded → spec §10.5 + trail. Antag F-3 (RECEIVED pane silent-skip)→T-15.
+Antag F-2 / Audit F-4 (soft cap / shared budget) ACCEPT (bounded/low-risk). No human escalation.

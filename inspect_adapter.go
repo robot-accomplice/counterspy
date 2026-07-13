@@ -62,8 +62,14 @@ func toInspectView(r inspect.Result) model.InspectView {
 		v.Coverage = model.InspectMetadata // encrypted — volumes only, no readable content exposed
 	case inspect.CoveragePlaintext:
 		v.Coverage = model.InspectPlaintext
-		v.Sent = sanitizeMultiline(string(r.Outbound))
-		v.Received = sanitizeMultiline(string(r.Inbound))
+		// Show each direction's bytes as text ONLY if THAT direction is plaintext — an encrypted
+		// direction is never rendered even when the other direction is readable (§6).
+		if r.OutboundPlaintext {
+			v.Sent = sanitizeMultiline(string(r.Outbound))
+		}
+		if r.InboundPlaintext {
+			v.Received = sanitizeMultiline(string(r.Inbound))
+		}
 	default:
 		v.Coverage = model.InspectNone // unknown/newer tier — honest, never an overclaim
 	}

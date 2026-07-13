@@ -215,6 +215,14 @@ and should follow the safe, always-available metadata tier.
    via cgo, never a shelled `frida`/`dtrace` child (§2). The Phase-B spike targets the
    native mechanism.
 3. **Redaction: mask secrets by default** with a "reveal" toggle (§6). Agreed.
+5. **Bidirectional capture/display (2026-07-13).** §1 framed inspection as "what is it *sending*"
+   (outbound), but an established connection is usually inbound-active (the ClientHello/SNI is in the
+   past), so an outbound-only view read as "no data" while the flow was busy receiving. Inspection now
+   captures BOTH directions: the view shows a `↑ sent / ↓ received` byte-volume line for any coverage
+   (so an encrypted flow still conveys its shape) and a labelled SENT/RECEIVED content pane per
+   direction for plaintext. Exposure is PER-DIRECTION: an encrypted direction's bytes are never shown
+   as text even when the other direction is readable (§6). Sent/Received are still redaction-masked by
+   default with the single reveal toggle, local-only and ephemeral.
 4. **Native-first, narrowly relaxed for a pure-Go filter assembler (2026-07-12, Phase A).** The
    scoped kernel BPF filter (§6 least-privilege) is assembled with `golang.org/x/net/bpf` — a
    pure-Go instruction *assembler* with a VM that validates the filter program against fixture

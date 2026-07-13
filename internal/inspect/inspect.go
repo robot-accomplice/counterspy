@@ -37,7 +37,12 @@ type Result struct {
 	Verdict  string // the honest one-line coverage verdict shown to the user
 	Outbound []byte // application bytes sent to the remote (client → target)
 	Inbound  []byte // application bytes received from the remote (target → client)
-	Err      error  // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
+	// Per-direction plaintext flags: a direction's bytes may be shown as text ONLY when its own
+	// flag is set, so an encrypted direction is never rendered as text even when the OTHER
+	// direction is plaintext (§6 — the coverage OR is flow-wide, but exposure is per-direction).
+	OutboundPlaintext bool
+	InboundPlaintext  bool
+	Err               error // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
 }
 
 // maxInspectBytes bounds how much payload we accumulate for one inspection, across both directions.
@@ -86,9 +91,11 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		}
 	}
 	r.Outbound, r.Inbound = outbound, inbound
+	r.OutboundPlaintext = looksPlaintext(outbound)
+	r.InboundPlaintext = looksPlaintext(inbound)
 
 	switch {
-	case looksPlaintext(outbound) || looksPlaintext(inbound):
+	case r.OutboundPlaintext || r.InboundPlaintext:
 		r.Coverage, r.Tier = CoveragePlaintext, "plaintext"
 		r.Verdict = "plaintext — readable (not encrypted)"
 	case len(outbound) > 0 || len(inbound) > 0:

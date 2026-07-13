@@ -25,8 +25,10 @@ func TestToInspectView_CoverageMapping(t *testing.T) {
 		{inspect.CoveragePlaintext, model.InspectPlaintext, true},
 	}
 	for _, c := range cases {
+		plain := c.in == inspect.CoveragePlaintext
 		r := inspect.Result{Coverage: c.in, SNI: "api.example.com", Verdict: "v",
-			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n")}
+			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n"),
+			OutboundPlaintext: plain, InboundPlaintext: plain}
 		v := toInspectView(r)
 		if v.Coverage != c.want {
 			t.Errorf("coverage %d → %d, want %d", c.in, v.Coverage, c.want)
@@ -35,13 +37,35 @@ func TestToInspectView_CoverageMapping(t *testing.T) {
 		if hasContent != c.wantContent {
 			t.Errorf("coverage %d: content present=%v, want %v", c.in, hasContent, c.wantContent)
 		}
-		// Byte volumes are always reported, even for encrypted, so the flow's shape is visible.
-		if v.SentBytes == 0 || v.RecvBytes == 0 {
-			t.Errorf("coverage %d: byte volumes must always be reported", c.in)
+		// Byte volumes map from the raw bytes and are reported for ANY coverage, so an encrypted
+		// flow still conveys its shape (one direction may legitimately be 0 — not asserted here).
+		if v.SentBytes != len(r.Outbound) || v.RecvBytes != len(r.Inbound) {
+			t.Errorf("coverage %d: byte volumes must equal len(Outbound)/len(Inbound)", c.in)
 		}
 		if v.SNI != "api.example.com" {
 			t.Errorf("SNI must pass through, got %q", v.SNI)
 		}
+	}
+}
+
+// §6: when only ONE direction is plaintext, the encrypted direction's bytes must NOT be shown as
+// text — even though flow-wide coverage is Plaintext. (cp-insE-bidir Audit F-1)
+func TestToInspectView_EncryptedDirectionNotShown(t *testing.T) {
+	r := inspect.Result{
+		Coverage: inspect.CoveragePlaintext, // flow-wide OR: inbound is readable
+		Outbound: []byte("\x16\x03\x01ciphertexthandshake"), OutboundPlaintext: false,
+		Inbound: []byte("HTTP/1.1 200 OK\r\n\r\nreadable body"), InboundPlaintext: true,
+	}
+	v := toInspectView(r)
+	if v.Sent != "" {
+		t.Fatalf("encrypted outbound must NOT be shown as text, got %q", v.Sent)
+	}
+	if v.Received == "" {
+		t.Fatal("the plaintext inbound direction must be shown")
+	}
+	// Both volumes still reported so the encrypted direction's activity is visible.
+	if v.SentBytes == 0 || v.RecvBytes == 0 {
+		t.Fatal("byte volumes for both directions must still be reported")
 	}
 }
 
