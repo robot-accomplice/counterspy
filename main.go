@@ -259,6 +259,13 @@ func collectWithSpinner() ([]model.Evidence, []string) {
 // scanSpinner animates a braille spinner + progress line on w until stop closes.
 func scanSpinner(w io.Writer, done, total *int64, stop <-chan struct{}) {
 	frames := []rune("⣾⣽⣻⢿⡿⣟⣯⣷")
+	// Tint the braille glyph with the shared mint accent (report sMint, 38;5;79 — CounterSpy
+	// chrome); the message stays default. NO_COLOR drops the tint (the caller already gates the
+	// whole spinner on a tty).
+	col, reset := "\033[38;5;79m", "\033[0m"
+	if os.Getenv("NO_COLOR") != "" {
+		col, reset = "", ""
+	}
 	t := time.NewTicker(90 * time.Millisecond)
 	defer t.Stop()
 	for i := 0; ; i++ {
@@ -272,7 +279,7 @@ func scanSpinner(w io.Writer, done, total *int64, stop <-chan struct{}) {
 			if tot > 0 {
 				msg = fmt.Sprintf("checking code signatures  %d/%d", d, tot)
 			}
-			fmt.Fprintf(w, "\r\033[K%c %s", frames[i%len(frames)], msg)
+			fmt.Fprintf(w, "\r\033[K%s%c%s %s", col, frames[i%len(frames)], reset, msg)
 		}
 	}
 }
@@ -435,6 +442,9 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "console: cannot init screen:", err)
 		return 1
 	}
+	// Assert our own window title. Without this the terminal derives the title from the foreground
+	// child process, so it flips to "nettop" every time the egress monitor samples.
+	screen.SetTitle("CounterSpy")
 	// finiOnce guarantees the terminal is restored exactly once no matter which path
 	// (signal, panic, error, or success) triggers it first.
 	var finiOnce sync.Once
