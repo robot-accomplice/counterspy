@@ -40,3 +40,7 @@
       hazard that can EFAULT/corrupt the BIOCSETF filter install (currently swallowed → would silently
       defeat the T-9 filter). Add runtime.KeepAlive(insns) after the syscall. Separate from the
       BIOCSBLEN fix; address as its own change. The filter-drop smoke test may surface it.
+- [ ] T-14 (sev:low, pre-existing) Prune the app-level out+in spark maps (monitor.spark + sparkIn,
+      keyed by path) on dead app keys, like the per-PID/conn rings. Pre-existing for `spark`; cp-tr1
+      doubled the surface with `sparkIn`. Bounded by distinct app-paths seen in a session (small), so low.
+      Origin: cp-tr1 Audit F-2.

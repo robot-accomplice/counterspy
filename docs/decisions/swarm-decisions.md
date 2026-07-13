@@ -378,3 +378,9 @@ The interceptor's live capture is now proven, not just compiled. T-13 (KeepAlive
 follow-up. REMAINING before the Phase A PR: Jon's eyeball on the real interactive console
 (`sudo counterspy console` → i on live TLS), then bundle Phase A → develop (already swarm-reviewed
 per checkpoint) + CI gate. Nothing pushed yet.
+
+## cp-tr1 (in-rate data layer) — reviewed 2026-07-13 (session 3, trend-modes)
+Antagonist(haiku)+Audit(sonnet) on aac1024..65272e1. Antagonist CLEAN. Audit CLEAN on display-only,
+mirror correctness, resource safety (per-PID/conn in-rings pruned), the InRate-was-0 fix. Findings:
+F-1 (low): test gap on in-ring prune + conn-level in-history → FIX-NOW (added TestMonitor_InRingsPruneDeadKeys).
+F-2 (low): app-level sparkIn unpruned, mirrors pre-existing unpruned out spark → DEFER (T-14, prune both).

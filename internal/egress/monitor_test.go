@@ -303,3 +303,48 @@ func TestMonitor_InRateAndInSpark(t *testing.T) {
 			g.Members[0].InRate, g.Members[0].InSpark)
 	}
 }
+
+// The in-rate rings must be bounded like the out-rings: a dead PID / connKey is pruned from
+// sparkInPID and sparkInConn (F-1: without this, a regression dropping the in-ring prune blocks
+// would leak memory undetected on a long-running monitor). Also asserts conn-level InRate/InSpark.
+func TestMonitor_InRingsPruneDeadKeys(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,300000,0\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	groups := m.Sample()
+	if len(m.sparkInPID) != 1 || len(m.sparkInConn) != 1 {
+		t.Fatalf("in-rings must track the live key: pid=%d conn=%d", len(m.sparkInPID), len(m.sparkInConn))
+	}
+	// Conn-level in-rate + in-history are populated on the connection leaf.
+	if c := groups[0].Members[0].Conns; len(c) != 1 || len(c[0].InSpark) == 0 {
+		t.Fatalf("connection must carry in-history, got %+v", groups[0].Members[0].Conns)
+	}
+
+	present = false
+	m.Sample()
+	if len(m.sparkInPID) != 0 {
+		t.Fatalf("dead PID must be pruned from sparkInPID, still have %d", len(m.sparkInPID))
+	}
+	if len(m.sparkInConn) != 0 {
+		t.Fatalf("dead connKey must be pruned from sparkInConn, still have %d", len(m.sparkInConn))
+	}
+}
