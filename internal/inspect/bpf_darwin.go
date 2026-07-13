@@ -220,11 +220,18 @@ func (c *bpfCapture) Close() error { return unix.Close(c.fd) }
 // parseBPFRecords walks a BPF read buffer (a sequence of bpf_hdr-prefixed, word-aligned frames),
 // strips each frame's link layer, and returns the IP packets plus the total record count walked
 // (records >= len(out); the gap is frames stripLinkLayer rejected — a link-layer/DLT mismatch).
+// minBpfHdr is the smallest valid bh_hdrlen: the offset just past the last header field we read.
+// The kernel sets bh_hdrlen to the payload offset, which it varies per datalink to align the frame
+// and can be SMALLER than SizeofBpfHdr (that includes trailing struct padding) — macOS writes 18
+// for Ethernet, 20 for loopback. Guarding against SizeofBpfHdr wrongly rejected every Ethernet
+// record (read succeeds, zero frames parsed); guard against this field-end minimum instead.
+const minBpfHdr = int(unsafe.Offsetof(unix.BpfHdr{}.Hdrlen)) + 2
+
 func parseBPFRecords(buf []byte, dlt uint32) (out [][]byte, records int, dropSample []byte) {
-	for len(buf) >= int(unix.SizeofBpfHdr) {
+	for len(buf) >= minBpfHdr {
 		h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
 		hdrlen, caplen := int(h.Hdrlen), int(h.Caplen)
-		if hdrlen < int(unix.SizeofBpfHdr) || caplen < 0 || hdrlen+caplen > len(buf) {
+		if hdrlen < minBpfHdr || caplen < 0 || hdrlen+caplen > len(buf) {
 			break
 		}
 		records++

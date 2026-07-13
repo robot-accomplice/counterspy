@@ -26,6 +26,30 @@ func bpfRecord(frame []byte) []byte {
 	return buf
 }
 
+// bpfRecordHdrlen frames a record with an explicit bh_hdrlen (the data offset), mirroring how
+// macOS varies it per datalink to align the payload — 18 for Ethernet, not the struct's padded 20.
+func bpfRecordHdrlen(frame []byte, hdrlen int) []byte {
+	buf := make([]byte, bpfWordAlign(hdrlen+len(frame)))
+	h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
+	h.Hdrlen = uint16(hdrlen)
+	h.Caplen = uint32(len(frame))
+	h.Datalen = uint32(len(frame))
+	copy(buf[hdrlen:], frame)
+	return buf
+}
+
+// macOS writes bh_hdrlen=18 for Ethernet (payload-aligned), which is LESS than SizeofBpfHdr (20).
+// The walk must accept it, not reject it as "too small" — the live-capture EFAULT-free-but-empty bug.
+func TestParseBPFRecords_EthernetHdrlen18(t *testing.T) {
+	ip := ipv4TCP(netip.MustParseAddrPort("10.0.0.2:5"), netip.MustParseAddrPort("3.3.3.3:443"), []byte("x"))
+	buf := bpfRecordHdrlen(ethFrame(0x0800, ip), 18) // en0's real header length
+
+	got, records, _ := parseBPFRecords(buf, dltEN10MB)
+	if records != 1 || len(got) != 1 || !bytes.Equal(got[0], ip) {
+		t.Fatalf("a record with bh_hdrlen=18 must parse (records=%d packets=%d)", records, len(got))
+	}
+}
+
 func ethFrame(etherType uint16, payload []byte) []byte {
 	f := make([]byte, 14)
 	binary.BigEndian.PutUint16(f[12:14], etherType)
@@ -60,9 +84,10 @@ func TestParseBPFRecords_EthernetStripAndDropNonIP(t *testing.T) {
 func TestParseBPFRecords_HostileHeadersDontPanic(t *testing.T) {
 	hdrlen := int(unix.SizeofBpfHdr)
 
-	// Hdrlen smaller than the struct → must break immediately.
+	// Hdrlen smaller than the header's own fields (below minBpfHdr) → must break immediately, so
+	// the header bytes can't be mistaken for frame data.
 	tooSmall := make([]byte, hdrlen+8)
-	(*unix.BpfHdr)(unsafe.Pointer(&tooSmall[0])).Hdrlen = uint16(hdrlen - 1)
+	(*unix.BpfHdr)(unsafe.Pointer(&tooSmall[0])).Hdrlen = uint16(minBpfHdr - 1)
 	if got, _, _ := parseBPFRecords(tooSmall, dltRaw); len(got) != 0 {
 		t.Fatalf("under-size Hdrlen must yield nothing, got %d", len(got))
 	}
