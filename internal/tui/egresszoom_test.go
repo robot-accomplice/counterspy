@@ -204,6 +204,48 @@ func TestZoom_ToggleGraphByDest(t *testing.T) {
 	}
 }
 
+// With the destinations box focused (g), arrow keys move the DEST cursor (not the PID cursor), and
+// i inspects the busiest flow to the selected destination.
+func TestZoom_ByDestNavigateAndInspect(t *testing.T) {
+	m := NewEgress().withGroups([]model.EgressGroup{zoomGroupFixture()})
+	m, _ = egressUpdate(m, tcell.KeyRune, 'z')
+	m, _ = egressUpdate(m, tcell.KeyRune, 'g') // focus the destinations box
+	if !m.Zoom.byDest {
+		t.Fatal("g must focus the destinations box")
+	}
+	m, _ = egressUpdate(m, tcell.KeyDown, 0)
+	if m.Zoom.selDest != 1 {
+		t.Fatalf("down must move the DEST cursor, got %d", m.Zoom.selDest)
+	}
+	if m.Zoom.sel != 0 {
+		t.Fatalf("the PID cursor must stay put while destinations are focused, got %d", m.Zoom.sel)
+	}
+	// dests sort by rate desc: [1.2.3.4:443, 5.6.7.8:443]; index 1 → 5.6.7.8:443 → pid 1990.
+	m, _ = egressUpdate(m, tcell.KeyRune, 'i')
+	if m.InspectReq == nil || m.InspectReq.pid != 1990 {
+		t.Fatalf("i must inspect the busiest flow to the selected destination (pid 1990), got %+v", m.InspectReq)
+	}
+}
+
+// The focused box is drawn with an accent border so the user can see where the arrow keys act.
+func TestDrawPanel_FocusHighlightsBorder(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(20, 6)
+	drawPanel(s, 0, 0, 10, 4, "A", true)
+	if _, _, st, _ := s.GetContent(0, 0); fgOf(st) != colSelBar {
+		t.Fatalf("a focused panel border must use the accent color, got %v", fgOf(st))
+	}
+	drawPanel(s, 0, 0, 10, 4, "A", false)
+	if _, _, st, _ := s.GetContent(0, 0); fgOf(st) != colDivider {
+		t.Fatalf("an unfocused panel border must use the divider color, got %v", fgOf(st))
+	}
+}
+
+func fgOf(st tcell.Style) tcell.Color { fg, _, _ := st.Decompose(); return fg }
+
 // The by-destination graph aggregates connections by endpoint, summing each endpoint's history
 // across the PIDs that talk to it (aligned at the newest sample).
 func TestDestSeriesList_AggregatesByEndpoint(t *testing.T) {

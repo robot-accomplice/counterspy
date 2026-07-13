@@ -93,13 +93,18 @@ func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
 	return out
 }
 
-// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border (divider color)
-// — a thin panel frame (unlike the solid-filled modal drawBox), matching the btm reference.
-func drawPanel(s tcell.Screen, x, y, w, h int, title string) {
+// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border — a thin frame
+// (unlike the solid-filled modal drawBox), matching the btm reference. A focused panel gets an
+// accent border + title so the user can see which box the arrow keys drive.
+func drawPanel(s tcell.Screen, x, y, w, h int, title string, focused bool) {
 	if w < 2 || h < 2 {
 		return
 	}
-	st := tcell.StyleDefault.Foreground(colDivider)
+	border, titleColor := colDivider, colDim
+	if focused {
+		border, titleColor = colSelBar, colAccent
+	}
+	st := tcell.StyleDefault.Foreground(border)
 	for i := 1; i < w-1; i++ {
 		s.SetContent(x+i, y, '─', nil, st)
 		s.SetContent(x+i, y+h-1, '─', nil, st)
@@ -113,13 +118,17 @@ func drawPanel(s tcell.Screen, x, y, w, h int, title string) {
 	s.SetContent(x, y+h-1, '└', nil, st)
 	s.SetContent(x+w-1, y+h-1, '┘', nil, st)
 	if title != "" {
-		drawText(s, x+2, y, tcell.StyleDefault.Foreground(colDim), truncate(" "+title+" ", w-4))
+		ts := tcell.StyleDefault.Foreground(titleColor)
+		if focused {
+			ts = ts.Bold(true)
+		}
+		drawText(s, x+2, y, ts, truncate(" "+title+" ", w-4))
 	}
 }
 
-// drawEgressZoom renders the full-screen btm-style zoom dashboard for m.Zoom's group: a per-PID
-// throughput graph, a selectable PID table (rates + %-of-group share), the destinations, and the
-// group metadata with the key hints on its border.
+// drawEgressZoom renders the full-screen btm-style zoom dashboard for m.Zoom's group. `g` moves
+// focus between the PIDs box and the destinations box: the focused box gets an accent border, its
+// cursor drives the graph emphasis, and the graph groups its lines to match (by PID or by dest).
 func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	s.Clear()
 	w, h := s.Size()
@@ -129,9 +138,19 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 		return
 	}
 	members := zoomedMembers(g)
-	sel := m.Zoom.sel
-	if sel >= len(members) {
-		sel = len(members) - 1
+	dests := zoomDests(g)
+	byDest := m.Zoom.byDest
+	selPID := clamp(m.Zoom.sel, len(members))
+	selDest := clamp(m.Zoom.selDest, len(dests))
+
+	// Emphasis (the line drawn on top) is the focused box's selection.
+	emphPID, emphEp := -1, ""
+	if byDest {
+		if selDest < len(dests) {
+			emphEp = dests[selDest].ep
+		}
+	} else if selPID < len(members) {
+		emphPID = members[selPID].PID
 	}
 
 	topH := (h - 1) / 2
@@ -140,31 +159,19 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	}
 	leftW := w * 62 / 100
 
-	drawZoomGraph(s, 0, 0, leftW, topH, g, members, sel, m.Zoom.mode, m.Zoom.byDest)
-	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, sel)
+	drawZoomGraph(s, 0, 0, leftW, topH, g, members, m.Zoom.mode, byDest, emphPID, emphEp)
+	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, selPID, !byDest)
 	botY, botH := topH, h-topH
-	drawZoomDests(s, 0, botY, leftW, botH, g, members, sel, m.Zoom.byDest)
+	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest)
 	drawZoomMeta(s, leftW, botY, w-leftW, botH, g)
 }
 
-// selectedDestKey is the "ip:port" the selected PID sends the most to — the destination the graph
-// emphasizes in by-destination mode, so the table selection stays meaningful in both graph modes.
-func selectedDestKey(members []model.EgressInstance, sel int) string {
-	if sel < 0 || sel >= len(members) {
-		return ""
-	}
-	if c := busiestConn(members[sel].Conns); c != nil {
-		return fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)
-	}
-	return ""
-}
-
-func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, mode trendMode, byDest bool) {
+func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, mode trendMode, byDest bool, emphPID int, emphEp string) {
 	noun, grouping, nLines := "pid(s)", "by pid", len(members)
 	if byDest {
 		noun, grouping, nLines = "dest(s)", "by dest", len(destSeriesList(g, mode))
 	}
-	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · egress · %d %s · %s · %s", g.App, nLines, noun, grouping, trendWord(mode)))
+	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · egress · %d %s · %s · %s", g.App, nLines, noun, grouping, trendWord(mode)), false)
 	ix, iy, iw, ih := x+1, y+1, w-2, h-2
 	if iw < 10 || ih < 3 {
 		return
@@ -177,24 +184,19 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	// Build the lines in a STABLE order (by PID, or by endpoint string for destinations): where lines
 	// overlap a cell, plotSeries gives it to the last-plotted series, so a rate-driven reshuffle would
 	// flip the color of already-rendered historical cells (observed flicker). A fixed order makes the
-	// overlap winner deterministic. Emphasis (drawn on top) follows the table selection in both modes.
+	// overlap winner deterministic. Emphasis (drawn on top) is the focused box's selection.
 	var series []graphSeries
 	var maxY uint64
 	if byDest {
-		selDest := selectedDestKey(members, sel)
 		for _, d := range destSeriesList(g, mode) {
 			for _, v := range d.vals {
 				if v > maxY {
 					maxY = v
 				}
 			}
-			series = append(series, graphSeries{values: d.vals, color: destLineColor(d.ep), emphasized: d.ep == selDest})
+			series = append(series, graphSeries{values: d.vals, color: destLineColor(d.ep), emphasized: d.ep == emphEp})
 		}
 	} else {
-		selPID := -1
-		if sel >= 0 && sel < len(members) {
-			selPID = members[sel].PID
-		}
 		byPID := append([]model.EgressInstance(nil), members...)
 		sort.SliceStable(byPID, func(i, j int) bool { return byPID[i].PID < byPID[j].PID })
 		for _, mem := range byPID {
@@ -204,7 +206,7 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 					maxY = v
 				}
 			}
-			series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: mem.PID == selPID})
+			series = append(series, graphSeries{values: vals, color: pidLineColor(mem.PID), emphasized: mem.PID == emphPID})
 		}
 	}
 	grid := plotSeries(series, plotCols, plotRows, maxY)
@@ -226,8 +228,8 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	drawText(s, ix+iw-len([]rune(totals)), iy+ih-1, tcell.StyleDefault.Foreground(colDim), totals)
 }
 
-func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int) {
-	drawPanel(s, x, y, w, h, "PIDs")
+func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, focused bool) {
+	drawPanel(s, x, y, w, h, "PIDs", focused)
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
 		return
@@ -241,7 +243,7 @@ func drawZoomPIDs(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members [
 		share := pidShare(mem.OutRate, g.OutRate)
 		line := fmt.Sprintf("%5d  %6s  %5s  %s%3d%%  ", mem.PID, human(mem.OutRate), human(mem.InRate), shareBar(share, 4), share)
 		st := tcell.StyleDefault.Foreground(colText)
-		if i == sel {
+		if i == sel && focused { // the cursor only shows in the focused box (arrows drive it)
 			st = st.Background(colSelBg).Bold(true)
 			s.SetContent(x+1, row, '▸', nil, tcell.StyleDefault.Foreground(colSelBar))
 		}
@@ -270,36 +272,14 @@ func shareBar(pct, n int) string {
 	return string(b)
 }
 
-func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, sel int, byDest bool) {
-	drawPanel(s, x, y, w, h, "destinations")
+func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool) {
+	drawPanel(s, x, y, w, h, "destinations", focused)
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
 		return
 	}
-	agg := map[string]uint64{}
-	for _, c := range g.Conns {
-		agg[fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)] += c.OutRate
-	}
-	type dest struct {
-		ep   string
-		rate uint64
-	}
-	ds := make([]dest, 0, len(agg))
-	for ep, r := range agg {
-		ds = append(ds, dest{ep, r})
-	}
-	sort.SliceStable(ds, func(i, j int) bool {
-		if ds[i].rate != ds[j].rate {
-			return ds[i].rate > ds[j].rate
-		}
-		return ds[i].ep < ds[j].ep
-	})
-	// In by-destination graph mode this panel is the color legend: swatch each row to its graph line
-	// and highlight the endpoint the graph emphasizes (the selected PID's busiest destination).
-	selDest := ""
-	if byDest {
-		selDest = selectedDestKey(members, sel)
-	}
+	// When this box is focused it's the graph's color legend: swatch each row to its graph line and
+	// show the cursor on the emphasized endpoint (which the arrow keys drive).
 	for i, d := range ds {
 		row := iy + i
 		if row >= y+h-1 {
@@ -308,11 +288,12 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 		share := pidShare(d.rate, g.OutRate)
 		st := tcell.StyleDefault.Foreground(colText)
 		tx := ix
-		if byDest {
+		if focused {
 			drawText(s, ix, row, tcell.StyleDefault.Foreground(destLineColor(d.ep)), "■")
 			tx = ix + 2
-			if d.ep == selDest {
+			if i == sel {
 				st = st.Background(colSelBg).Bold(true)
+				s.SetContent(x+1, row, '▸', nil, tcell.StyleDefault.Foreground(colSelBar))
 			}
 		}
 		drawText(s, tx, row, st,
@@ -321,7 +302,7 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 }
 
 func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
-	drawPanel(s, x, y, w, h, "this group")
+	drawPanel(s, x, y, w, h, "this group", false)
 	ix, iy, iw := x+2, y+1, w-4
 	lines := []string{model.Clean(fmt.Sprintf("%s · %s · cadence: %s", g.Trust, bgLabel(g.Background), g.Cadence))}
 	if len(g.Capabilities) > 0 {

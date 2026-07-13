@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -67,13 +68,15 @@ type EgressModel struct {
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
 // samples flow in), the selected PID index within the sorted members, and the graph metric mode.
 type zoomState struct {
-	app    string
-	sel    int
-	mode   trendMode
-	byDest bool // graph groups lines by destination (g) instead of by PID
+	app     string
+	sel     int       // cursor in the PIDs box
+	selDest int       // cursor in the destinations box
+	mode    trendMode // graph metric: out / in / combined
+	byDest  bool      // focus + graph grouping: destinations box (true) vs PIDs box (false)
 }
 
 func (z *zoomState) withSel(sel int) *zoomState      { c := *z; c.sel = sel; return &c }
+func (z *zoomState) withSelDest(i int) *zoomState    { c := *z; c.selDest = i; return &c }
 func (z *zoomState) withMode(m trendMode) *zoomState { c := *z; c.mode = m; return &c }
 func (z *zoomState) withByDest(b bool) *zoomState    { c := *z; c.byDest = b; return &c }
 
@@ -102,6 +105,78 @@ func (m EgressModel) zoomGroup() (model.EgressGroup, bool) {
 		}
 	}
 	return model.EgressGroup{}, false
+}
+
+// destRate is one destination endpoint's aggregated out-rate, for the destinations box.
+type destRate struct {
+	ep   string
+	rate uint64
+}
+
+// zoomDests aggregates a group's connections by endpoint and sorts by out-rate desc (loud first),
+// stable by endpoint. Shared by the destinations panel, its cursor navigation, and the by-dest graph.
+func zoomDests(g model.EgressGroup) []destRate {
+	agg := map[string]uint64{}
+	for _, c := range g.Conns {
+		agg[fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)] += c.OutRate
+	}
+	ds := make([]destRate, 0, len(agg))
+	for ep, r := range agg {
+		ds = append(ds, destRate{ep, r})
+	}
+	sort.SliceStable(ds, func(i, j int) bool {
+		if ds[i].rate != ds[j].rate {
+			return ds[i].rate > ds[j].rate
+		}
+		return ds[i].ep < ds[j].ep
+	})
+	return ds
+}
+
+// busiestConnTo returns the highest-out-rate connection to an "ip:port" endpoint (across PIDs) —
+// the concrete flow `i` inspects when a destination is selected.
+func busiestConnTo(g model.EgressGroup, ep string) *model.Conn {
+	var best *model.Conn
+	for i := range g.Conns {
+		c := &g.Conns[i]
+		if fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port) == ep {
+			if best == nil || c.OutRate > best.OutRate {
+				best = c
+			}
+		}
+	}
+	return best
+}
+
+// zoomInspectTarget resolves the flow to inspect from the FOCUSED box: the selected PID's busiest
+// connection, or the busiest connection to the selected destination. nil if nothing resolvable.
+func zoomInspectTarget(g model.EgressGroup, members []model.EgressInstance, dests []destRate, z *zoomState) *inspectTarget {
+	if z.byDest {
+		if z.selDest >= len(dests) {
+			return nil
+		}
+		c := busiestConnTo(g, dests[z.selDest].ep)
+		if c == nil {
+			return nil
+		}
+		trust := ""
+		for _, mem := range members {
+			if mem.PID == c.PID {
+				trust = mem.Trust
+				break
+			}
+		}
+		return &inspectTarget{app: g.App, pid: c.PID, trust: trust, conn: *c}
+	}
+	if z.sel >= len(members) {
+		return nil
+	}
+	mem := members[z.sel]
+	c := busiestConn(mem.Conns)
+	if c == nil {
+		return nil
+	}
+	return &inspectTarget{app: g.App, pid: mem.PID, trust: mem.Trust, conn: *c}
 }
 
 // pidShare is a member's percentage of the group's total out-rate (0..100), 0 when the group is
@@ -233,27 +308,33 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 			return m, false
 		}
 		members := zoomedMembers(g)
-		// Re-clamp the selection against the freshly-resolved members EVERY keypress, not only on
-		// up/down: a group can gain/lose PIDs between ticks, and a stale sel would make `i` a silent
-		// no-op or leave sel negative (cp-zoom Audit F3 / Antagonist F1). Single source of truth.
-		m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel, len(members)))
+		dests := zoomDests(g)
+		// Re-clamp BOTH box cursors against the freshly-resolved lists EVERY keypress, not only on
+		// up/down: a group can gain/lose PIDs or destinations between ticks, and a stale cursor would
+		// make `i` a silent no-op or go negative (cp-zoom Audit F3 / Antagonist F1). One source of truth.
+		m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel, len(members))).withSelDest(clamp(m.Zoom.selDest, len(dests)))
+		// Arrow keys navigate the FOCUSED box (destinations when byDest, else PIDs).
+		nav := func(delta int) {
+			if m.Zoom.byDest {
+				m.Zoom = m.Zoom.withSelDest(clamp(m.Zoom.selDest+delta, len(dests)))
+			} else {
+				m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel+delta, len(members)))
+			}
+		}
 		switch {
 		case key == tcell.KeyEscape, r == 'z':
 			m.Zoom = nil
 		case key == tcell.KeyUp, r == 'k':
-			m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel-1, len(members)))
+			nav(-1)
 		case key == tcell.KeyDown, r == 'j':
-			m.Zoom = m.Zoom.withSel(clamp(m.Zoom.sel+1, len(members)))
+			nav(+1)
 		case r == 't':
 			m.Zoom = m.Zoom.withMode((m.Zoom.mode + 1) % 3)
 		case r == 'g':
-			m.Zoom = m.Zoom.withByDest(!m.Zoom.byDest) // toggle graph grouping: by PID ⇄ by destination
+			m.Zoom = m.Zoom.withByDest(!m.Zoom.byDest) // move focus: PIDs box ⇄ destinations box
 		case r == 'i':
-			if m.Zoom.sel < len(members) {
-				mem := members[m.Zoom.sel]
-				if c := busiestConn(mem.Conns); c != nil {
-					m.InspectReq = &inspectTarget{app: g.App, pid: mem.PID, trust: mem.Trust, conn: *c}
-				}
+			if tgt := zoomInspectTarget(g, members, dests, m.Zoom); tgt != nil {
+				m.InspectReq = tgt
 			}
 		case r == 'Q':
 			return m, true
