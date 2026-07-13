@@ -286,7 +286,7 @@ func TestEgressView_SparklineDownsampledAndColumnsAligned(t *testing.T) {
 	s.Show()
 
 	cols := computeCols(120)
-	row := 2 // first data row (row 0 = title, row 1 = header, row 2 = first group)
+	row := 4 // first data row (0 title, 1 rule, 2 header, 3 rule, 4 first group)
 
 	glyphs := 0
 	for x := cols.trendX; x < cols.trendX+trendW; x++ {
@@ -312,6 +312,40 @@ func TestEgressView_SparklineDownsampledAndColumnsAligned(t *testing.T) {
 	}
 	if !strings.Contains(concern.String(), model.Low.String()) {
 		t.Fatalf("CONCERN column misaligned, got %q at x=%d", concern.String(), cols.concernX)
+	}
+}
+
+// The exfil view is split into panes by light rules: one under the title (row 1), one under the
+// column headers (row 3), and one directly above the footer usage line — so the title, labels,
+// values, and controls read as separate sections instead of one dense block.
+func TestEgressView_SectionSeparators(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	const h = 40
+	s.SetSize(120, h)
+	m := NewEgress().withGroups([]model.EgressGroup{eg("backuptool", model.Elevated, 900)})
+	m.Selected = 0 // select the app row so the detail pane (and its rule) render too
+	egressView(m, s)
+	s.Show()
+
+	isRule := func(y int) bool {
+		r, _, _, _ := s.GetContent(marginX, y)
+		return r == '─'
+	}
+	if !isRule(1) {
+		t.Error("expected a rule between the title and the column headers (row 1)")
+	}
+	if !isRule(3) {
+		t.Error("expected a rule between the column headers and the values (row 3)")
+	}
+	if !isRule(h - 2) {
+		t.Error("expected a rule between the legend and the usage guide (row h-2)")
+	}
+	// The headers moved down a row to make room for the title rule.
+	if r, _, _, _ := s.GetContent(computeCols(120).appX, 2); r != 'A' {
+		t.Errorf("APP / PROCESS header should sit on row 2, got %q", r)
 	}
 }
 

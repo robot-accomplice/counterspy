@@ -412,21 +412,46 @@ func egressView(m EgressModel, s tcell.Screen) {
 	drawText(s, w-len(statusLine)-marginR, 0, tcell.StyleDefault.Foreground(statusColor), statusLine)
 
 	cols := computeCols(w)
-	headerY := 1
+	// Header band: a rule under the title, the column headers, then a rule under the headers, so
+	// the title, the labels and the values each read as their own pane (not one dense block).
+	drawHRule(s, 1, w)
+	headerY := 2
 	drawText(s, cols.appX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("APP / PROCESS", cols.appW))
 	drawText(s, cols.trustX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TRUST", trustW))
 	drawText(s, cols.rateX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("OUT↑", rateW))
 	drawText(s, cols.trendX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("TREND "+trendGlyph(m.Trend), trendW))
 	drawText(s, cols.destX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("DESTINATIONS", cols.destW))
 	drawText(s, cols.concernX, headerY, tcell.StyleDefault.Foreground(colDim), truncate("CONCERN", concernW))
+	drawHRule(s, 3, w)
+	tableTop := 4
 
 	rows := m.visibleRows()
-	footerY := h - 1
-	legendY := footerY - 1 // the contextual trend legend sits directly above the footer
 	detail := detailLines(rows, m.Selected, w-marginX-marginR)
-	tableBottom := legendY - 1 - len(detail)
 
-	tableTop := headerY + 1
+	// Bottom deck, anchored to the last row and stacked upward: usage guide, a rule, the trend
+	// legend, a rule, the detail block, and a rule that closes the table off from it. Each rule is
+	// only drawn if it clears the header band, so a short terminal degrades by dropping the
+	// lowest-priority separators rather than overprinting the table.
+	footerY := h - 1
+	legendUsageRuleY := footerY - 1
+	legendY := footerY - 2
+	detailLegendRuleY := legendY - 1
+	tableBottom := detailLegendRuleY - 1 // with no detail, this rule doubles as the table|legend split
+	if len(detail) > 0 {
+		detailBottom := detailLegendRuleY - 1
+		detailTop := detailBottom - len(detail) + 1
+		tableDetailRuleY := detailTop - 1
+		tableBottom = tableDetailRuleY - 1
+		for i, line := range detail {
+			y := detailTop + i
+			if y <= tableTop { // never draw the detail over the table/header on a tiny terminal
+				continue
+			}
+			drawText(s, marginX, y, tcell.StyleDefault.Foreground(colDim), model.Clean(truncate(line, w-marginX-marginR)))
+		}
+		drawHRule(s, tableDetailRuleY, w)
+	}
+
 	if len(rows) == 0 {
 		hint := collectingHint // haven't sampled yet — don't accuse the user of a misconfig
 		if m.sampled {
@@ -450,20 +475,26 @@ func egressView(m EgressModel, s tcell.Screen) {
 		}
 	}
 
-	if len(detail) > 0 {
-		base := legendY - len(detail)
-		for i, line := range detail {
-			if base+i <= headerY { // never draw the detail over the title/column header (tiny terminal)
-				continue
-			}
-			drawText(s, marginX, base+i, tcell.StyleDefault.Foreground(colDim), model.Clean(truncate(line, w-marginX-marginR)))
-		}
-	}
-
-	if legendY > headerY { // skip the legend if there's no room for it above the footer
+	if legendY > tableTop { // skip the legend + its rule if there's no room above the footer
+		drawHRule(s, detailLegendRuleY, w)
 		drawTrendLegend(s, legendY, w-marginR, m.Trend)
 	}
+	drawHRule(s, legendUsageRuleY, w)
 	drawText(s, marginX, footerY, tcell.StyleDefault.Foreground(colDim), truncate(footerHint, w-marginX-marginR))
+}
+
+// drawHRule draws a thin panel-divider rule across the content columns at row y — a light separator
+// between sections, not a full box (no verticals/corners). Guarded so it never lands on the title
+// row or off-screen.
+func drawHRule(s tcell.Screen, y, w int) {
+	if y < 1 {
+		return
+	}
+	n := w - marginX - marginR
+	if n < 1 {
+		return
+	}
+	drawText(s, marginX, y, tcell.StyleDefault.Foreground(colDivider), strings.Repeat("─", n))
 }
 
 func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int) {
