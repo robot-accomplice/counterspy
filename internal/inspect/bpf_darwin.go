@@ -47,6 +47,8 @@ type bpfCapture struct {
 	framesRead int    // raw BPF records read (before the link-layer strip)
 	framesKept int    // records that survived stripLinkLayer (an IP packet came out)
 	dropSample []byte // first 16 bytes of the first frame stripLinkLayer rejected (link-header dump)
+	firstReadN int    // byte count of the first read that returned data
+	firstBuf   []byte // first 32 bytes of that read (the raw bpf_hdr, for layout inspection)
 }
 
 // Diag reports where the capture pipeline stood, so an empty result is stage-localizable: the DLT
@@ -55,8 +57,11 @@ type bpfCapture struct {
 // framesRead=0 = nothing reached the read (idle, or a kernel filter dropped it upstream);
 // framesRead>0 & framesKept=0 = the link-layer strip rejected everything (drop=... shows why).
 func (c *bpfCapture) Diag() string {
-	s := fmt.Sprintf("dlt=%d reads=%d bytes=%d eagain=%d frames=%d kept=%d",
-		c.dlt, c.readCalls, c.bytesRead, c.eagains, c.framesRead, c.framesKept)
+	s := fmt.Sprintf("dlt=%d szhdr=%d reads=%d bytes=%d eagain=%d frames=%d kept=%d",
+		c.dlt, unix.SizeofBpfHdr, c.readCalls, c.bytesRead, c.eagains, c.framesRead, c.framesKept)
+	if len(c.firstBuf) > 0 {
+		s += fmt.Sprintf(" n0=%d buf0=%x", c.firstReadN, c.firstBuf)
+	}
 	if len(c.dropSample) > 0 {
 		s += fmt.Sprintf(" drop=%x", c.dropSample)
 	}
@@ -193,6 +198,10 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
 		c.bytesRead += n
+		if c.firstBuf == nil && n > 0 { // stash the raw head of the first data read for inspection
+			c.firstReadN = n
+			c.firstBuf = append([]byte(nil), c.buf[:min(n, 32)]...)
+		}
 		pkts, recs, drop := parseBPFRecords(c.buf[:n], c.dlt)
 		c.framesRead += recs
 		c.framesKept += len(pkts)
