@@ -41,6 +41,9 @@ type bpfCapture struct {
 	pend     [][]byte
 	deadline time.Time // zero = no wall-clock bound
 
+	readCalls  int    // read() attempts made
+	bytesRead  int    // total bytes returned by successful reads
+	eagains    int    // reads that returned EAGAIN (nothing buffered this instant)
 	framesRead int    // raw BPF records read (before the link-layer strip)
 	framesKept int    // records that survived stripLinkLayer (an IP packet came out)
 	dropSample []byte // first 16 bytes of the first frame stripLinkLayer rejected (link-header dump)
@@ -52,7 +55,8 @@ type bpfCapture struct {
 // framesRead=0 = nothing reached the read (idle, or a kernel filter dropped it upstream);
 // framesRead>0 & framesKept=0 = the link-layer strip rejected everything (drop=... shows why).
 func (c *bpfCapture) Diag() string {
-	s := fmt.Sprintf("dlt=%d frames=%d kept=%d", c.dlt, c.framesRead, c.framesKept)
+	s := fmt.Sprintf("dlt=%d reads=%d bytes=%d eagain=%d frames=%d kept=%d",
+		c.dlt, c.readCalls, c.bytesRead, c.eagains, c.framesRead, c.framesKept)
 	if len(c.dropSample) > 0 {
 		s += fmt.Sprintf(" drop=%x", c.dropSample)
 	}
@@ -175,9 +179,11 @@ func (c *bpfCapture) Next() ([]byte, error) {
 		if !c.deadline.IsZero() && time.Now().After(c.deadline) {
 			return nil, io.EOF // capture window elapsed — a clean end, not a failure
 		}
+		c.readCalls++
 		n, err := unix.Read(c.fd, c.buf)
 		if err != nil {
 			if err == unix.EAGAIN { // no packets buffered — sleep briefly, then re-check the deadline
+				c.eagains++
 				time.Sleep(readPoll)
 				continue
 			}
@@ -186,6 +192,7 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			}
 			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
+		c.bytesRead += n
 		pkts, recs, drop := parseBPFRecords(c.buf[:n], c.dlt)
 		c.framesRead += recs
 		c.framesKept += len(pkts)
