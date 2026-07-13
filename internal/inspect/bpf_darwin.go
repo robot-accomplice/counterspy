@@ -40,6 +40,16 @@ type bpfCapture struct {
 	buf      []byte
 	pend     [][]byte
 	deadline time.Time // zero = no wall-clock bound
+
+	framesRead int // raw BPF records read (before the link-layer strip)
+	framesKept int // records that survived stripLinkLayer (an IP packet came out)
+}
+
+// Diag reports where the capture pipeline stood, so an empty result is stage-localizable: the DLT
+// the kernel gave us, raw records read, and how many survived the link-layer strip. framesRead=0
+// = nothing off the wire; framesRead>0 & framesKept=0 = the link-layer strip (DLT) dropped it all.
+func (c *bpfCapture) Diag() string {
+	return fmt.Sprintf("dlt=%d frames=%d kept=%d", c.dlt, c.framesRead, c.framesKept)
 }
 
 // OpenLiveCapture opens the first free /dev/bpf, binds it to iface in immediate mode, installs a
@@ -169,7 +179,10 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			}
 			return nil, fmt.Errorf("bpf read: %w", err) // localizes a read failure vs a setup ioctl
 		}
-		c.pend = parseBPFRecords(c.buf[:n], c.dlt)
+		pkts, recs := parseBPFRecords(c.buf[:n], c.dlt)
+		c.framesRead += recs
+		c.framesKept += len(pkts)
+		c.pend = pkts
 	}
 	p := c.pend[0]
 	c.pend = c.pend[1:]
@@ -179,15 +192,18 @@ func (c *bpfCapture) Next() ([]byte, error) {
 func (c *bpfCapture) Close() error { return unix.Close(c.fd) }
 
 // parseBPFRecords walks a BPF read buffer (a sequence of bpf_hdr-prefixed, word-aligned frames),
-// strips each frame's link layer, and returns the IP packets.
-func parseBPFRecords(buf []byte, dlt uint32) [][]byte {
+// strips each frame's link layer, and returns the IP packets plus the total record count walked
+// (records >= len(out); the gap is frames stripLinkLayer rejected — a link-layer/DLT mismatch).
+func parseBPFRecords(buf []byte, dlt uint32) ([][]byte, int) {
 	var out [][]byte
+	records := 0
 	for len(buf) >= int(unix.SizeofBpfHdr) {
 		h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
 		hdrlen, caplen := int(h.Hdrlen), int(h.Caplen)
 		if hdrlen < int(unix.SizeofBpfHdr) || caplen < 0 || hdrlen+caplen > len(buf) {
 			break
 		}
+		records++
 		if ip, ok := stripLinkLayer(dlt, buf[hdrlen:hdrlen+caplen]); ok {
 			out = append(out, append([]byte(nil), ip...))
 		}
@@ -197,7 +213,7 @@ func parseBPFRecords(buf []byte, dlt uint32) [][]byte {
 		}
 		buf = buf[adv:]
 	}
-	return out
+	return out, records
 }
 
 func bpfWordAlign(n int) int {

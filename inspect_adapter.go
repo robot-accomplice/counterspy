@@ -43,6 +43,9 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 	v := toInspectView(res)
 	if v.Coverage == model.InspectNone && v.Err == "" {
 		v.Verdict += " · iface " + iface // name the bound interface so an empty capture is diagnosable
+		if d, ok := src.(interface{ Diag() string }); ok {
+			v.Verdict += " · " + d.Diag() // dlt + raw-frames-read + frames-kept: which pipeline stage dropped
+		}
 	}
 	return v
 }
