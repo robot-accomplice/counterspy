@@ -14,6 +14,8 @@ type Conn struct {
 	Proto    string   // "tcp" | "udp"
 	OutRate  uint64   // bytes/sec for this connection (from nettop's per-connection rows)
 	Spark    []uint64 // per-connection recent out-rate history (this connection's own sparkline)
+	InRate   uint64   // bytes/sec inbound for this connection
+	InSpark  []uint64 // per-connection recent in-rate history
 }
 
 // ConcernLevel is the coarse concern/exfil band used for coloring and sorting.
@@ -50,6 +52,7 @@ type EgressInstance struct {
 	OutTotal uint64
 	Conns    []Conn
 	Spark    []uint64 // per-PID recent out-rate history (this instance's own sparkline)
+	InSpark  []uint64 // per-PID recent in-rate history
 }
 
 // EgressGroup aggregates ALL instances (PIDs) and connections (ports/protocols/destinations)
@@ -65,7 +68,8 @@ type EgressGroup struct {
 	InRate       uint64
 	OutTotal     uint64
 	Spark        []uint64
-	Cadence      string // "one-off" | "bursty" | "steady" | "periodic"
+	InSpark      []uint64 // per-app recent in-rate history (summed across instances)
+	Cadence      string   // "one-off" | "bursty" | "steady" | "periodic"
 	Destinations []Endpoint
 	Conns        []Conn
 	Background   bool

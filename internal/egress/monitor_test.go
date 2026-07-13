@@ -262,3 +262,44 @@ func TestMonitor_PerConnPrunesDeadConns(t *testing.T) {
 		t.Fatalf("dead connection should be pruned, still have %d", len(m.sparkConn))
 	}
 }
+
+// The mirror of TestMonitor_PerPIDSparkAttachedToMembers for INbound: a PID with climbing
+// cumulative bytes_in must yield a non-zero InRate and a populated InSpark at group + member
+// level. Guards the "in-rate is actually computed" fix (it was hardcoded 0).
+func TestMonitor_InRateAndInSpark(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		in := 100000 * tick // cumulative in climbs 100000/tick → per-tick in-rate 100000
+		return []byte("time,,bytes_in,bytes_out\n15:04:0" + itoa(tick) + ".0,daemon." + itoa(4821) +
+			"," + itoa(in) + ",0\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → in-rate 0, one sample recorded
+	groups := m.Sample() // tick 2: in-rate 100000, second sample recorded
+	if len(groups) != 1 {
+		t.Fatalf("want one group, got %d", len(groups))
+	}
+	g := groups[0]
+	if g.InRate == 0 {
+		t.Fatal("group in-rate must be computed, not hardcoded 0")
+	}
+	if len(g.InSpark) != 2 {
+		t.Fatalf("group in-history should hold 2 ticks, got %v", g.InSpark)
+	}
+	if g.Members[0].InRate == 0 || len(g.Members[0].InSpark) != 2 {
+		t.Fatalf("instance must carry in-rate + in-history, got rate=%d spark=%v",
+			g.Members[0].InRate, g.Members[0].InSpark)
+	}
+}
