@@ -1,0 +1,85 @@
+{
+  "id": "v0-5-1-cgo-ci",
+  "version": "0.5.1",
+  "name": "Codesign-in-release fix + comprehensive CI",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Patch release. Fixes a shipped-binary bug — goreleaser built with CGO_ENABLED=0, which silently dropped the cgo code-signature collector, so released binaries did no codesign checks (v0.5.0 was affected). Rebuilds with cgo + a compile-time guard, and restructures the Actions pipeline so a release passes the exact same comprehensive gate as CI.",
+  "targetWindow": "v0.5.1 (patch on develop→main)",
+  "lastUpdated": "2026-07-14T00:00:00.000Z",
+  "updateSource": "CI-hardening + release-build RCA",
+  "scope": {
+    "required": [
+      {
+        "id": "release-cgo-fix",
+        "title": "Build releases with cgo so codesign ships",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "codesign_darwin.go carries import \"C\" (Security.framework); Go drops every cgo file under CGO_ENABLED=0, so the goreleaser build shipped binaries with NO code-signature checks (trust/notarization/revocation/unsigned all gone). Fixed: .goreleaser.yaml CGO_ENABLED=1 with a per-arch CC (clang -arch x86_64) so the amd64 slice cross-compiles with cgo on the arm64 macOS runner; verified goreleaser builds both arches + the universal binary.",
+        "owner": "Project maintainers",
+        "workstreamId": "ci-release",
+        "dependsOn": [],
+        "evidence": ["goreleaser snapshot build succeeds on macOS runner (CI release-build job)", "measured: CGO=0 build has 0 nativeSig symbols, CGO=1 has them"]
+      },
+      {
+        "id": "cgo-compile-guard",
+        "title": "Compile guard: darwin && !cgo fails the build",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "codesign_cgo_required.go references an undefined identifier under `darwin && !cgo`, so a no-cgo darwin build fails to compile instead of silently shipping crippled. A successful release build now proves cgo is on; the CI goreleaser-snapshot job trips the guard if CGO regresses.",
+        "owner": "Project maintainers",
+        "workstreamId": "ci-release",
+        "dependsOn": [],
+        "evidence": ["CGO_ENABLED=0 go build fails with the guard message; default cgo build passes"]
+      },
+      {
+        "id": "comprehensive-ci",
+        "title": "Reusable checks gate + release-build validation",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "checks.yml (workflow_call) is the single releasable-gate — gofmt, vet, build, race tests, coverage ≥80%, Codecov — called by both CI and Release, so a tag passes the same bar as CI. CI push triggers fixed (feat/**,swarm/** → main,develop) and a goreleaser snapshot build runs every push/PR.",
+        "owner": "Project maintainers",
+        "workstreamId": "ci-release",
+        "dependsOn": [],
+        "evidence": ["actionlint clean", "CI run on PR #35: checks + release-build both green"]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [],
+    "outOfScope": []
+  },
+  "workstreams": [
+    {
+      "id": "ci-release",
+      "name": "CI & release hardening",
+      "owner": "Project maintainers",
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "Found and fixed a release-build bug (codesign dropped under CGO=0) while making the Actions pipeline comprehensive: one reusable gate shared by CI and Release, release-build validation on every run, and a compile guard so the codesign regression can never ship again.",
+      "progress": 100,
+      "itemIds": ["release-cgo-fix", "cgo-compile-guard", "comprehensive-ci"],
+      "evidence": ["go test ./... (all pass)", "goreleaser snapshot build (cgo, both arches + universal)", "actionlint"]
+    }
+  ],
+  "blockers": [],
+  "milestones": [
+    {
+      "id": "v051-shipped",
+      "label": "v0.5.1 tagged (codesign restored in releases)",
+      "status": "complete",
+      "targetWindow": "v0.5.1",
+      "order": 1,
+      "itemIds": ["release-cgo-fix", "cgo-compile-guard", "comprehensive-ci"]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "ci-green-pr35",
+      "label": "PR #35 CI: reusable checks + release-build (goreleaser snapshot, cgo) both green",
+      "kind": "test",
+      "status": "complete"
+    }
+  ]
+}
