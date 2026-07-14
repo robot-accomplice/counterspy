@@ -42,10 +42,15 @@ tar -xzf "$tmp/$asset" -C "$tmp"
 [ -f "$tmp/counterspy" ] || fail "archive did not contain the counterspy binary."
 
 echo "Installing to $PREFIX/counterspy…"
-if [ -w "$PREFIX" ]; then
+# Create PREFIX if it doesn't exist yet — a custom PREFIX (e.g. ~/.local/bin) may not, and
+# `install` won't create the target directory itself. Elevate only when we can't write it.
+if [ -d "$PREFIX" ] && [ -w "$PREFIX" ]; then
+  install -m 0755 "$tmp/counterspy" "$PREFIX/counterspy"
+elif [ ! -e "$PREFIX" ] && mkdir -p "$PREFIX" 2>/dev/null; then
   install -m 0755 "$tmp/counterspy" "$PREFIX/counterspy"
 else
   echo "  ($PREFIX needs elevated permission)"
+  sudo mkdir -p "$PREFIX"
   sudo install -m 0755 "$tmp/counterspy" "$PREFIX/counterspy"
 fi
 
