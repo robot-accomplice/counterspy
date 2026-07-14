@@ -7,9 +7,19 @@
       "severity": "medium",
       "status": "open",
       "summary": "Unsigned binaries with LaunchAgents are common and legitimate on developer machines, and the Apple-only allowlist does not recognize third-party Developer-ID or self-built tools, so they surface as actionable findings.",
-      "mitigations": ["Monitor tier absorbs low-signal items (not shown in detail)", "User allowlist (~/.config/counterspy/allowlist.txt) to vet known-good tools", "Hidden-path signal down-weighted", "Primary open question for the ABORT release gate"],
-      "relatedNodes": ["mod-interpret", "counterspy-system"],
-      "relatedFlows": ["scan-pipeline"]
+      "mitigations": [
+        "Monitor tier absorbs low-signal items (not shown in detail)",
+        "User allowlist (~/.config/counterspy/allowlist.txt) to vet known-good tools",
+        "Hidden-path signal down-weighted",
+        "Primary open question for the ABORT release gate"
+      ],
+      "relatedNodes": [
+        "mod-interpret",
+        "counterspy-system"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ]
     },
     {
       "id": "risk-signed-malware",
@@ -18,9 +28,38 @@
       "severity": "medium",
       "status": "open",
       "summary": "CounterSpy trusts the Gatekeeper (spctl) verdict; a Developer-ID-signed, Gatekeeper-accepted supply-chain implant is treated as trusted and will not be flagged on signature grounds alone.",
-      "mitigations": ["Correlation + tripwires can still flag it on behavior (persistence/listener/TCC)", "Documented as an explicit non-goal in the threat model"],
-      "relatedNodes": ["mod-score", "counterspy-system"],
-      "relatedFlows": ["scan-pipeline"]
+      "mitigations": [
+        "Correlation + tripwires can still flag it on behavior (persistence/listener/TCC)",
+        "Documented as an explicit non-goal in the threat model"
+      ],
+      "relatedNodes": [
+        "mod-score",
+        "counterspy-system"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ]
+    },
+    {
+      "id": "risk-bpf-capture",
+      "title": "Root /dev/bpf packet capture of user traffic",
+      "category": "security",
+      "severity": "medium",
+      "status": "mitigating",
+      "summary": "Inspection reads raw packets from /dev/bpf as root — a privileged capture path over the user's own traffic that briefly holds the very secrets it hunts.",
+      "mitigations": [
+        "Least-privilege: the cBPF filter is scoped to the single selected flow (host + TCP), not the whole interface",
+        "Ephemeral: captured bytes live in memory for the view only; never written to disk without an explicit, confirmed export",
+        "Local-only: captured content never leaves the machine (the feedback channel is egress-only and carries no payload)",
+        "Never decrypts; TLS ciphertext is not surfaced; readable secrets are masked until reveal (§6)"
+      ],
+      "relatedNodes": [
+        "mod-inspect",
+        "mod-tui"
+      ],
+      "relatedFlows": [
+        "inspection"
+      ]
     }
   ]
 }

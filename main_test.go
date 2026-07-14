@@ -16,6 +16,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"counterspy/internal/feedback"
+	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/tui"
@@ -855,16 +856,21 @@ func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
 	}
 }
 
-// Task 6 / cp-T5 review: livenessFor marks a persistence target vestigial when it
-// is not among the running paths (best-effort; a real ps runs but our fake target
-// won't be running).
-func TestLivenessForMarksVestigialWhenNotRunning(t *testing.T) {
-	a := model.Assessment{Finding: model.Finding{
-		Subject:  model.Subject{Path: "/nope/definitely-not-running-xyz"},
-		Evidence: []model.Evidence{{Kind: model.KindPersistence, Facts: map[string]string{"target": "/nope/definitely-not-running-xyz"}}},
-	}}
-	got := livenessFor([]model.Assessment{a})
-	if got["path:/nope/definitely-not-running-xyz"].RunState != mark.GlyphVestigial {
-		t.Errorf("expected vestigial, got %+v", got["path:/nope/definitely-not-running-xyz"])
+// Task 6 / cp-T5 + #23: interpret derives run-state (against the live-process set) and livenessFor
+// maps it to a glyph. A persistence target NOT in the running set is armed ◐ (loaded, will fire —
+// not dormant); the same target running is active ▸.
+func TestLivenessForMapsRunState(t *testing.T) {
+	const target = "/opt/agent-xyz"
+	f := model.Finding{
+		Subject:  model.Subject{Path: target},
+		Evidence: []model.Evidence{{Kind: model.KindPersistence, Facts: map[string]string{"target": target}}},
+	}
+	armed := livenessFor(interpret.Assess([]model.Finding{f}, nil))
+	if armed["path:"+target].RunState != mark.GlyphArmed {
+		t.Errorf("installed, not running → armed ◐, got %+v", armed["path:"+target])
+	}
+	active := livenessFor(interpret.Assess([]model.Finding{f}, map[string]bool{target: true}))
+	if active["path:"+target].RunState != mark.GlyphActive {
+		t.Errorf("installed and running → active ▸, got %+v", active["path:"+target])
 	}
 }

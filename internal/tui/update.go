@@ -8,7 +8,7 @@ import (
 
 // Cmd is an effect the event loop must perform (Run executes it). update stays pure.
 type Cmd struct {
-	Op string // "quarantine" | "restore" | "labelFP" | "labelTP" | "quit"
+	Op string // "quarantine" | "restore" | "labelFP" | "labelTP" | "ack" | "unack" | "quit"
 	A  model.Assessment
 }
 
@@ -68,7 +68,8 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		case 'k':
 			return moveSel(m, -1, n), nil
 		case 's':
-			m.SortByRec = !m.SortByRec
+			m.Sort = (m.Sort + 1) % 3
+			m.Toast = "sorted by " + m.Sort.label()
 		case '/':
 			m.Focus = focusFilter
 		case '?':
@@ -95,6 +96,16 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 				break
 			}
 			return m, []Cmd{{Op: "labelTP", A: v[m.Selected]}}
+		case 'a':
+			if n == 0 || m.Selected >= n {
+				break
+			}
+			// Revisitable toggle: ack an unacked finding, un-ack an already-decided one.
+			op := "ack"
+			if m.Acked[v[m.Selected].Subject.Key()] {
+				op = "unack"
+			}
+			return m, []Cmd{{Op: op, A: v[m.Selected]}}
 		case 'Q':
 			return m, []Cmd{{Op: "quit"}}
 		}

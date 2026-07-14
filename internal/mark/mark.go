@@ -29,10 +29,25 @@ const (
 
 // Liveness glyphs.
 const (
-	GlyphActive    = '▸' // subject maps to a running process
-	GlyphVestigial = '†' // persistence install whose target is not running
+	GlyphActive    = '▸' // running now (live process, or loaded with a live PID)
+	GlyphArmed     = '◐' // installed/loaded, will fire on a trigger — no live PID (issue #23)
+	GlyphVestigial = '†' // dormant: disabled (.bak) or target missing — cannot execute
 	GlyphSocket    = '↔' // holds a network listener
 )
+
+// LivenessGlyph maps an Assessment.Liveness state to its glyph (0 = no state).
+func LivenessGlyph(state string) rune {
+	switch state {
+	case model.LivenessActive:
+		return GlyphActive
+	case model.LivenessArmed:
+		return GlyphArmed
+	case model.LivenessDormant:
+		return GlyphVestigial
+	default:
+		return 0
+	}
+}
 
 // Encryption annotation: a sealed box (▣) marks a TLS/encrypted flow, an open box (□) marks
 // cleartext, absent = unknown. Both are single runes from the Geometric Shapes block (like the
@@ -173,53 +188,25 @@ func isAppleAuthority(a string) bool {
 // blank slot. RunState and Socket are independent so ▸ active and ↔ live-socket
 // can co-occur.
 type Liveness struct {
-	RunState rune // GlyphActive, GlyphVestigial, or 0
+	RunState rune // GlyphActive ▸, GlyphArmed ◐, GlyphVestigial †, or 0 — from Assessment.Liveness
 	Socket   rune // GlyphSocket or 0
 }
 
-// Classify derives per-subject liveness (keyed by Subject.Key()). `running` is
-// the set of filesystem paths referenced by running processes — executables and
-// argv path tokens (see collect.CollectRunningPaths / T-4, ESC-1). Rules:
-//   - socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true")
-//   - a finding with process evidence is active (it is a live process)
-//   - else a persistence finding is active iff its target path is running, else vestigial
-//   - otherwise run-state is blank (a file/grant with no process/persistence liveness)
-//
-// Liveness is DISPLAY-ONLY and never influences scoring.
-func Classify(assessments []model.Assessment, running map[string]bool) map[string]Liveness {
+// Classify assembles the per-subject display marks (keyed by Subject.Key()):
+//   - RunState = the glyph for the finding's liveness, which interpret already derived and stored on
+//     Assessment.Liveness (▸ active / ◐ armed / † dormant / blank). Sourcing it from that single
+//     value — rather than re-deriving here — is what keeps the scored run-state and the displayed
+//     run-state from ever disagreeing (issue #23).
+//   - Socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true"). Independent of
+//     RunState, so ▸ active and ↔ live-socket can co-occur.
+func Classify(assessments []model.Assessment) map[string]Liveness {
 	out := make(map[string]Liveness, len(assessments))
 	for _, a := range assessments {
-		var lv Liveness
-		var hasProc bool
-		// Persistence run-state is derived from the extracted target executable
-		// (Facts["target"]), NOT Subject.Path: when target extraction fails,
-		// persistence.go falls Subject.Path back to the plist path, which would
-		// then falsely read as vestigial. An unknown target stays blank, not a
-		// misleading † (swarm cp-T2 review F-1).
-		var targetKnown, targetRunning bool
+		lv := Liveness{RunState: LivenessGlyph(a.Liveness)}
 		for _, e := range a.Evidence {
 			if e.Facts["listener"] == "true" {
 				lv.Socket = GlyphSocket
 			}
-			switch e.Kind {
-			case model.KindProcess:
-				hasProc = true
-			case model.KindPersistence:
-				if t := e.Facts["target"]; t != "" {
-					targetKnown = true
-					if running[t] {
-						targetRunning = true
-					}
-				}
-			}
-		}
-		switch {
-		case hasProc: // a live process wins; process/persistence can't co-occur today (defensive, cp-T2 F-2)
-			lv.RunState = GlyphActive
-		case targetRunning:
-			lv.RunState = GlyphActive
-		case targetKnown:
-			lv.RunState = GlyphVestigial
 		}
 		out[a.Subject.Key()] = lv
 	}
@@ -274,8 +261,9 @@ func Legend() []LegendRow {
 		{GlyphSigned, "trust", "signed, not notarized", "signed"},
 		{GlyphUnsigned, "trust", "unsigned", "unsigned"},
 		{GlyphRevoked, "trust", "revoked certificate", "revoked"},
-		{GlyphActive, "liveness", "running", "running"},
-		{GlyphVestigial, "liveness", "vestigial (installed, not running)", "vestigial"},
+		{GlyphActive, "liveness", "active (running now)", "active"},
+		{GlyphArmed, "liveness", "armed (loaded, fires on a trigger — no live PID)", "armed"},
+		{GlyphVestigial, "liveness", "dormant (disabled or target missing — cannot execute)", "dormant"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
 		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
 	}

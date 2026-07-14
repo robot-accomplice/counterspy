@@ -1,0 +1,35 @@
+{
+  "id": "v0-5-3-liveness-hardening",
+  "version": "0.5.3",
+  "name": "Liveness scoring + backlog hardening",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Current develop cycle: tech-debt hardening already merged (atomic feedback-store writes; Clean egress identity strings at the source), plus the planned liveness dimension (active/armed/dormant, fed into scoring so a dead persistence remnant scores below a live one) and Findings concern-coloring + revisitable decision flags. Real destination names (SNI/DNS) tracked as the next feature.",
+  "targetWindow": "on develop, post-v0.5.2",
+  "lastUpdated": "2026-07-14T00:00:00.000Z",
+  "updateSource": "backlog triage of open GitHub issues",
+  "scope": {
+    "required": [
+      { "id": "feedback-atomic-store", "title": "Atomic feedback-store writes + dup-send warning (#7)", "kind": "bugfix", "status": "complete", "summary": "Store.save() writes temp+fsync+rename (no mid-write corruption); a post-send MarkSent failure warns loudly.", "owner": "Project maintainers", "workstreamId": "backlog", "dependsOn": [], "evidence": ["go test ./internal/feedback/ .", "merged to develop (#39)"] },
+      { "id": "egress-clean-identity", "title": "Clean attacker-influenced egress identity strings at the source (#9)", "kind": "hardening", "status": "complete", "summary": "App/path/ancestry run through model.Clean when built, so a crafted argv can't carry ANSI/RTLO into storage or the terminal.", "owner": "Project maintainers", "workstreamId": "backlog", "dependsOn": [], "evidence": ["go test ./internal/egress/", "merged to develop (#39)"] },
+      { "id": "liveness-scoring", "title": "Liveness dimension (active/armed/dormant) fed into scoring (#23)", "kind": "feature", "status": "complete", "summary": "Three-state liveness (active ▸ / armed ◐ / dormant †) derived once in interpret against the live-process set, stored on Assessment.Liveness, and read by BOTH scoring (a dormant remnant caps at Monitor unless a tripwire fires) and display (mark.Classify maps the value to a glyph). Killed the display-only DRY split; only ever lowers urgency, so no new false-positive surface. Decision recorded (dec-liveness-scoring).", "owner": "Project maintainers", "workstreamId": "backlog", "dependsOn": [], "evidence": ["go test ./... (all pass)", "internal/interpret dormant-cap + active/armed derivation tests", "architext validate", "dec-liveness-scoring"] },
+      { "id": "scan-concern-ack", "title": "Findings concern-coloring + revisitable decision flags (#4)", "kind": "feature", "status": "complete", "summary": "Assessment.Concern (trust×location×behavior → minimal→elevated) colors the Monitor-tier rows so the ~300 Apple rows recede and non-Apple/unsigned ones stand out; opt-in concern sort under `s`. New local internal/ack store records a revisitable 'reviewed / leave it' decision — flagged (☑), never hidden, re-flagged '⟳ reviewed · changed' when the finding's fingerprint changes; `a` toggles. Separate from the shareable feedback labels; wired via Actor.Ack/Unack so the TUI keeps its model-only decoupling.", "owner": "Project maintainers", "workstreamId": "backlog", "dependsOn": [], "evidence": ["go test ./internal/ack/ ./internal/interpret/ ./internal/tui/ (all pass)", "internal/ack ≥80% coverage", "TestDecouplingInvariant", "architext validate"] }
+    ],
+    "planned": [],
+    "stretch": [
+      { "id": "sni-names", "title": "Real destination names (SNI/DNS) in the tree (#3)", "kind": "feature", "status": "planned", "summary": "Passive SNI capture / DNS-query correlation to show destination hostnames instead of IPs; the inspector already parses SNI.", "owner": "Project maintainers" }
+    ],
+    "deferred": [],
+    "outOfScope": []
+  },
+  "workstreams": [
+    { "id": "backlog", "name": "Open-issue backlog", "owner": "Project maintainers", "status": "complete", "posture": "on-track", "summary": "Worked the open GitHub issues one after another after v0.5.2: atomic feedback-store writes (#7) and Clean egress identity (#9) merged, then the liveness dimension (#23) and Findings concern-coloring + revisitable ack flags (#4). All required scope complete — v0.5.3 is ready to cut (develop→main→tag). SNI/DNS names (#3) remains as stretch/next.", "progress": 100, "itemIds": ["feedback-atomic-store", "egress-clean-identity", "liveness-scoring", "scan-concern-ack"], "evidence": ["go test ./... (all pass)", "architext validate"] }
+  ],
+  "blockers": [],
+  "milestones": [
+    { "id": "backlog-hardening", "label": "Tech-debt hardening merged (#7,#9)", "status": "complete", "targetWindow": "develop", "order": 1, "itemIds": ["feedback-atomic-store", "egress-clean-identity"] },
+    { "id": "backlog-liveness", "label": "Liveness + concern-coloring", "status": "complete", "targetWindow": "develop", "order": 2, "itemIds": ["liveness-scoring", "scan-concern-ack"] }
+  ],
+  "dependencies": [],
+  "evidence": [ { "id": "gate-develop", "label": "go test ./... + architext validate on develop", "kind": "test", "status": "in-progress" } ]
+}

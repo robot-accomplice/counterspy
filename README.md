@@ -124,8 +124,9 @@ from the code, so it always matches what the tool emits:
 | ◇ | trust | signed, not notarized |
 | ○ | trust | unsigned |
 | ⊘ | trust | revoked certificate |
-| ▸ | liveness | running |
-| † | liveness | vestigial (installed, not running) |
+| ▸ | liveness | active (running now) |
+| ◐ | liveness | armed (loaded, fires on a trigger — no live PID) |
+| † | liveness | dormant (disabled or target missing — cannot execute) |
 | ↔ | liveness | live network socket |
 | ▣ | encryption | TLS-encrypted flow (□ = cleartext) |
 <!-- END LEGEND -->

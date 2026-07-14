@@ -166,8 +166,11 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			rate = RateOut(prev, cur[pid], m.interval)
 			rateIn = RateIn(prev, cur[pid], m.interval)
 		}
+		// Clean the attacker-influenced identity strings (process name / path / ancestry) at the
+		// source: a crafted argv[0] can't carry ANSI/newlines/RTLO into storage or the terminal.
+		// Defense-in-depth over the JSON encoder + the TUI's render-time Clean (issue #9).
 		insts = append(insts, Instance{
-			PID: pid, App: app, Path: path, Ancestry: collect.Ancestry(procs, pid),
+			PID: pid, App: model.Clean(app), Path: model.Clean(path), Ancestry: model.Clean(collect.Ancestry(procs, pid)),
 			Trust: m.trustOf(path), OutRate: rate, OutTotal: cur[pid].Out, InRate: rateIn,
 			Conns: conns[pid], Capabilities: m.capsOf(path),
 		})

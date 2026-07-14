@@ -18,7 +18,7 @@ func TestAssess_KeyloggerShapeQuarantine(t *testing.T) {
 		Kinds:    []model.SignalKind{model.KindTCC},
 		Evidence: []model.Evidence{tccEv("kTCCServiceListenEvent", "holds Input Monitoring"), tccEv("kTCCServiceAccessibility", "holds Accessibility")},
 	}
-	a := Assess([]model.Finding{f})
+	a := Assess([]model.Finding{f}, nil)
 	if a[0].Category != "keylogger" {
 		t.Errorf("category=%q want keylogger", a[0].Category)
 	}
@@ -33,7 +33,7 @@ func TestAssess_KeyloggerShapeQuarantine(t *testing.T) {
 // A tripwire always recommends Quarantine regardless of score.
 func TestAssess_TripwireQuarantines(t *testing.T) {
 	f := model.Finding{Subject: model.Subject{Path: "/tmp/b"}, Score: 3, Tripwire: "unsigned+persistence+listener"}
-	if a := Assess([]model.Finding{f}); a[0].Recommendation != model.RecQuarantine {
+	if a := Assess([]model.Finding{f}, nil); a[0].Recommendation != model.RecQuarantine {
 		t.Errorf("tripwire must Quarantine, got %q", a[0].Recommendation)
 	}
 }
@@ -46,7 +46,7 @@ func TestAssess_LoneGrantIsNeutralNotSpyware(t *testing.T) {
 		Score:    2,
 		Evidence: []model.Evidence{tccEv("kTCCServiceScreenCapture", "holds Screen Recording")},
 	}
-	a := Assess([]model.Finding{f})
+	a := Assess([]model.Finding{f}, nil)
 	if a[0].Category == "surveillance-capable" {
 		t.Errorf("a lone grant must not be surveillance-capable, got %q", a[0].Category)
 	}
@@ -65,7 +65,7 @@ func TestAssess_CorroboratedGrantIsSpywareGeneric(t *testing.T) {
 			{Kind: model.KindPersistence, Summary: "LaunchDaemon"},
 		},
 	}
-	if a := Assess([]model.Finding{f}); a[0].Category != "surveillance-capable" {
+	if a := Assess([]model.Finding{f}, nil); a[0].Category != "surveillance-capable" {
 		t.Errorf("full-disk + persistence should be surveillance-capable, got %q", a[0].Category)
 	}
 }
@@ -86,7 +86,7 @@ func TestAssess_SignedAcceptedNeverQuarantines(t *testing.T) {
 	for i := range in {
 		in[i].Subject = sub
 	}
-	a := Assess([]model.Finding{{Subject: sub, Score: 12, Evidence: in}})
+	a := Assess([]model.Finding{{Subject: sub, Score: 12, Evidence: in}}, nil)
 	if a[0].Recommendation == model.RecQuarantine {
 		t.Fatalf("a Gatekeeper-accepted signed app must never auto-Quarantine, got %q", a[0].Recommendation)
 	}
@@ -103,7 +103,7 @@ func TestAssess_UnsignedPersistenceOnlyCapsAtInvestigate(t *testing.T) {
 			{Subject: sub, Kind: model.KindPersistence, Summary: "user-level LaunchAgent"},
 		},
 	}}
-	if a := Assess(in); a[0].Recommendation != model.RecInvestigate {
+	if a := Assess(in, nil); a[0].Recommendation != model.RecInvestigate {
 		t.Fatalf("unsigned persistence-only should cap at Investigate, got %q", a[0].Recommendation)
 	}
 }
@@ -119,7 +119,7 @@ func TestAssess_UnsignedWeakHighScoreStillQuarantines(t *testing.T) {
 			{Subject: sub, Kind: model.KindPersistence, Summary: "user-level LaunchAgent"},
 		},
 	}}
-	if a := Assess(in); a[0].Recommendation != model.RecQuarantine {
+	if a := Assess(in, nil); a[0].Recommendation != model.RecQuarantine {
 		t.Fatalf("unsigned weak-category at critical score should Quarantine, got %q", a[0].Recommendation)
 	}
 }
@@ -129,7 +129,99 @@ func TestAssess_LowScoreMonitor(t *testing.T) {
 		Score:    2,
 		Evidence: []model.Evidence{{Kind: model.KindProcess, Summary: "active network connection"}},
 	}
-	if a := Assess([]model.Finding{f}); a[0].Recommendation != model.RecMonitor {
+	if a := Assess([]model.Finding{f}, nil); a[0].Recommendation != model.RecMonitor {
 		t.Errorf("recommendation=%q want Monitor", a[0].Recommendation)
+	}
+}
+
+// #23: a dormant persistence remnant (missing target / disabled .bak plist) cannot execute, so it
+// caps at Monitor even at a score that would otherwise Investigate — the com.ironclad.agent case
+// (a dead .bak remnant must not read as urgently as a live agent).
+func TestAssess_DormantRemnantCapsAtMonitor(t *testing.T) {
+	sub := model.Subject{Path: "/x/agent"}
+	f := model.Finding{Subject: sub, Score: 12, Kinds: []model.SignalKind{model.KindPersistence},
+		Evidence: []model.Evidence{{Subject: sub, Kind: model.KindPersistence,
+			Summary: "persistence target is missing/renamed", Weight: 2,
+			Facts: map[string]string{"plist": "/Users/x/Library/LaunchAgents/com.evil.plist.bak.1700000000"}}}}
+	a := Assess([]model.Finding{f}, nil)[0]
+	if a.Liveness != model.LivenessDormant {
+		t.Fatalf("missing target / .bak plist → dormant, got %q", a.Liveness)
+	}
+	if a.Recommendation != model.RecMonitor {
+		t.Fatalf("a dormant remnant must cap at Monitor regardless of score, got %s", a.Recommendation)
+	}
+	// Sanity: the same finding NOT dormant would have surfaced (score 12 ≥ ShowThreshold → Investigate).
+	live := model.Finding{Subject: sub, Score: 12, Kinds: []model.SignalKind{model.KindPersistence},
+		Evidence: []model.Evidence{{Subject: sub, Kind: model.KindPersistence, Summary: "user-level LaunchAgent", Weight: 1,
+			Facts: map[string]string{"plist": "/Users/x/Library/LaunchAgents/com.evil.plist"}}}}
+	if a2 := Assess([]model.Finding{live}, nil)[0]; a2.Liveness == model.LivenessDormant || a2.Recommendation == model.RecMonitor {
+		t.Fatalf("a non-dormant persistence finding must not be capped by liveness: %+v", a2.Recommendation)
+	}
+}
+
+// #23 liveness derivation (interpret owns run-state now). A persistence target found in the live
+// process set is active; the same target absent is armed (loaded, not dormant); an unextractable
+// target stays blank so it never reads as a misleading armed/dormant (swarm cp-T2 F-1).
+func TestAssess_LivenessFromRunningSet(t *testing.T) {
+	persist := func(path, target string, facts map[string]string) model.Finding {
+		e := model.Evidence{Subject: model.Subject{Path: path}, Kind: model.KindPersistence, Weight: 1, Facts: facts}
+		return model.Finding{Subject: model.Subject{Path: path}, Score: 6,
+			Kinds: []model.SignalKind{model.KindPersistence}, Evidence: []model.Evidence{e}}
+	}
+	live := persist("/a/agent", "/a/agent", map[string]string{"target": "/a/agent"})
+	armed := persist("/b/agent", "/b/agent", map[string]string{"target": "/b/agent"})
+	unknown := persist("/c/x.plist", "", map[string]string{"plist": "/c/x.plist"}) // extraction failed: no target
+	running := map[string]bool{"/a/agent": true}
+
+	got := Assess([]model.Finding{live, armed, unknown}, running)
+	if got[0].Liveness != model.LivenessActive {
+		t.Errorf("target in running set → active, got %q", got[0].Liveness)
+	}
+	if got[1].Liveness != model.LivenessArmed {
+		t.Errorf("target on disk, not running → armed, got %q", got[1].Liveness)
+	}
+	if got[2].Liveness != "" {
+		t.Errorf("unextractable target must stay blank (not armed/dormant), got %q", got[2].Liveness)
+	}
+	// A live process is active regardless of the running-paths map.
+	proc := model.Finding{Subject: model.Subject{PID: 5}, Score: 3, Kinds: []model.SignalKind{model.KindProcess},
+		Evidence: []model.Evidence{{Subject: model.Subject{PID: 5}, Kind: model.KindProcess, Weight: 1}}}
+	if a := Assess([]model.Finding{proc}, nil)[0]; a.Liveness != model.LivenessActive {
+		t.Errorf("a live process is active, got %q", a.Liveness)
+	}
+}
+
+// #4 concern heuristic: Apple-signed system code recedes to Minimal (the ~300-row floor); an unsigned
+// binary in a user path making network connections stands out; a lone notarized quiet app stays low.
+func TestConcernOf(t *testing.T) {
+	codesign := func(signed, authority string) model.Evidence {
+		return model.Evidence{Kind: model.KindCodesign, Facts: map[string]string{"signed": signed, "authority": authority}}
+	}
+	proc := func(fact string) model.Evidence {
+		return model.Evidence{Kind: model.KindProcess, Facts: map[string]string{"net": fact}}
+	}
+	cases := []struct {
+		name string
+		f    model.Finding
+		want model.ConcernLevel
+	}{
+		{"apple system daemon floors at minimal", model.Finding{
+			Subject:  model.Subject{Label: "com.apple.somed", Path: "/System/Library/x"},
+			Evidence: []model.Evidence{codesign("true", "Software Signing")},
+		}, model.Minimal},
+		{"unsigned user-path networking binary stands out", model.Finding{
+			Subject:  model.Subject{Path: "/Users/x/Downloads/thing"},
+			Evidence: []model.Evidence{codesign("false", ""), proc("connection")},
+		}, model.Elevated}, // unsigned(2) + user(1) + connection(1) = 4 → Elevated
+		{"notarized quiet third-party app stays low/minimal", model.Finding{
+			Subject:  model.Subject{Path: "/Applications/Foo.app"},
+			Evidence: []model.Evidence{codesign("true", "Developer ID Application: Foo")},
+		}, model.Minimal},
+	}
+	for _, c := range cases {
+		got := Assess([]model.Finding{c.f}, nil)[0].Concern
+		if got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
 	}
 }

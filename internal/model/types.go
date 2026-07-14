@@ -9,7 +9,7 @@ import (
 
 // Version is stamped into every manifest so an incident can be traced to the exact
 // build (weights, allowlist, rules) that produced a quarantine (ABORT C4).
-const Version = "v0.5.2"
+const Version = "v0.5.3"
 
 // Clean strips control/escape characters from attacker-influenced strings (labels,
 // paths, argv) before they reach a terminal — so a crafted value can't inject ANSI or
@@ -147,7 +147,24 @@ type Assessment struct {
 	Verdict        string
 	Category       string
 	Recommendation Recommendation
+	// Liveness is the finding's run-state: "active" (running), "armed" (installed/loaded, will fire
+	// on a trigger, no live PID), "dormant" (disabled .bak or missing target — cannot execute), or ""
+	// (not a process/persistence subject). Derived in interpret so it can BOTH down-weight a dead
+	// remnant in scoring and drive the display glyph (issue #23).
+	Liveness string
+	// Concern is a coarse trust×location×behavior band (Minimal→Elevated) derived in interpret,
+	// used to COLOR and optionally sort the Findings view so the large tail of Apple-signed Monitor
+	// rows recedes and the few non-Apple/unsigned ones stand out. It is a legibility hint only — it
+	// never changes the Recommendation or the score (issue #4).
+	Concern ConcernLevel
 }
+
+// Liveness states (Assessment.Liveness).
+const (
+	LivenessActive  = "active"
+	LivenessArmed   = "armed"
+	LivenessDormant = "dormant"
+)
 
 // FeedbackSchema is the FeedbackRecord wire-schema version (independent of tool Version).
 const FeedbackSchema = "1"

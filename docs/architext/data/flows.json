@@ -6,21 +6,106 @@
       "status": "implemented",
       "summary": "The read-only scan: fan out four collectors, score+correlate, synthesize recommendations, render a ranked report. Never mutates.",
       "trigger": "operator runs `sudo counterspy scan`",
-      "actors": ["operator"],
-      "steps": [
-        {"id": "s1", "from": "operator", "to": "counterspy-cli", "action": "runScan", "kind": "start", "summary": "Invoke scan (optionally --json / --interactive).", "data": []},
-        {"id": "s2", "from": "counterspy-cli", "to": "mod-collect", "action": "collectAll", "kind": "process", "summary": "Fan out collectors; a failing collector is reported as a gap, never silence.", "data": []},
-        {"id": "s3", "from": "mod-collect", "to": "macos-tools", "action": "execNativeTools", "kind": "process", "summary": "Shell out to launchctl/plutil/codesign/spctl/ps/lsof/sqlite3.", "data": ["process-list", "code-signatures", "tcc-grants"]},
-        {"id": "s4", "from": "mod-collect", "to": "mod-score", "action": "Score", "kind": "process", "summary": "Group evidence by subject, sum weights, correlation multiplier, suppress allowlisted, fire tripwires.", "data": ["scan-findings"]},
-        {"id": "s5", "from": "mod-score", "to": "mod-interpret", "action": "Assess", "kind": "process", "summary": "Rule-based verdict + category + recommendation per finding.", "data": ["scan-findings"]},
-        {"id": "s6", "from": "mod-interpret", "to": "mod-report", "action": "Render", "kind": "process", "summary": "Executive summary + ranked actionable findings; Monitor tier counted, not dumped.", "data": ["scan-findings"]},
-        {"id": "s7", "from": "mod-report", "to": "operator", "action": "printReport", "kind": "return", "summary": "Ranked report (or --json).", "data": ["scan-findings"]}
+      "actors": [
+        "operator"
       ],
-      "guarantees": ["Read-only", "Missing signals reported as gaps (fail loud)", "Deterministic verdicts"],
-      "failureBehavior": ["A collector that cannot read its source prints a gap line; the scan still completes with the signals it has"],
-      "observability": ["Ranked report", "--json", "gap lines"],
-      "verification": ["go test ./...", "manual `counterspy scan` on a real Mac"],
-      "knownGaps": ["False-positive volume on developer machines (see risk-false-positive-volume)"]
+      "steps": [
+        {
+          "id": "s1",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "runScan",
+          "kind": "start",
+          "summary": "Invoke scan (optionally --json / --interactive).",
+          "data": []
+        },
+        {
+          "id": "s2",
+          "from": "counterspy-cli",
+          "to": "mod-collect",
+          "action": "collectAll",
+          "kind": "process",
+          "summary": "Fan out collectors; a failing collector is reported as a gap, never silence.",
+          "data": []
+        },
+        {
+          "id": "s3",
+          "from": "mod-collect",
+          "to": "macos-tools",
+          "action": "execNativeTools",
+          "kind": "process",
+          "summary": "Shell out to launchctl/plutil/codesign/spctl/ps/lsof/sqlite3.",
+          "data": [
+            "process-list",
+            "code-signatures",
+            "tcc-grants"
+          ]
+        },
+        {
+          "id": "s4",
+          "from": "mod-collect",
+          "to": "mod-score",
+          "action": "Score",
+          "kind": "process",
+          "summary": "Group evidence by subject, sum weights, correlation multiplier, suppress allowlisted, fire tripwires.",
+          "data": [
+            "scan-findings"
+          ]
+        },
+        {
+          "id": "s5",
+          "from": "mod-score",
+          "to": "mod-interpret",
+          "action": "Assess",
+          "kind": "process",
+          "summary": "Rule-based verdict + category + recommendation per finding.",
+          "data": [
+            "scan-findings"
+          ]
+        },
+        {
+          "id": "s6",
+          "from": "mod-interpret",
+          "to": "mod-report",
+          "action": "Render",
+          "kind": "process",
+          "summary": "Executive summary + ranked actionable findings; Monitor tier counted, not dumped.",
+          "data": [
+            "scan-findings"
+          ]
+        },
+        {
+          "id": "s7",
+          "from": "mod-report",
+          "to": "operator",
+          "action": "printReport",
+          "kind": "return",
+          "summary": "Ranked report (or --json).",
+          "data": [
+            "scan-findings"
+          ]
+        }
+      ],
+      "guarantees": [
+        "Read-only",
+        "Missing signals reported as gaps (fail loud)",
+        "Deterministic verdicts"
+      ],
+      "failureBehavior": [
+        "A collector that cannot read its source prints a gap line; the scan still completes with the signals it has"
+      ],
+      "observability": [
+        "Ranked report",
+        "--json",
+        "gap lines"
+      ],
+      "verification": [
+        "go test ./...",
+        "manual `counterspy scan` on a real Mac"
+      ],
+      "knownGaps": [
+        "False-positive volume on developer machines (see risk-false-positive-volume)"
+      ]
     },
     {
       "id": "quarantine",
@@ -28,17 +113,174 @@
       "status": "implemented",
       "summary": "The only mutating flow: on per-item approval, disable the launch item and MOVE its artifacts into a reversible quarantine, recording a manifest.",
       "trigger": "operator answers y to a finding in `scan --interactive`",
-      "actors": ["operator"],
-      "steps": [
-        {"id": "q1", "from": "operator", "to": "counterspy-cli", "action": "approveQuarantine", "kind": "start", "summary": "Per-item consent (y/N/q).", "data": ["scan-findings"]},
-        {"id": "q2", "from": "counterspy-cli", "to": "mod-act", "action": "Quarantine", "kind": "process", "summary": "Refuse allowlisted/protected paths; bootout; move artifacts into the quarantine mirror.", "data": ["quarantine-manifest"]},
-        {"id": "q3", "from": "mod-act", "to": "operator", "action": "confirmReversible", "kind": "return", "summary": "Quarantined to ~/CounterSpyQuarantine/<ts>; reversible via `restore`.", "data": ["quarantine-manifest"]}
+      "actors": [
+        "operator"
       ],
-      "guarantees": ["Never deletes — moves only", "Reversible (restore round-trips byte-identically)", "Partial failures still write a manifest so nothing is orphaned"],
-      "failureBehavior": ["Refuses Apple-signed/allowlisted and protected system paths; on a mid-way move failure, stops and records the partial manifest"],
-      "observability": ["manifest.json (undo + RCA trail)"],
-      "verification": ["go test ./internal/act/"],
-      "knownGaps": ["A live process with no on-disk artifact cannot be quarantined (surfaced for manual action)"]
+      "steps": [
+        {
+          "id": "q1",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "approveQuarantine",
+          "kind": "start",
+          "summary": "Per-item consent (y/N/q).",
+          "data": [
+            "scan-findings"
+          ]
+        },
+        {
+          "id": "q2",
+          "from": "counterspy-cli",
+          "to": "mod-act",
+          "action": "Quarantine",
+          "kind": "process",
+          "summary": "Refuse allowlisted/protected paths; bootout; move artifacts into the quarantine mirror.",
+          "data": [
+            "quarantine-manifest"
+          ]
+        },
+        {
+          "id": "q3",
+          "from": "mod-act",
+          "to": "operator",
+          "action": "confirmReversible",
+          "kind": "return",
+          "summary": "Quarantined to ~/CounterSpyQuarantine/<ts>; reversible via `restore`.",
+          "data": [
+            "quarantine-manifest"
+          ]
+        }
+      ],
+      "guarantees": [
+        "Never deletes — moves only",
+        "Reversible (restore round-trips byte-identically)",
+        "Partial failures still write a manifest so nothing is orphaned"
+      ],
+      "failureBehavior": [
+        "Refuses Apple-signed/allowlisted and protected system paths; on a mid-way move failure, stops and records the partial manifest"
+      ],
+      "observability": [
+        "manifest.json (undo + RCA trail)"
+      ],
+      "verification": [
+        "go test ./internal/act/"
+      ],
+      "knownGaps": [
+        "A live process with no on-disk artifact cannot be quarantined (surfaced for manual action)"
+      ]
+    },
+    {
+      "id": "inspection",
+      "name": "Flow inspection (i → /dev/bpf capture → honest verdict)",
+      "status": "implemented",
+      "summary": "On demand, capture one selected Exfiltration flow with a native /dev/bpf tap scoped to its 4-tuple and return an honest coverage verdict (readable plaintext, TLS ciphertext, or cleartext binary) — never decrypting, keeping bytes local and ephemeral.",
+      "trigger": "operator presses `i` on a flow in the Exfiltration view",
+      "actors": [
+        "operator"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "from": "operator",
+          "to": "mod-tui",
+          "action": "pressInspect",
+          "kind": "start",
+          "summary": "Press i on a selected flow.",
+          "data": []
+        },
+        {
+          "id": "s2",
+          "from": "mod-tui",
+          "to": "counterspy-cli",
+          "action": "requestInspect",
+          "kind": "process",
+          "summary": "Pure update queues InspectReq; the run loop performs the I/O (root capture off the UI thread).",
+          "data": []
+        },
+        {
+          "id": "s3",
+          "from": "counterspy-cli",
+          "to": "mod-inspect",
+          "action": "inspect",
+          "kind": "process",
+          "summary": "Open a /dev/bpf capture scoped to the flow and read up to maxPackets.",
+          "data": [
+            "captured-flow-payload"
+          ]
+        },
+        {
+          "id": "s4",
+          "from": "mod-inspect",
+          "to": "macos-tools",
+          "action": "bpfRead",
+          "kind": "process",
+          "summary": "Read frames from /dev/bpf (BIOCSETIF/BIOCSETF filter, link-layer strip).",
+          "data": [
+            "captured-flow-payload"
+          ]
+        },
+        {
+          "id": "s5",
+          "from": "macos-tools",
+          "to": "mod-inspect",
+          "action": "frames",
+          "kind": "return",
+          "returnOf": "s4",
+          "summary": "Captured frames for the scoped flow.",
+          "data": [
+            "captured-flow-payload"
+          ]
+        },
+        {
+          "id": "s6",
+          "from": "mod-inspect",
+          "to": "mod-inspect",
+          "action": "classifyCoverage",
+          "kind": "process",
+          "summary": "Correlate both directions; classify coverage honestly (plaintext / TLS-ciphertext / cleartext-binary) + extract SNI.",
+          "data": [
+            "captured-flow-payload"
+          ]
+        },
+        {
+          "id": "s7",
+          "from": "mod-inspect",
+          "to": "counterspy-cli",
+          "action": "result",
+          "kind": "return",
+          "returnOf": "s3",
+          "summary": "Honest verdict + rendered bytes (text or hexdump; ciphertext withheld).",
+          "data": []
+        },
+        {
+          "id": "s8",
+          "from": "counterspy-cli",
+          "to": "operator",
+          "action": "renderVerdict",
+          "kind": "stop",
+          "summary": "Render the coverage verdict via the TUI; secrets masked until reveal (v).",
+          "data": []
+        }
+      ],
+      "guarantees": [
+        "Never decrypts",
+        "Captured bytes are local + ephemeral",
+        "Least-privilege BPF filter scoped to the one flow"
+      ],
+      "failureBehavior": [
+        "A capture failure is surfaced as an honest verdict (e.g. 'relaunch with sudo'), never a false 'clean'."
+      ],
+      "observability": [
+        "on-screen coverage verdict"
+      ],
+      "verification": [
+        "go test ./internal/inspect/ ./internal/tui/ .",
+        "root smoke test (COUNTERSPY_LIVE_CAPTURE=1): loopback TLS SNI + filter-drop"
+      ],
+      "knownGaps": [
+        "Destination NAMES (SNI/DNS) not yet threaded into the tree (issue #3)",
+        "Full TCP reassembly deferred (T-10)"
+      ]
     }
   ]
 }

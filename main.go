@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"counterspy/internal/ack"
 	"counterspy/internal/act"
 	"counterspy/internal/collect"
 	"counterspy/internal/egress"
@@ -109,7 +110,8 @@ func runScan(flags []string, stdout io.Writer) int {
 	if !dry {
 		ev, gaps = collectWithSpinner()
 	}
-	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
+	running, _ := collect.CollectRunningPaths()
+	assessments := filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 
 	if asJSON {
 		for _, g := range gaps { // gaps to stderr — keep --json clean
@@ -147,12 +149,12 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
-// livenessFor resolves the paths referenced by running processes (best-effort)
-// and classifies each assessment's liveness. A ps failure degrades to "nothing
-// known running" — persistence then reads vestigial rather than crashing (T-4/#23).
+// livenessFor assembles each assessment's display marks (run-state + socket) from the
+// liveness interpret already derived (issue #23). The run-state itself is resolved once,
+// at Assess time, against the live-process set — so a snapshot (`--from`) carries its
+// scan-time liveness instead of being re-derived against a different machine's processes.
 func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
-	running, _ := collect.CollectRunningPaths()
-	return mark.Classify(assessments, running)
+	return mark.Classify(assessments)
 }
 
 func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
@@ -429,7 +431,8 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 		// Show the progress spinner while collecting (before the alt-screen opens) so the
 		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
 		ev, g := collectWithSpinner()
-		assessments = filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
+		running, _ := collect.CollectRunningPaths()
+		assessments = filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 		gaps = g
 	}
 
@@ -482,9 +485,11 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	cfgPath, storePath := feedbackPaths()
 	cfg := feedback.LoadConfig(cfgPath)
 	store := feedback.NewStore(storePath)
+	acks := ack.NewStore(ackPath())
+	_ = acks.Load() // missing/unreadable ack file → empty store; triage still opens (Rule 13)
 	actor := &cliActor{
 		root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts,
-		readOnly: from != "", store: store, detail: cfg.Detail,
+		readOnly: from != "", store: store, detail: cfg.Detail, acks: acks,
 	}
 	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
 	// the confirm modal without importing act (keeps internal/tui → model only).
@@ -493,6 +498,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	}
 	m := tui.New(assessments, gaps)
 	m.Liveness = livenessFor(assessments)
+	m.Acked, m.AckChanged = acksFor(acks, assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 
 	// Exfiltration sampler + a ~3Hz ticker. RunConsole samples LAZILY (only while Exfiltration is
@@ -568,6 +574,7 @@ type cliActor struct {
 	readOnly bool
 	store    *feedback.Store
 	detail   feedback.Detail
+	acks     *ack.Store
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
@@ -607,6 +614,22 @@ func (c *cliActor) Label(a model.Assessment, falsePositive bool) error {
 	return c.store.Add(feedback.Capture(a, label, c.detail, feedback.NewNonce()))
 }
 
+// Ack records a LOCAL "reviewed / leave it" decision, fingerprinting the finding's current state so
+// a later change re-flags it. Unack clears it. Both are local-only and never transmitted (#4).
+func (c *cliActor) Ack(a model.Assessment) error {
+	if c.acks == nil {
+		return nil
+	}
+	return c.acks.Ack(a.Subject.Key(), ack.Fingerprint(a), c.ts)
+}
+
+func (c *cliActor) Unack(a model.Assessment) error {
+	if c.acks == nil {
+		return nil
+	}
+	return c.acks.Unack(a.Subject.Key())
+}
+
 // invokingUserHome resolves the HOME of the human who ran the tool, not root's — the tool
 // runs under sudo, so os.UserHomeDir() would point at /var/root. Falls back to os.UserHomeDir.
 func invokingUserHome() string {
@@ -623,6 +646,33 @@ func invokingUserHome() string {
 func feedbackPaths() (configPath, storePath string) {
 	base := filepath.Join(invokingUserHome(), ".config", "counterspy")
 	return filepath.Join(base, "feedback.json"), filepath.Join(base, "feedback-store.json")
+}
+
+// ackPath returns the local ack-store path under the invoking user's home (#4).
+func ackPath() string {
+	return filepath.Join(invokingUserHome(), ".config", "counterspy", "ack.json")
+}
+
+// acksFor loads the ack store and derives the two per-finding display maps the TUI needs: which
+// findings are acked, and which of those have CHANGED since they were reviewed (stored fingerprint
+// no longer matches the finding's current state). A load error degrades to no acks — a triage view
+// must never fail to open because a local note file is unreadable (Rule 13: surfaced via empty maps,
+// the feature simply shows nothing rather than crashing).
+func acksFor(store *ack.Store, assessments []model.Assessment) (acked, changed map[string]bool) {
+	acked, changed = map[string]bool{}, map[string]bool{}
+	if store == nil {
+		return
+	}
+	for _, a := range assessments {
+		key := a.Subject.Key()
+		if rec, ok := store.Get(key); ok {
+			acked[key] = true
+			if rec.Fingerprint != ack.Fingerprint(a) {
+				changed[key] = true
+			}
+		}
+	}
+	return
 }
 
 // submitFeedback pushes pending labels according to the consent level. off → nothing;
@@ -651,7 +701,14 @@ func submitFeedback(cfg feedback.Config, store *feedback.Store, tx feedback.Tran
 		return err
 	}
 	fmt.Fprintf(out, "  shared %d record(s). Thank you.\n", len(pending))
-	return store.MarkSent(pending)
+	if err := store.MarkSent(pending); err != nil {
+		// Sent, but the local mark didn't stick — surface it loudly (§13 fail-loud): those records
+		// may re-send next run. The endpoint dedups on nonce+fingerprint, so this is a warning,
+		// not data loss.
+		fmt.Fprintln(out, "  warning: records were sent but could not be marked locally — they may re-send next run (the endpoint dedups):", err)
+		return err
+	}
+	return nil
 }
 
 // chooseTransmitter uses the configured HTTP endpoint when set, else falls back to a local
