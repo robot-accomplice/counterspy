@@ -29,6 +29,12 @@
       "name": "TCC privacy grants",
       "sensitivity": "medium",
       "handling": "Which apps hold Accessibility / Input Monitoring / Screen Recording / Full Disk Access. Read from the TCC databases (requires sudo)."
+    },
+    {
+      "id": "captured-flow-payload",
+      "name": "Captured flow payload",
+      "sensitivity": "high",
+      "handling": "Raw bytes read from /dev/bpf for a single user-selected flow. Ephemeral (in-memory, for the inspection view only; never written to disk unless the user runs an explicit export). Never leaves the machine. TLS ciphertext is not surfaced; readable plaintext is shown with secrets masked until reveal (§6). Least-privilege: the BPF filter is scoped to the one flow, not the interface."
     }
   ]
 }

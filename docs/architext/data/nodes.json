@@ -491,18 +491,24 @@
       "id": "mod-tui",
       "type": "module",
       "name": "internal/tui",
-      "summary": "Interactive tcell triage face over []Assessment: a pure Model + update(key)→[]Cmd, tcell only at the view/Run edge, acting through a locally-defined Actor interface. No analysis. Imports ONLY internal/model (enforced by TestDecouplingInvariant); the act coupling lives in main's cliActor adapter, not here.",
+      "summary": "Interactive tcell face over the two domains: Findings triage (master-detail over []Assessment) and the live Exfiltration monitor (per-app egress top, a btm-style per-app zoom dashboard, and on-demand flow inspection). Pure Model + update(key), tcell only at the view/Run edge, acting through locally-defined Actor/Sampler/Inspector seams. No analysis. Imports ONLY internal/model + internal/mark (enforced by TestDecouplingInvariant).",
       "responsibilities": [
-        "Render master-detail triage (findings + evidence)",
-        "Navigate/filter/sort, quarantine with confirm, restore",
-        "Stay a thin face — imports only internal/model"
+        "Render Findings triage (findings + evidence) and the Exfiltration monitor (tree, zoom, trend)",
+        "Navigate/filter/sort; quarantine with confirm; restore; inspect a flow (i); zoom an app (z)",
+        "Stay a thin face — imports only internal/model + internal/mark"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
         "internal/tui/model.go",
         "internal/tui/update.go",
         "internal/tui/view.go",
-        "internal/tui/run.go"
+        "internal/tui/run.go",
+        "internal/tui/console.go",
+        "internal/tui/egressmodel.go",
+        "internal/tui/egressview.go",
+        "internal/tui/egresszoom.go",
+        "internal/tui/braillegraph.go",
+        "internal/tui/inspect.go"
       ],
       "runtime": "in-process (tcell terminal)",
       "interfaces": [
@@ -510,7 +516,8 @@
         "New"
       ],
       "dependencies": [
-        "mod-model"
+        "mod-model",
+        "mod-mark"
       ],
       "dataHandled": [
         "scan-findings",
@@ -525,7 +532,8 @@
       ],
       "relatedFlows": [
         "scan-pipeline",
-        "quarantine"
+        "quarantine",
+        "inspection"
       ],
       "relatedDecisions": [
         "dec-move-not-delete"
@@ -595,7 +603,7 @@
       "id": "mod-egress",
       "type": "module",
       "name": "internal/egress",
-      "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability × egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only; reads no payloads.",
+      "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability × egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only at the tree level (reads no payloads); on demand, a selected flow can be handed to internal/inspect for a root /dev/bpf capture + honest coverage verdict.",
       "responsibilities": [
         "Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence",
         "Group by app; score concern; infer exfil risk + candidate categories",
@@ -643,6 +651,58 @@
       "knownRisks": [],
       "verification": [
         "go test ./internal/egress/"
+      ]
+    },
+    {
+      "id": "mod-inspect",
+      "type": "module",
+      "name": "internal/inspect",
+      "summary": "On-demand per-flow inspection engine. Opens a native /dev/bpf live capture scoped to one selected flow (BIOCSETIF/BIOCSETF filter, IPv4/IPv6 + TCP framing, link-layer strip), correlates both directions, and returns an HONEST coverage verdict: readable plaintext, TLS ciphertext (only with real evidence — SNI/handshake/TLS-port), or cleartext-binary. Reads the user’s OWN traffic locally; never decrypts; captured bytes are ephemeral and never leave the machine. Pure over an injectable PacketSource (CI-testable without root).",
+      "responsibilities": [
+        "Capture one flow via native /dev/bpf (root), scoped by a cBPF host+TCP filter",
+        "Parse IPv4/IPv6 + TCP framing; correlate outbound/inbound",
+        "Classify coverage honestly (plaintext / TLS-ciphertext / cleartext-binary) + extract SNI"
+      ],
+      "owner": "Project maintainers",
+      "sourcePaths": [
+        "internal/inspect/inspect.go",
+        "internal/inspect/bpf_darwin.go",
+        "internal/inspect/filter.go",
+        "internal/inspect/framing.go",
+        "internal/inspect/tls.go"
+      ],
+      "runtime": "in-process (native /dev/bpf; requires root for live capture)",
+      "interfaces": [
+        "Inspect(PacketSource, Flow, maxPackets) Result",
+        "OpenLiveCapture(iface, remote, maxWait)"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-mark"
+      ],
+      "dataHandled": [
+        "captured-flow-payload"
+      ],
+      "security": [
+        "Root packet capture of the user’s OWN outbound traffic; least-privilege BPF filter scoped to the single flow",
+        "Never decrypts; TLS ciphertext is not surfaced; captured bytes are ephemeral (memory-only) and never leave the machine",
+        "Secrets in readable plaintext are masked until the user reveals (§6)"
+      ],
+      "observability": [
+        "on-screen coverage verdict"
+      ],
+      "relatedFlows": [
+        "inspection"
+      ],
+      "relatedDecisions": [
+        "dec-honest-coverage"
+      ],
+      "knownRisks": [
+        "risk-bpf-capture"
+      ],
+      "verification": [
+        "go test ./internal/inspect/",
+        "root smoke test (COUNTERSPY_LIVE_CAPTURE=1)"
       ]
     }
   ]

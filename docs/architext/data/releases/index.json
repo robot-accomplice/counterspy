@@ -1,5 +1,5 @@
 {
-  "currentReleaseId": "v0-5-2-inspect-honesty",
+  "currentReleaseId": "v0-5-3-liveness-hardening",
   "releases": [
     {
       "id": "v0-3-0-feedback",
@@ -63,6 +63,27 @@
         "stretch": 0
       },
       "file": "v0-2-0-tui.json"
+    },
+    {
+      "id": "v0-5-3-liveness-hardening",
+      "version": "0.5.3",
+      "name": "Liveness scoring + backlog hardening",
+      "status": "in-progress",
+      "posture": "on-track",
+      "targetWindow": "on develop, post-v0.5.2",
+      "lastUpdated": "2026-07-14T00:00:00.000Z",
+      "summary": "Current develop cycle: tech-debt hardening already merged (atomic feedback-store writes; Clean egress identity strings at the source), plus the planned liveness dimension (active/armed/dormant, fed into scoring so a dead persistence remnant scores below a live one) and Findings concern-coloring + revisitable decision flags. Real destination names (SNI/DNS) tracked as the next feature.",
+      "counts": {
+        "features": 3,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 0,
+        "complete": 2,
+        "inProgress": 0,
+        "planned": 3,
+        "stretch": 0
+      },
+      "file": "v0-5-3-liveness-hardening.json"
     },
     {
       "id": "v0-4-0-egress",
