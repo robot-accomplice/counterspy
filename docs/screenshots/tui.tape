@@ -14,7 +14,5 @@ Type "counterspy tui --from /tmp/snap.json"
 Sleep 500ms
 Enter
 Sleep 2s
-Type "m"
-Sleep 900ms
 Screenshot "docs/screenshots/tui.png"
 Type "Q"

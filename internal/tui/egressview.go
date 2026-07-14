@@ -397,7 +397,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 		drawText(s, 0, 0, tcell.StyleDefault.Foreground(colWarn), "terminal too small")
 		return
 	}
-	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), "CounterSpy · Egress")
+	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), "CounterSpy · Exfiltration")
 
 	groups := m.orderedGroups()
 	status := "sampling"
@@ -465,11 +465,19 @@ func egressView(m EgressModel, s tcell.Screen) {
 		drawText(s, cx, cy, tcell.StyleDefault.Foreground(colDim), hint)
 	} else {
 		peak := int(framePeak(rows, m.Trend)) // share-of-peak denominator, once per frame
+		// Viewport: expanding an app can push rows past the bottom edge, so scroll to keep the
+		// selected row on-screen (stateless clamp, mirroring the Findings pane).
+		visibleRows := tableBottom - tableTop + 1
+		scrollTop := 0
+		if visibleRows > 0 && m.Selected >= visibleRows {
+			scrollTop = m.Selected - visibleRows + 1
+		}
 		y := tableTop
-		for i, row := range rows {
+		for i := scrollTop; i < len(rows); i++ {
 			if y > tableBottom {
 				break
 			}
+			row := rows[i]
 			drawEgressRow(s, cols, w, y, row, i == m.Selected, m.expanded, m.expandedPID, m.Trend, peak)
 			y++
 		}

@@ -1,0 +1,95 @@
+{
+  "id": "v0-5-2-inspect-honesty",
+  "version": "0.5.2",
+  "name": "Honest inspection + Exfiltration polish",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Patch release from live use. Inspection no longer overstates or hides: 'ENCRYPTED (TLS)' requires real evidence (SNI/handshake/TLS-port), and captured wire bytes are always shown — readable text as text, cleartext-binary as a hexdump — instead of a false 'metadata only'. Plus the Exfiltration tree now scrolls, the views say 'Exfiltration' (not 'Egress'), and the README is reorganized with real screenshots.",
+  "targetWindow": "v0.5.2 (patch on develop→main)",
+  "lastUpdated": "2026-07-14T00:00:00.000Z",
+  "updateSource": "live-use feedback on the exfil inspector + views",
+  "scope": {
+    "required": [
+      {
+        "id": "inspect-honesty",
+        "title": "Evidence-based TLS verdict + always show the wire bytes",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "A throttled cleartext :80 download was branded 'ENCRYPTED (TLS)' because its binary body looked like ciphertext. 'Encrypted (TLS)' now requires positive evidence — a ClientHello SNI, a TLS record header (looksTLS), or a well-known TLS port (mark.PortEnc). And captured bytes are always surfaced: readable text as text (HTTP headers show), cleartext-binary as a hexdump (ASCII gutter surfaces embedded text), TLS ciphertext left unshown (noise). Revises the §6 'never render encrypted' rule, which over-hid.",
+        "owner": "Project maintainers",
+        "workstreamId": "exfil-polish",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/inspect/ . ./internal/tui/ (new: cleartext-binary-as-hex, TLS-ciphertext-not-dumped, hexdump gutter, port-aware TLS)", "live: :80 download reads CLEARTEXT · binary with a hexdump"]
+      },
+      {
+        "id": "exfil-tree-scroll",
+        "title": "Exfiltration tree viewport scroll",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "The tree had no viewport — expanding an app past the bottom edge clipped the overflow with no way to reach it. Added the same stateless-clamp viewport the Findings pane uses, keeping the selected row on-screen.",
+        "owner": "Project maintainers",
+        "workstreamId": "exfil-polish",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/tui/ (scroll regression test)"]
+      },
+      {
+        "id": "exfil-label-and-readme",
+        "title": "Exfiltration labels + README overhaul",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "The views said 'Egress'; aligned the user-facing labels to Exfiltration / exfil (internal egress package/types unchanged). Reorganized the README around a real-screenshot gallery + a prominent sudo/TCC callout, with the explanatory prose moved to the bottom; dropped the synthetic screenshot generator.",
+        "owner": "Project maintainers",
+        "workstreamId": "exfil-polish",
+        "dependsOn": [],
+        "evidence": ["README legend sync test", "real screenshots for Findings/Exfiltration/Zoom/Inspect/CLI"]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "sni-in-tree",
+        "title": "Destination NAMES (SNI/DNS) in the tree, not just IPs",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Show the destination hostname (SNI) instead of IP:port in the Exfiltration tree/zoom. The inspect engine already parses the ClientHello SNI; thread it (or a cached DNS-query correlation) into the observe loop.",
+        "reason": "Scope: reverse-DNS is what nettop -n disables for speed (the 5s stall), so the good version is passive SNI capture / DNS correlation — a real feature, not a config flip. Next up.",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": []
+  },
+  "workstreams": [
+    {
+      "id": "exfil-polish",
+      "name": "Exfiltration inspector & view polish",
+      "owner": "Project maintainers",
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "Live-use hardening of the v0.5.0 exfil work: the inspector tells the truth about encryption and shows the actual wire bytes, the tree scrolls, the labels are consistent, and the README leads with real screenshots.",
+      "progress": 100,
+      "itemIds": ["inspect-honesty", "exfil-tree-scroll", "exfil-label-and-readme"],
+      "evidence": ["go test ./... (all pass)", "architext validate"]
+    }
+  ],
+  "blockers": [],
+  "milestones": [
+    {
+      "id": "v052-shipped",
+      "label": "v0.5.2 tagged (honest inspection + polish)",
+      "status": "complete",
+      "targetWindow": "v0.5.2",
+      "order": 1,
+      "itemIds": ["inspect-honesty", "exfil-tree-scroll", "exfil-label-and-readme"]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "gate-v052",
+      "label": "go test ./... (all pass) + vet + gofmt + architext validate",
+      "kind": "test",
+      "status": "complete"
+    }
+  ]
+}
