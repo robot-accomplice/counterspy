@@ -1,6 +1,27 @@
 {
   "decisions": [
     {
+      "id": "dec-liveness-scoring",
+      "status": "accepted",
+      "title": "Liveness is derived once in interpret and feeds both scoring and display",
+      "context": "Run-state was display-only (mark.Classify, 2-state ▸/†) and computed after interpret. A dead persistence remnant (disabled .bak + missing target, the com.ironclad.agent case) therefore scored the same as a live, loaded agent, and the mark layer re-derived a run-state the scorer never saw — a DRY split that could drift.",
+      "decision": "interpret.livenessState derives a 3-state run-state (active ▸ / armed ◐ / dormant †) once, against the live-process set passed into Assess, and stores it on Assessment.Liveness. recommend() caps a dormant subject at Monitor (it cannot execute) unless a tripwire fires; active/armed keep the score-based recommendation (down-weight the dead, never up-weight the live). mark.Classify now only maps that single value to a glyph and adds the socket mark. This reverses the earlier 'liveness never influences scoring' invariant, but only ever to LOWER urgency, so it cannot manufacture a false escalation. Assess itself stays I/O-free — the caller collects running paths — so verdicts remain reproducible from (findings, running).",
+      "consequences": [
+        "A dead remnant no longer reads as urgently as a live agent",
+        "Scored and displayed run-state are the same value — cannot disagree",
+        "armed ◐ distinguishes loaded-not-running from dormant in the UI",
+        "A --from snapshot carries its scan-time liveness, not a re-derivation against a different machine",
+        "Liveness can only reduce a recommendation, never escalate — no new false-positive surface"
+      ],
+      "relatedNodes": [
+        "mod-interpret",
+        "mod-mark"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ]
+    },
+    {
       "id": "dec-pure-scorer",
       "status": "accepted",
       "title": "The scoring engine is a pure function",
