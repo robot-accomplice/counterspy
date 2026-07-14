@@ -18,8 +18,8 @@ func (f *fakeActor) Quarantine(a model.Assessment) (string, error) {
 	f.quarantined = append(f.quarantined, a.Subject.Label)
 	return "/tmp/manifest.json", nil
 }
-func (f *fakeActor) Restore(string) error               { f.restored++; return nil }
-func (f *fakeActor) Label(model.Assessment, bool) error { return nil }
+func (f *fakeActor) RestoreItem(string, model.Assessment) error { f.restored++; return nil }
+func (f *fakeActor) Label(model.Assessment, bool) error         { return nil }
 func (f *fakeActor) Ack(a model.Assessment) error {
 	f.acked = append(f.acked, a.Subject.Key())
 	return nil
@@ -41,10 +41,10 @@ type errActor struct {
 func (e *errActor) Quarantine(model.Assessment) (string, error) {
 	return e.quarantineManifest, e.quarantineErr
 }
-func (e *errActor) Restore(string) error               { return e.restoreErr }
-func (e *errActor) Label(model.Assessment, bool) error { return e.labelErr }
-func (e *errActor) Ack(model.Assessment) error         { return e.ackErr }
-func (e *errActor) Unack(model.Assessment) error       { return e.ackErr }
+func (e *errActor) RestoreItem(string, model.Assessment) error { return e.restoreErr }
+func (e *errActor) Label(model.Assessment, bool) error         { return e.labelErr }
+func (e *errActor) Ack(model.Assessment) error                 { return e.ackErr }
+func (e *errActor) Unack(model.Assessment) error               { return e.ackErr }
 
 func applyOne(m Model, op string, a model.Assessment, actor Actor, lm *string) Model {
 	return applyFindingsCmd(m, Cmd{Op: op, A: a}, actor, lm)
@@ -92,29 +92,47 @@ func TestApplyFindingsCmd_QuarantineErrorNoManifest(t *testing.T) {
 	}
 }
 
-func TestApplyFindingsCmd_RestoreNothingYet(t *testing.T) {
-	var lm string
-	m := applyOne(New(nil, nil), "restore", model.Assessment{}, &fakeActor{}, &lm)
+func TestApplyFindingsCmd_RestoreItemNothingYet(t *testing.T) {
+	var lm string // no manifest yet → nothing quarantined this session
+	m := applyOne(New(nil, nil), "restoreItem", mk("evil", model.RecQuarantine, 14), &fakeActor{}, &lm)
 	if m.Toast != "nothing quarantined this session" {
 		t.Fatalf("toast = %q", m.Toast)
 	}
 }
 
-func TestApplyFindingsCmd_RestoreSuccessClearsDone(t *testing.T) {
+// #8: restoring the selected item clears only THAT item's Done, and drops lastManifest once the
+// session has nothing left to undo.
+func TestApplyFindingsCmd_RestoreItemClearsOnlyThatItem(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	b := mk("other", model.RecQuarantine, 12)
+	lm := "/tmp/manifest.json"
+	m := New([]model.Assessment{a, b}, nil)
+	m.Done = map[string]bool{a.Subject.Key(): true, b.Subject.Key(): true}
+	m = applyOne(m, "restoreItem", a, &fakeActor{}, &lm)
+	if m.Done[a.Subject.Key()] {
+		t.Fatal("the restored item must be cleared from Done")
+	}
+	if !m.Done[b.Subject.Key()] {
+		t.Fatal("a per-item restore must NOT clear other items' Done")
+	}
+	if lm == "" {
+		t.Fatal("lastManifest must remain while other items are still quarantined")
+	}
+	m = applyOne(m, "restoreItem", b, &fakeActor{}, &lm)
+	if len(m.Done) != 0 || lm != "" {
+		t.Fatalf("restoring the last item should empty Done and clear lastManifest: done=%v lm=%q", m.Done, lm)
+	}
+}
+
+func TestApplyFindingsCmd_RestoreItemErrorKeepsDone(t *testing.T) {
 	a := mk("evil", model.RecQuarantine, 14)
 	lm := "/tmp/manifest.json"
 	m := New([]model.Assessment{a}, nil)
 	m.Done = map[string]bool{a.Subject.Key(): true}
-	m = applyOne(m, "restore", model.Assessment{}, &fakeActor{}, &lm)
-	if len(m.Done) != 0 {
-		t.Fatal("restore must clear Done (containment no longer holds)")
+	m = applyOne(m, "restoreItem", a, &errActor{restoreErr: errors.New("nope")}, &lm)
+	if !m.Done[a.Subject.Key()] {
+		t.Fatal("a failed restore must keep the item marked done (containment may still hold)")
 	}
-}
-
-func TestApplyFindingsCmd_RestoreError(t *testing.T) {
-	lm := "/tmp/manifest.json"
-	m := applyOne(New(nil, nil), "restore", model.Assessment{},
-		&errActor{restoreErr: errors.New("nope")}, &lm)
 	if want := "restore finished with issues"; m.Toast[:len(want)] != want {
 		t.Fatalf("toast = %q", m.Toast)
 	}

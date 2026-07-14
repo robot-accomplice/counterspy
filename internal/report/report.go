@@ -12,13 +12,23 @@ import (
 	"counterspy/internal/model"
 )
 
-// RenderJSON emits the machine-readable form fed to CI / the ABORT gate / future UIs.
+// Snapshot is the machine-readable form of a scan: the tool version, any collector GAPS, and the
+// assessments. Carrying gaps here — not only on stderr — is what lets `console --from <snapshot>`
+// surface the same "signal unavailable" notes a live scan shows; without them a snapshot silently
+// reads as a clean bill of health when a collector actually failed (#8, and Rule 13).
+type Snapshot struct {
+	ToolVersion string             `json:"tool_version"`
+	Gaps        []string           `json:"gaps,omitempty"`
+	Assessments []model.Assessment `json:"assessments"`
+}
+
+// RenderJSON emits the machine-readable snapshot fed to CI / the ABORT gate / future UIs.
 // It emits ALL assessments, including Monitor-tier. Consumers MUST gate on
 // Recommendation before surfacing Category/Verdict prominently — a Monitor-tier
 // item's category (e.g. "permission-grant") is low-signal and must not be shown as an
 // alert (cp-9 Audit F-2; spec §8.1 "present, don't scare").
-func RenderJSON(assessments []model.Assessment) ([]byte, error) {
-	return json.MarshalIndent(assessments, "", "  ")
+func RenderJSON(assessments []model.Assessment, gaps []string) ([]byte, error) {
+	return json.MarshalIndent(Snapshot{ToolVersion: model.Version, Gaps: gaps, Assessments: assessments}, "", "  ")
 }
 
 // ANSI style codes. Applied only when color is on (a real terminal, NO_COLOR unset).

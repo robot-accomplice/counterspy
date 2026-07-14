@@ -322,7 +322,7 @@ func drawHelp(s tcell.Screen) {
 		"Keys", "",
 		"j / k, ↑/↓   move selection",
 		"q            quarantine (confirm)",
-		"u            restore this session's quarantine",
+		"u            undo the selected item's quarantine",
 		"g            mark selected as a FALSE positive (legit)",
 		"b            mark selected as correctly flagged (bad)",
 		"a            reviewed · leave it (local; toggles off)",
