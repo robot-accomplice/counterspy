@@ -171,7 +171,7 @@ func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members 
 	if byDest {
 		noun, grouping, nLines = "dest(s)", "by dest", len(destSeriesList(g, mode))
 	}
-	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · egress · %d %s · %s · %s", g.App, nLines, noun, grouping, trendWord(mode)), false)
+	drawPanel(s, x, y, w, h, fmt.Sprintf("%s · exfil · %d %s · %s · %s", g.App, nLines, noun, grouping, trendWord(mode)), false)
 	ix, iy, iw, ih := x+1, y+1, w-2, h-2
 	if iw < 10 || ih < 3 {
 		return

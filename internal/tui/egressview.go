@@ -397,7 +397,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 		drawText(s, 0, 0, tcell.StyleDefault.Foreground(colWarn), "terminal too small")
 		return
 	}
-	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), "CounterSpy · Egress")
+	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), "CounterSpy · Exfiltration")
 
 	groups := m.orderedGroups()
 	status := "sampling"
