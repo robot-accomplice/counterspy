@@ -78,9 +78,9 @@
         "bugFixes": 0,
         "workstreams": 1,
         "blockers": 0,
-        "complete": 2,
+        "complete": 3,
         "inProgress": 0,
-        "planned": 3,
+        "planned": 2,
         "stretch": 0
       },
       "file": "v0-5-3-liveness-hardening.json"
