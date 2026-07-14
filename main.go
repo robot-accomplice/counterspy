@@ -109,7 +109,8 @@ func runScan(flags []string, stdout io.Writer) int {
 	if !dry {
 		ev, gaps = collectWithSpinner()
 	}
-	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
+	running, _ := collect.CollectRunningPaths()
+	assessments := filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 
 	if asJSON {
 		for _, g := range gaps { // gaps to stderr — keep --json clean
@@ -147,12 +148,12 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
-// livenessFor resolves the paths referenced by running processes (best-effort)
-// and classifies each assessment's liveness. A ps failure degrades to "nothing
-// known running" — persistence then reads vestigial rather than crashing (T-4/#23).
+// livenessFor assembles each assessment's display marks (run-state + socket) from the
+// liveness interpret already derived (issue #23). The run-state itself is resolved once,
+// at Assess time, against the live-process set — so a snapshot (`--from`) carries its
+// scan-time liveness instead of being re-derived against a different machine's processes.
 func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
-	running, _ := collect.CollectRunningPaths()
-	return mark.Classify(assessments, running)
+	return mark.Classify(assessments)
 }
 
 func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
@@ -429,7 +430,8 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 		// Show the progress spinner while collecting (before the alt-screen opens) so the
 		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
 		ev, g := collectWithSpinner()
-		assessments = filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
+		running, _ := collect.CollectRunningPaths()
+		assessments = filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 		gaps = g
 	}
 

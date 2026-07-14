@@ -13,19 +13,64 @@ import (
 )
 
 // Assess annotates each finding with a category, verdict, and recommendation.
-func Assess(findings []model.Finding) []model.Assessment {
+// `running` is the set of filesystem paths referenced by live processes (from
+// collect.CollectRunningPaths); it feeds liveness only — Assess itself does no I/O,
+// so verdicts stay reproducible from (findings, running) alone (Rule 6). Pass nil
+// when the run-state is unknown; findings then read as armed/blank, never active.
+func Assess(findings []model.Finding, running map[string]bool) []model.Assessment {
 	out := make([]model.Assessment, 0, len(findings))
 	for _, f := range findings {
 		s := signalsOf(f)
 		cat := categorize(s)
+		live := livenessState(f, running)
 		out = append(out, model.Assessment{
 			Finding:        f,
 			Category:       cat,
 			Verdict:        verdict(f, s),
-			Recommendation: recommend(f, s, cat),
+			Recommendation: recommend(f, s, cat, live),
+			Liveness:       live,
 		})
 	}
 	return out
+}
+
+// livenessState derives the finding's run-state (issue #23). It is the single source of liveness —
+// both scoring (recommend) and display (mark.Classify) read the value it stores on the Assessment,
+// so the two can never disagree. Precedence:
+//   - dormant — a persistence remnant that CANNOT execute: its target is missing/renamed, or its
+//     plist is a disabled ".bak" variant (the com.ironclad.agent case). Caps scoring at Monitor.
+//   - active — a live process, or a persistence target found in `running`.
+//   - armed  — a persistence target that exists (extracted, not missing) but isn't running: loaded,
+//     will fire on its trigger. NOT dormant — it can still execute.
+//   - ""     — no process/persistence run-state (e.g. a bare file or lone TCC grant), OR a
+//     persistence finding whose target couldn't be extracted (an unknown target must not read as a
+//     misleading dormant/armed — swarm cp-T2 F-1).
+func livenessState(f model.Finding, running map[string]bool) string {
+	var hasProc, targetKnown, targetRunning bool
+	for _, e := range f.Evidence {
+		switch e.Kind {
+		case model.KindProcess:
+			hasProc = true
+		case model.KindPersistence:
+			if strings.Contains(e.Summary, "missing/renamed") || strings.Contains(e.Facts["plist"], ".bak") {
+				return model.LivenessDormant
+			}
+			if t := e.Facts["target"]; t != "" {
+				targetKnown = true
+				if running[t] {
+					targetRunning = true
+				}
+			}
+		}
+	}
+	switch {
+	case hasProc, targetRunning:
+		return model.LivenessActive
+	case targetKnown:
+		return model.LivenessArmed
+	default:
+		return ""
+	}
 }
 
 // signals is the boolean shape of a finding, extracted once.
@@ -127,9 +172,14 @@ func verdict(f model.Finding, s signals) string {
 //   - "weak" categories (persistence-only / permission-grant / unknown) never
 //     auto-Quarantine without a tripwire, softening the score-only escalation that
 //     flagged benign unsigned dev tools.
-func recommend(f model.Finding, s signals, cat string) model.Recommendation {
+func recommend(f model.Finding, s signals, cat string, liveness string) model.Recommendation {
 	if f.Tripwire != "" {
 		return model.RecQuarantine
+	}
+	// A dormant remnant (disabled .bak or missing target) cannot execute — cap it at Monitor so a
+	// dead artifact never reads as urgently as a live, loaded one (issue #23). A tripwire still wins.
+	if liveness == model.LivenessDormant {
+		return model.RecMonitor
 	}
 	weak := cat == "persistence-only" || cat == "permission-grant" || cat == "unknown"
 	if s.acceptedSigned && !s.unsigned {
