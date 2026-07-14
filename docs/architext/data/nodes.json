@@ -407,7 +407,7 @@
       "id": "mod-report",
       "type": "module",
       "name": "internal/report",
-      "summary": "Presentation only: executive summary + ranked actionable findings (Monitor tier counted, not dumped) and a JSON form.",
+      "summary": "Presentation only: executive summary + ranked actionable findings (Monitor tier counted, not dumped) and a JSON form. RenderJSON emits a Snapshot {tool_version, gaps, assessments} so a --from load recovers collector gaps.",
       "responsibilities": [
         "Render([]Assessment) string",
         "RenderJSON([]Assessment)"
@@ -451,7 +451,8 @@
       "responsibilities": [
         "Quarantine (refuse allowlisted/protected paths)",
         "Write manifest (undo + RCA trail)",
-        "Restore without clobbering"
+        "Restore without clobbering",
+        "Per-item undo (RestoreItem) — reverse one manifest item, trim it from the manifest"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -461,7 +462,8 @@
       "runtime": "in-process + exec (launchctl)",
       "interfaces": [
         "Quarantine",
-        "Restore"
+        "Restore",
+        "RestoreItem"
       ],
       "dependencies": [
         "mod-model",
