@@ -90,7 +90,8 @@ func view(m Model, s tcell.Screen) {
 		scrollTop = m.Selected - visibleRows + 1
 	}
 	for i := scrollTop; i < len(vis) && i < scrollTop+visibleRows; i++ {
-		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i], m.Liveness[vis[i].Subject.Key()])
+		key := vis[i].Subject.Key()
+		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[key], vis[i], m.Liveness[key], m.Acked[key], m.AckChanged[key])
 	}
 	if len(vis) == 0 {
 		msg := "no findings match"
@@ -103,7 +104,7 @@ func view(m Model, s tcell.Screen) {
 	}
 
 	drawText(s, 2, h-1, def.Foreground(colDim), truncate(
-		"⇥ switch · j/k move · q quarantine · u restore · s sort · / filter · ? help · Q quit", w-3))
+		"⇥ switch · j/k move · q quarantine · a reviewed · u restore · s sort · / filter · ? help · Q quit", w-3))
 	if m.Focus == focusFilter {
 		drawText(s, 2, h-1, def.Foreground(colAccent), truncate("/"+m.Filter+"_  (esc clears)", w-3))
 	}
@@ -120,7 +121,7 @@ func view(m Model, s tcell.Screen) {
 }
 
 // drawListRow renders one finding row within the left pane [0, split).
-func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment, lv mark.Liveness) {
+func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment, lv mark.Liveness, acked, ackChanged bool) {
 	fg := tierColor(a.Recommendation)
 	// Within the Monitor tier (the large com.apple.* tail), color by CONCERN instead of the flat
 	// tier gray so trusted Apple rows (Minimal → dim) recede and a non-Apple/unsigned one (Notable/
@@ -128,6 +129,14 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 	// loud (issue #4).
 	if a.Recommendation == model.RecMonitor {
 		fg = concernColor(a.Concern)
+	}
+	// A reviewed ("leave it") finding recedes — unless its state changed since review, which re-asserts
+	// it in amber so newly-surfaced concern isn't silently masked (issue #4). Quarantined wins (dim).
+	if acked {
+		fg = colDim
+		if ackChanged {
+			fg = colInvestigate
+		}
 	}
 	if done {
 		fg = colDim
@@ -146,8 +155,13 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 	scoreStr := fmt.Sprintf("%d", a.Score)
 	x := drawText(s, 2, y, st.Bold(!done), cluster)
 	name := a.Subject.Display()
-	if done {
-		name = "✓ " + name
+	switch {
+	case done:
+		name = "✓ " + name // quarantined this session
+	case acked && ackChanged:
+		name = "⟳ " + name // reviewed, but the finding changed — look again
+	case acked:
+		name = "☑ " + name // reviewed · leave it
 	}
 	nameX := x + 1
 	nameW := split - 2 - nameX - len(scoreStr)
@@ -311,7 +325,8 @@ func drawHelp(s tcell.Screen) {
 		"u            restore this session's quarantine",
 		"g            mark selected as a FALSE positive (legit)",
 		"b            mark selected as correctly flagged (bad)",
-		"s            sort by score / recommendation",
+		"a            reviewed · leave it (local; toggles off)",
+		"s            sort by score / recommendation / concern",
 		"/            filter by name   ·   esc clears",
 		"?            toggle this help",
 		"Q, Ctrl-C    quit",

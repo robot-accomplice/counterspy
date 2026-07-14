@@ -177,6 +177,24 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 			verdict = "false positive"
 		}
 		m.Toast = "marked " + c.A.Subject.Display() + " as " + verdict
+	case "ack":
+		if err := actor.Ack(c.A); err != nil {
+			m.Toast = "could not record decision: " + err.Error()
+			break
+		}
+		key := c.A.Subject.Key()
+		m.Acked = withKey(m.Acked, key)
+		m.AckChanged = withoutKey(m.AckChanged, key) // just reviewed at the current state → not "changed"
+		m.Toast = "reviewed — leaving " + c.A.Subject.Display() + " (a to undo)"
+	case "unack":
+		if err := actor.Unack(c.A); err != nil {
+			m.Toast = "could not clear decision: " + err.Error()
+			break
+		}
+		key := c.A.Subject.Key()
+		m.Acked = withoutKey(m.Acked, key)
+		m.AckChanged = withoutKey(m.AckChanged, key)
+		m.Toast = "cleared review flag on " + c.A.Subject.Display()
 	}
 	return m
 }

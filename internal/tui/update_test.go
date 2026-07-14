@@ -220,3 +220,18 @@ func TestMoveSel_EmptyListResetsToZero(t *testing.T) {
 		t.Fatalf("moveSel with n=0 should reset selection to 0, got %d", m.Selected)
 	}
 }
+
+// #4: `a` toggles the local review flag — emits "ack" for an undecided finding and "unack" for one
+// already acked (revisitable).
+func TestUpdate_AckToggle(t *testing.T) {
+	m := threeQ()
+	_, cmds := update(m, tcell.KeyRune, 'a')
+	if len(cmds) != 1 || cmds[0].Op != "ack" {
+		t.Fatalf("a on an undecided finding should emit ack, got %+v", cmds)
+	}
+	m.Acked = map[string]bool{m.visible()[0].Subject.Key(): true}
+	_, cmds = update(m, tcell.KeyRune, 'a')
+	if len(cmds) != 1 || cmds[0].Op != "unack" {
+		t.Fatalf("a on an acked finding should emit unack, got %+v", cmds)
+	}
+}

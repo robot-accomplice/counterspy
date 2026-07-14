@@ -46,12 +46,15 @@ type Model struct {
 	Pending     model.Assessment         // the item shown in the confirm modal
 	Done        map[string]bool          // Subject.Key() of quarantined items
 	Liveness    map[string]mark.Liveness // Subject.Key() -> run-state/socket marks
+	Acked       map[string]bool          // Subject.Key() of locally "reviewed / leave it" findings (#4)
+	AckChanged  map[string]bool          // acked but the finding's state has since changed → re-flag
 	Toast       string
 	ReadOnly    bool // --from snapshot: triage only, quarantine disabled (untrusted paths)
 }
 
 func New(assessments []model.Assessment, gaps []string) Model {
-	return Model{Assessments: assessments, Gaps: gaps, Done: map[string]bool{}, Liveness: map[string]mark.Liveness{}}
+	return Model{Assessments: assessments, Gaps: gaps, Done: map[string]bool{}, Liveness: map[string]mark.Liveness{},
+		Acked: map[string]bool{}, AckChanged: map[string]bool{}}
 }
 
 // sortMode is the Findings ordering, cycled by `s`. Score-desc is the default (highest raw signal
