@@ -152,20 +152,23 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 			*lastManifest = mp
 			m.Toast = "quarantined " + c.A.Subject.Display()
 		}
-	case "restore":
+	case "restoreItem":
 		if *lastManifest == "" {
 			m.Toast = "nothing quarantined this session"
 			break
 		}
-		err := actor.Restore(*lastManifest)
-		// Clear Done on ANY result: a partial restore moved SOME items back, so keeping them
-		// marked "✓ quarantined" would misreport containment (ABORT-TUI Domain #1).
-		m.Done = map[string]bool{}
-		if err != nil {
+		key := c.A.Subject.Key()
+		if err := actor.RestoreItem(*lastManifest, c.A); err != nil {
+			// Leave the item marked done: a failed/partial restore means containment may still
+			// hold, so we must NOT misreport it as restored (ABORT-TUI Domain #1, per-item).
 			m.Toast = "restore finished with issues — rescan to confirm: " + err.Error()
-		} else {
-			m.Toast = "restored (reloads at next login)"
+			break
 		}
+		m.Done = withoutKey(m.Done, key)
+		if len(m.Done) == 0 {
+			*lastManifest = "" // nothing left to undo this session
+		}
+		m.Toast = "restored " + c.A.Subject.Display() + " (reloads at next login)"
 	case "labelFP", "labelTP":
 		fp := c.Op == "labelFP"
 		if err := actor.Label(c.A, fp); err != nil {

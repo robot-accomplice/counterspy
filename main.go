@@ -610,7 +610,9 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 	return mp, err
 }
 
-func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
+func (c *cliActor) RestoreItem(manifest string, a model.Assessment) error {
+	return act.RestoreItem(manifest, a.Subject.Key())
+}
 
 // Label records a TP/FP judgement to the local store (no network — submission is a
 // separate, consent-gated step). A read-only snapshot may still be labeled.

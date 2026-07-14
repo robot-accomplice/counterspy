@@ -8,7 +8,7 @@ import (
 
 // Cmd is an effect the event loop must perform (Run executes it). update stays pure.
 type Cmd struct {
-	Op string // "quarantine" | "restore" | "labelFP" | "labelTP" | "ack" | "unack" | "quit"
+	Op string // "quarantine" | "restoreItem" | "labelFP" | "labelTP" | "ack" | "unack" | "quit"
 	A  model.Assessment
 }
 
@@ -85,7 +85,17 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 			m.Pending = v[m.Selected]
 			m.Focus = focusModal
 		case 'u':
-			return m, []Cmd{{Op: "restore"}}
+			// Per-item undo: restore the SELECTED finding if it was quarantined this session
+			// (#8) rather than reversing the whole session at once.
+			if n == 0 || m.Selected >= n {
+				break
+			}
+			sel := v[m.Selected]
+			if !m.Done[sel.Subject.Key()] {
+				m.Toast = "nothing to undo on " + sel.Subject.Display() + " (not quarantined this session)"
+				break
+			}
+			return m, []Cmd{{Op: "restoreItem", A: sel}}
 		case 'g':
 			if n == 0 || m.Selected >= n {
 				break

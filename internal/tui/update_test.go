@@ -97,11 +97,21 @@ func TestUpdate_QuarantineModalCancel(t *testing.T) {
 	}
 }
 
-func TestUpdate_RestoreEmitsCmd(t *testing.T) {
+// #8: `u` is per-item — it restores the SELECTED finding only when that finding was quarantined
+// this session, and otherwise explains why there's nothing to undo (no whole-session sweep).
+func TestUpdate_RestoreItemEmitsCmdForDoneSelection(t *testing.T) {
 	m := threeQ()
-	_, cmds := update(m, tcell.KeyRune, 'u')
-	if len(cmds) != 1 || cmds[0].Op != "restore" {
-		t.Fatalf("u should emit restore: %+v", cmds)
+	// Nothing quarantined yet → u is a no-op with an explanation, not a session-wide restore.
+	m2, cmds := update(m, tcell.KeyRune, 'u')
+	if len(cmds) != 0 || m2.Toast == "" {
+		t.Fatalf("u on a non-quarantined item should emit no cmd and toast: cmds=%+v toast=%q", cmds, m2.Toast)
+	}
+	// Mark the selected item done → u restores just it.
+	sel := m.visible()[m.Selected]
+	m.Done = map[string]bool{sel.Subject.Key(): true}
+	_, cmds = update(m, tcell.KeyRune, 'u')
+	if len(cmds) != 1 || cmds[0].Op != "restoreItem" || cmds[0].A.Subject.Key() != sel.Subject.Key() {
+		t.Fatalf("u should emit restoreItem for the selected done item: %+v", cmds)
 	}
 }
 
