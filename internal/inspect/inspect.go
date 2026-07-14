@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+
+	"counterspy/internal/mark"
 )
 
 // Flow identifies the connection to inspect, taken from the Exfiltration row the user pressed `i`
@@ -37,12 +39,17 @@ type Result struct {
 	Verdict  string // the honest one-line coverage verdict shown to the user
 	Outbound []byte // application bytes sent to the remote (client → target)
 	Inbound  []byte // application bytes received from the remote (target → client)
-	// Per-direction plaintext flags: a direction's bytes may be shown as text ONLY when its own
-	// flag is set, so an encrypted direction is never rendered as text even when the OTHER
-	// direction is plaintext (§6 — the coverage OR is flow-wide, but exposure is per-direction).
+	// Per-direction plaintext flags: a direction's bytes are readable TEXT when set (shown as text);
+	// otherwise the bytes are still shown, as a hexdump. The flag governs text-vs-hex rendering, not
+	// whether content is shown — the wire bytes are always surfaced (§6: never fabricate decryption,
+	// but never hide what actually crossed the wire either).
 	OutboundPlaintext bool
 	InboundPlaintext  bool
-	Err               error // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
+	// Encrypted is true when the flow is CONFIRMED or strongly-presumed TLS: a ClientHello SNI or a
+	// TLS record was seen, or the remote is a well-known TLS port. Distinguishes "ENCRYPTED (TLS)
+	// ciphertext" from "cleartext but binary/opaque" — a :80 flow with a non-text body is NOT TLS.
+	Encrypted bool
+	Err       error // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
 }
 
 // maxInspectBytes bounds how much payload we accumulate for one inspection, across both directions.
@@ -93,6 +100,11 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	r.Outbound, r.Inbound = outbound, inbound
 	r.OutboundPlaintext = looksPlaintext(outbound)
 	r.InboundPlaintext = looksPlaintext(inbound)
+	// TLS only when there's actual evidence — an SNI/handshake or a TLS record — or the remote is a
+	// well-known TLS port. Never infer "encrypted" merely from bytes being non-text: a cleartext
+	// download's binary body is opaque but NOT TLS (the reported :80 mislabel).
+	r.Encrypted = r.SNI != "" || looksTLS(outbound) || looksTLS(inbound) ||
+		mark.PortEnc(int(flow.Remote.Port())) == mark.EncTLS
 
 	switch {
 	case r.OutboundPlaintext || r.InboundPlaintext:
@@ -100,10 +112,13 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		r.Verdict = "plaintext — readable (not encrypted)"
 	case len(outbound) > 0 || len(inbound) > 0:
 		r.Coverage, r.Tier = CoverageMetadata, "metadata"
-		if r.SNI != "" {
-			r.Verdict = "ENCRYPTED · SNI " + r.SNI + " · not decrypted (metadata only)"
-		} else {
-			r.Verdict = "ENCRYPTED · not decrypted (metadata only)"
+		switch {
+		case r.Encrypted && r.SNI != "":
+			r.Verdict = "ENCRYPTED · SNI " + r.SNI + " · TLS ciphertext (not decryptable)"
+		case r.Encrypted:
+			r.Verdict = "ENCRYPTED · TLS ciphertext (not decryptable)"
+		default:
+			r.Verdict = "CLEARTEXT · binary / non-text payload (shown as hex — not TLS)"
 		}
 	case r.Err != nil:
 		r.Verdict = "capture failed: " + r.Err.Error() // honest failure, not a clean "no data"
@@ -138,4 +153,12 @@ func looksPlaintext(b []byte) bool {
 		}
 	}
 	return printable*100/n >= 85
+}
+
+// looksTLS reports whether bytes begin with a TLS record header — a content type (0x14–0x18)
+// followed by a plausible protocol version (0x03 0x00–0x04). Positive evidence of TLS, unlike the
+// weak "not printable" negative in looksPlaintext, so a binary cleartext payload isn't mistaken for
+// ciphertext.
+func looksTLS(b []byte) bool {
+	return len(b) >= 3 && b[0] >= 0x14 && b[0] <= 0x18 && b[1] == 0x03 && b[2] <= 0x04
 }
