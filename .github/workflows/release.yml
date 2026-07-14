@@ -8,9 +8,18 @@ permissions:
   contents: write
 
 jobs:
+  # Gate the release on the SAME comprehensive checks CI runs — a tag never publishes code that
+  # wouldn't pass CI.
+  checks:
+    uses: ./.github/workflows/checks.yml
+    secrets: inherit
+
   goreleaser:
+    needs: checks
     # macOS runner so the produced binaries match the platform; the build itself is pure Go.
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,9 +29,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: run tests before releasing
-        run: go test ./...
 
       - uses: goreleaser/goreleaser-action@v6
         with:

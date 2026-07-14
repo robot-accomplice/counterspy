@@ -10,13 +10,23 @@ builds:
   - id: counterspy
     main: .
     binary: counterspy
+    # cgo MUST be on: the code-signature probe (codesign_darwin.go) is a cgo file, and Go drops
+    # every cgo file when CGO_ENABLED=0 — silently shipping a binary with no codesign checks
+    # (guarded at compile time by codesign_cgo_required.go). Cross-compiling amd64 from the arm64
+    # macOS runner needs the x86_64 clang target, which the macOS universal SDK provides.
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - darwin
     goarch:
       - amd64
       - arm64
+    overrides:
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+          - CC=clang -arch x86_64
     flags:
       - -trimpath
     ldflags:
