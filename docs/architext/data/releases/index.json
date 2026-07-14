@@ -1,5 +1,5 @@
 {
-  "currentReleaseId": "v0-5-1-cgo-ci",
+  "currentReleaseId": "v0-5-2-inspect-honesty",
   "releases": [
     {
       "id": "v0-3-0-feedback",
@@ -126,6 +126,27 @@
         "stretch": 0
       },
       "file": "v0-5-1-cgo-ci.json"
+    },
+    {
+      "id": "v0-5-2-inspect-honesty",
+      "version": "0.5.2",
+      "name": "Honest inspection + Exfiltration polish",
+      "status": "complete",
+      "posture": "on-track",
+      "targetWindow": "v0.5.2 (patch on develop→main)",
+      "lastUpdated": "2026-07-14T00:00:00.000Z",
+      "summary": "Patch release from live use. Inspection no longer overstates or hides: 'ENCRYPTED (TLS)' requires real evidence (SNI/handshake/TLS-port), and captured wire bytes are always shown — readable text as text, cleartext-binary as a hexdump — instead of a false 'metadata only'. Plus the Exfiltration tree now scrolls, the views say 'Exfiltration' (not 'Egress'), and the README is reorganized with real screenshots.",
+      "counts": {
+        "features": 1,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 0,
+        "complete": 3,
+        "inProgress": 0,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-5-2-inspect-honesty.json"
     }
   ]
 }
