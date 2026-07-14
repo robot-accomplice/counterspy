@@ -66,6 +66,27 @@ func TestPlotSeries_EmphasizedWinsColor(t *testing.T) {
 	}
 }
 
+// A series shorter than the plot width must still span the full width (the left column is lit) —
+// otherwise the graph can only ever fill a fraction of the panel (observed: ~45% cap).
+func TestPlotSeries_ShortSeriesFillsFullWidth(t *testing.T) {
+	// 3 samples into an 8-column (16 sub-column) plot must reach the leftmost cell.
+	grid := plotSeries([]graphSeries{{values: []uint64{2, 5, 8}, color: tcell.ColorRed}}, 8, 3, 0)
+	lit := func(col int) bool {
+		for r := 0; r < len(grid); r++ {
+			if grid[r][col].r > 0x2800 {
+				return true
+			}
+		}
+		return false
+	}
+	if !lit(0) {
+		t.Fatal("a short series must still light the leftmost column (stretch to full width)")
+	}
+	if !lit(7) {
+		t.Fatal("the newest sample must reach the rightmost column")
+	}
+}
+
 func TestPlotSeries_EmptyIsBlankNoPanic(t *testing.T) {
 	grid := plotSeries(nil, 3, 2, 0)
 	if len(grid) != 2 || len(grid[0]) != 3 {

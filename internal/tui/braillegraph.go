@@ -22,8 +22,9 @@ type graphCell struct {
 
 // plotSeries rasterizes each series as a braille line into a rows×cols grid sharing one Y-axis
 // scaled to maxY (0 = auto = the max value across all series). Sub-resolution is 2×cols wide and
-// 4×rows tall. The newest sample is right-aligned; a column with no sample stays blank. Emphasized
-// series are plotted last so a selected line wins a shared cell's color (btm's overlap rule).
+// 4×rows tall. Samples are stretched to fill the full width — sample 0 at the left edge, the newest
+// at the right — so a short history still spans the panel. Emphasized series are plotted last so a
+// selected line wins a shared cell's color (btm's overlap rule).
 func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell {
 	subCols, subRows := cols*2, rows*4
 	bits := make([][]byte, rows)
@@ -82,12 +83,15 @@ func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell
 		}
 		n := len(vals)
 		prev := -1
-		for i := 0; i < n; i++ {
-			sx := subCols - n + i // right-align the newest sample
-			if sx < 0 {
-				continue
+		// Stretch the samples across the FULL plot width (sample 0 at the left, newest at the right)
+		// rather than right-aligning a fixed count — otherwise a ring shorter than the plot leaves the
+		// left half permanently blank. Fewer samples than columns → each spans several columns.
+		for sx := 0; sx < subCols; sx++ {
+			idx := n - 1
+			if n > 1 && subCols > 1 {
+				idx = sx * (n - 1) / (subCols - 1)
 			}
-			h := height(vals[i])
+			h := height(vals[idx])
 			set(sx, subRows-1-h, s.color)
 			if prev >= 0 { // fill toward the previous point so the line is continuous, not dotty
 				lo, hi := prev, h
