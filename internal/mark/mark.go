@@ -29,10 +29,25 @@ const (
 
 // Liveness glyphs.
 const (
-	GlyphActive    = '▸' // subject maps to a running process
-	GlyphVestigial = '†' // persistence install whose target is not running
+	GlyphActive    = '▸' // running now (live process, or loaded with a live PID)
+	GlyphArmed     = '◐' // installed/loaded, will fire on a trigger — no live PID (issue #23)
+	GlyphVestigial = '†' // dormant: disabled (.bak) or target missing — cannot execute
 	GlyphSocket    = '↔' // holds a network listener
 )
+
+// LivenessGlyph maps an Assessment.Liveness state to its glyph (0 = no state).
+func LivenessGlyph(state string) rune {
+	switch state {
+	case model.LivenessActive:
+		return GlyphActive
+	case model.LivenessArmed:
+		return GlyphArmed
+	case model.LivenessDormant:
+		return GlyphVestigial
+	default:
+		return 0
+	}
+}
 
 // Encryption annotation: a sealed box (▣) marks a TLS/encrypted flow, an open box (□) marks
 // cleartext, absent = unknown. Both are single runes from the Geometric Shapes block (like the
@@ -274,8 +289,9 @@ func Legend() []LegendRow {
 		{GlyphSigned, "trust", "signed, not notarized", "signed"},
 		{GlyphUnsigned, "trust", "unsigned", "unsigned"},
 		{GlyphRevoked, "trust", "revoked certificate", "revoked"},
-		{GlyphActive, "liveness", "running", "running"},
-		{GlyphVestigial, "liveness", "vestigial (installed, not running)", "vestigial"},
+		{GlyphActive, "liveness", "active (running now)", "active"},
+		{GlyphArmed, "liveness", "armed (loaded, fires on a trigger — no live PID)", "armed"},
+		{GlyphVestigial, "liveness", "dormant (disabled or target missing — cannot execute)", "dormant"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
 		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
 	}

@@ -147,7 +147,19 @@ type Assessment struct {
 	Verdict        string
 	Category       string
 	Recommendation Recommendation
+	// Liveness is the finding's run-state: "active" (running), "armed" (installed/loaded, will fire
+	// on a trigger, no live PID), "dormant" (disabled .bak or missing target — cannot execute), or ""
+	// (not a process/persistence subject). Derived in interpret so it can BOTH down-weight a dead
+	// remnant in scoring and drive the display glyph (issue #23).
+	Liveness string
 }
+
+// Liveness states (Assessment.Liveness).
+const (
+	LivenessActive  = "active"
+	LivenessArmed   = "armed"
+	LivenessDormant = "dormant"
+)
 
 // FeedbackSchema is the FeedbackRecord wire-schema version (independent of tool Version).
 const FeedbackSchema = "1"

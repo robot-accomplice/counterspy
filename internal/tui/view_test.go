@@ -36,7 +36,7 @@ func TestView_HelpShowsMarkLegend(t *testing.T) {
 	view(m, s)
 	s.Show()
 	out := screenText(s)
-	for _, want := range []string{"Marks", "unsigned", "vestigial", "revoked"} {
+	for _, want := range []string{"Marks", "unsigned", "dormant", "revoked"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay should list the mark legend (missing %q):\n%s", want, out)
 		}
