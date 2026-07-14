@@ -51,8 +51,13 @@ PIDs and destinations boxes.
 </p>
 
 **Inspect (`i`) — honest per-flow coverage.** Capture and inspect a single flow. It never
-overstates what it can see: an **encrypted** flow is reported as exactly that — size and
-destination, no payload — and plaintext is shown masked until you press `v`.
+overstates or hides what it sees: a flow reads as "encrypted" only with real TLS evidence, and the
+captured bytes are **always shown** — readable text as text, cleartext-binary as a hexdump (never
+mislabeled as encrypted). Secrets stay masked until you press `v`.
+
+<p align="center">
+  <img src="docs/screenshots/inspect.png" alt="CounterSpy flow inspection: a cleartext port-80 flow honestly labeled CLEARTEXT binary (not TLS), with a hexdump of the payload" width="880">
+</p>
 
 **Plain CLI report (`scan`)** — an executive summary and only the actionable findings. Synthesis,
 not a dump.
