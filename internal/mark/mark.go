@@ -188,53 +188,25 @@ func isAppleAuthority(a string) bool {
 // blank slot. RunState and Socket are independent so ▸ active and ↔ live-socket
 // can co-occur.
 type Liveness struct {
-	RunState rune // GlyphActive, GlyphVestigial, or 0
+	RunState rune // GlyphActive ▸, GlyphArmed ◐, GlyphVestigial †, or 0 — from Assessment.Liveness
 	Socket   rune // GlyphSocket or 0
 }
 
-// Classify derives per-subject liveness (keyed by Subject.Key()). `running` is
-// the set of filesystem paths referenced by running processes — executables and
-// argv path tokens (see collect.CollectRunningPaths / T-4, ESC-1). Rules:
-//   - socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true")
-//   - a finding with process evidence is active (it is a live process)
-//   - else a persistence finding is active iff its target path is running, else vestigial
-//   - otherwise run-state is blank (a file/grant with no process/persistence liveness)
-//
-// Liveness is DISPLAY-ONLY and never influences scoring.
-func Classify(assessments []model.Assessment, running map[string]bool) map[string]Liveness {
+// Classify assembles the per-subject display marks (keyed by Subject.Key()):
+//   - RunState = the glyph for the finding's liveness, which interpret already derived and stored on
+//     Assessment.Liveness (▸ active / ◐ armed / † dormant / blank). Sourcing it from that single
+//     value — rather than re-deriving here — is what keeps the scored run-state and the displayed
+//     run-state from ever disagreeing (issue #23).
+//   - Socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true"). Independent of
+//     RunState, so ▸ active and ↔ live-socket can co-occur.
+func Classify(assessments []model.Assessment) map[string]Liveness {
 	out := make(map[string]Liveness, len(assessments))
 	for _, a := range assessments {
-		var lv Liveness
-		var hasProc bool
-		// Persistence run-state is derived from the extracted target executable
-		// (Facts["target"]), NOT Subject.Path: when target extraction fails,
-		// persistence.go falls Subject.Path back to the plist path, which would
-		// then falsely read as vestigial. An unknown target stays blank, not a
-		// misleading † (swarm cp-T2 review F-1).
-		var targetKnown, targetRunning bool
+		lv := Liveness{RunState: LivenessGlyph(a.Liveness)}
 		for _, e := range a.Evidence {
 			if e.Facts["listener"] == "true" {
 				lv.Socket = GlyphSocket
 			}
-			switch e.Kind {
-			case model.KindProcess:
-				hasProc = true
-			case model.KindPersistence:
-				if t := e.Facts["target"]; t != "" {
-					targetKnown = true
-					if running[t] {
-						targetRunning = true
-					}
-				}
-			}
-		}
-		switch {
-		case hasProc: // a live process wins; process/persistence can't co-occur today (defensive, cp-T2 F-2)
-			lv.RunState = GlyphActive
-		case targetRunning:
-			lv.RunState = GlyphActive
-		case targetKnown:
-			lv.RunState = GlyphVestigial
 		}
 		out[a.Subject.Key()] = lv
 	}
