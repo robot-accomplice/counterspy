@@ -10,19 +10,27 @@
     },
     {
       "id": "roadmap-egress-packet-capture",
-      "title": "Egress destination enrichment via packet capture",
+      "title": "Phase 1 — Passive reveal: destination names + cleartext extraction",
       "kind": "feature",
-      "section": "v0.4.1",
+      "section": "v0.6.0",
       "status": "planned",
-      "summary": "Enrich the egress monitor's destinations with real names and per-flow volume via a root packet tap (pktap/tcpdump) with process attribution — surfacing TLS SNI / DNS names instead of bare cloud IPs. Deferred from v0.4.0 for scope and sequencing: the v0.4.0 observe loop (nettop + lsof) establishes the per-app egress picture first; packet capture adds pcap parsing and a heavier data path best layered on a working monitor. Still root-CLI-feasible (no entitlement), unlike the Network Extension path."
+      "summary": "First phase of the outbound-visibility program (see docs/superpowers/specs/2026-07-14-outbound-traffic-visibility-design.md). Passive DNS-response capture (port 53) builds an IP->hostname cache so the egress tree/zoom/inspect show the name an app actually resolved instead of a bare cloud IP; and the on-demand inspector gains maximal cleartext extraction (structured HTTP request/response, headers, path, body preview) beyond today's text-or-hexdump. No decryption. Reuses a filter-parameterized /dev/bpf capture shared with the per-flow inspector. Names are display-only this phase (raw-IP concern scoring deferred). Foundation for Phases 2-3."
     },
     {
-      "id": "roadmap-egress-payload-inspection",
-      "title": "Egress payload / content inspection",
+      "id": "roadmap-egress-keylog-decrypt",
+      "title": "Phase 2 — TLS key-log decryption (SSLKEYLOGFILE)",
       "kind": "feature",
       "section": "future",
       "status": "planned",
-      "summary": "See the actual CONTENT of what an app exfiltrates, not just destinations/volume and capability-inferred candidates. Requires TLS interception — installing a MITM trust anchor and decrypting flows — which is invasive, itself spyware-shaped, and a trust-sensitive move for an anti-spyware tool. Deferred deliberately and gated behind explicit, per-run user consent and a very high bar. Until then, v0.4.0 answers 'what is being exfiltrated' by INFERENCE (TCC capability x egress), never by reading payloads. Recorded so the ambition is tracked, not silently promised."
+      "summary": "Capture the TLS session secrets that apps export via SSLKEYLOGFILE (browsers, curl, Go/OpenSSL/NSS tools) and decrypt those flows from the Phase-1 pcap. No trust anchor, no MITM, no traffic modification. Coverage is bounded to apps launched with the key-log env set, and honest about the rest (still shown 'encrypted'). Layers a key-log reader + record decryptor onto the Phase-1 capture substrate."
+    },
+    {
+      "id": "roadmap-egress-payload-inspection",
+      "title": "Phase 3 — Transparent proxy: decrypt, redact, block",
+      "kind": "feature",
+      "section": "future",
+      "status": "planned",
+      "summary": "Final phase: a local transparent intercepting proxy using a user-installed, reversible root CA -> broad TLS decryption of already-running apps' outbound HTTPS, PLUS active control: redact sensitive fields from outbound payloads and/or block transmissions outright. This is a deliberate, user-driven capability on the user's own hardware, gated behind explicit per-run consent; it is the one phase that crosses CounterSpy's observe-only network invariant (adds active egress control / DLP). Engineering rails: auditable + reversible CA install as features, never corrupt traffic, fail-mode chosen explicitly. Sequenced last so the passive-visibility foundation ships first."
     },
     {
       "id": "roadmap-signed-notarized-binaries",
