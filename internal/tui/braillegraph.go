@@ -20,11 +20,19 @@ type graphCell struct {
 	color tcell.Color
 }
 
-// plotSeries rasterizes each series as a braille line into a rows×cols grid sharing one Y-axis
-// scaled to maxY (0 = auto = the max value across all series). Sub-resolution is 2×cols wide and
-// 4×rows tall. Samples are stretched to fill the full width — sample 0 at the left edge, the newest
-// at the right — so a short history still spans the panel. Emphasized series are plotted last so a
-// selected line wins a shared cell's color (btm's overlap rule).
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// plotSeries rasterizes each series as a connected braille LINE into a rows×cols grid sharing one
+// Y-axis scaled to maxY (0 = auto = the max value across all series). Sub-resolution is 2×cols wide
+// and 4×rows tall. Consecutive samples are joined by straight line segments (Bresenham), spread to
+// fill the full width — sample 0 at the left edge, the newest at the right — so a short history
+// still spans the panel. Emphasized series are plotted last so a selected line wins a shared cell's
+// color (btm's overlap rule).
 func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell {
 	subCols, subRows := cols*2, rows*4
 	bits := make([][]byte, rows)
@@ -69,8 +77,39 @@ func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell
 		return h
 	}
 	set := func(sx, sy int, c tcell.Color) { // light sub-pixel (sx,sy); sy measured from the TOP
+		if sx < 0 || sx >= subCols || sy < 0 || sy >= subRows {
+			return
+		}
 		bits[sy/4][sx/2] |= brailleBit[sx%2][sy%4]
 		colr[sy/4][sx/2] = c
+	}
+	// line draws a straight braille line between two sub-pixels (Bresenham) — this is what makes the
+	// graph read as clean connected lines (btm-style) instead of a filled/dotty band.
+	line := func(x0, y0, x1, y1 int, c tcell.Color) {
+		dx, dy := abs(x1-x0), -abs(y1-y0)
+		sxStep, syStep := 1, 1
+		if x0 > x1 {
+			sxStep = -1
+		}
+		if y0 > y1 {
+			syStep = -1
+		}
+		e := dx + dy
+		for {
+			set(x0, y0, c)
+			if x0 == x1 && y0 == y1 {
+				break
+			}
+			e2 := 2 * e
+			if e2 >= dy { // independent of the next: a diagonal step advances BOTH
+				e += dy
+				x0 += sxStep
+			}
+			if e2 <= dx {
+				e += dx
+				y0 += syStep
+			}
+		}
 	}
 
 	for _, s := range ordered {
@@ -82,27 +121,23 @@ func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell
 			vals = downsample(vals, subCols)
 		}
 		n := len(vals)
-		prev := -1
-		// Stretch the samples across the FULL plot width (sample 0 at the left, newest at the right)
-		// rather than right-aligning a fixed count — otherwise a ring shorter than the plot leaves the
-		// left half permanently blank. Fewer samples than columns → each spans several columns.
-		for sx := 0; sx < subCols; sx++ {
-			idx := n - 1
-			if n > 1 && subCols > 1 {
-				idx = sx * (n - 1) / (subCols - 1)
+		// Spread the samples across the FULL width (sample 0 at the left, newest at the right) and
+		// connect consecutive samples with straight line segments — a line graph, not a fill.
+		col := func(i int) int {
+			if n <= 1 {
+				return subCols - 1
 			}
-			h := height(vals[idx])
-			set(sx, subRows-1-h, s.color)
-			if prev >= 0 { // fill toward the previous point so the line is continuous, not dotty
-				lo, hi := prev, h
-				if lo > hi {
-					lo, hi = hi, lo
-				}
-				for hh := lo; hh <= hi; hh++ {
-					set(sx, subRows-1-hh, s.color)
-				}
-			}
-			prev = h
+			return i * (subCols - 1) / (n - 1)
+		}
+		if n == 1 {
+			set(subCols-1, subRows-1-height(vals[0]), s.color)
+			continue
+		}
+		px, py := col(0), subRows-1-height(vals[0])
+		for i := 1; i < n; i++ {
+			cx, cy := col(i), subRows-1-height(vals[i])
+			line(px, py, cx, cy, s.color)
+			px, py = cx, cy
 		}
 	}
 

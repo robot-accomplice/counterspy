@@ -87,6 +87,20 @@ func TestPlotSeries_ShortSeriesFillsFullWidth(t *testing.T) {
 	}
 }
 
+// A flat mid-height series must render as a thin line at that height, NOT a band filled down to the
+// baseline — this is the line-graph (vs fill) behavior btm uses.
+func TestPlotSeries_ThinLineNotFilled(t *testing.T) {
+	grid := plotSeries([]graphSeries{{values: []uint64{5, 5, 5, 5}, color: tcell.ColorRed}}, 4, 4, 10)
+	if !gridHasBraille(grid) {
+		t.Fatal("the line must render")
+	}
+	for c := 0; c < 4; c++ { // the bottom (baseline) row must stay blank for a mid-height line
+		if grid[3][c].r > 0x2800 {
+			t.Fatal("a mid-height line must not fill down to the baseline (line graph, not fill)")
+		}
+	}
+}
+
 func TestPlotSeries_EmptyIsBlankNoPanic(t *testing.T) {
 	grid := plotSeries(nil, 3, 2, 0)
 	if len(grid) != 2 || len(grid[0]) != 3 {
