@@ -122,6 +122,13 @@ func view(m Model, s tcell.Screen) {
 // drawListRow renders one finding row within the left pane [0, split).
 func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment, lv mark.Liveness) {
 	fg := tierColor(a.Recommendation)
+	// Within the Monitor tier (the large com.apple.* tail), color by CONCERN instead of the flat
+	// tier gray so trusted Apple rows (Minimal → dim) recede and a non-Apple/unsigned one (Notable/
+	// Elevated) stands out. Actionable Q/I rows keep their tier color so the "review me" cue stays
+	// loud (issue #4).
+	if a.Recommendation == model.RecMonitor {
+		fg = concernColor(a.Concern)
+	}
 	if done {
 		fg = colDim
 	}

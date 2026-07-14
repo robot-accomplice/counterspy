@@ -152,6 +152,11 @@ type Assessment struct {
 	// (not a process/persistence subject). Derived in interpret so it can BOTH down-weight a dead
 	// remnant in scoring and drive the display glyph (issue #23).
 	Liveness string
+	// Concern is a coarse trust×location×behavior band (Minimal→Elevated) derived in interpret,
+	// used to COLOR and optionally sort the Findings view so the large tail of Apple-signed Monitor
+	// rows recedes and the few non-Apple/unsigned ones stand out. It is a legibility hint only — it
+	// never changes the Recommendation or the score (issue #4).
+	Concern ConcernLevel
 }
 
 // Liveness states (Assessment.Liveness).

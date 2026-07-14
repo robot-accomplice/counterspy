@@ -29,6 +29,7 @@ func Assess(findings []model.Finding, running map[string]bool) []model.Assessmen
 			Verdict:        verdict(f, s),
 			Recommendation: recommend(f, s, cat, live),
 			Liveness:       live,
+			Concern:        concernOf(f, s),
 		})
 	}
 	return out
@@ -71,6 +72,105 @@ func livenessState(f model.Finding, running map[string]bool) string {
 	default:
 		return ""
 	}
+}
+
+// concernOf derives the coarse concern band (issue #4) from trust × location × behavior. It exists to
+// make the Findings view legible — NOT to change scoring — so the large tail of Apple-signed system
+// code (~300 Monitor rows) recedes to Minimal and the few non-Apple/unsigned/actively-networking items
+// stand out. Apple-namespace code is the floor (Minimal) unless it is somehow unsigned (defensive —
+// real Apple code never is). Everything else accrues a small additive score, banded like egress concern.
+func concernOf(f model.Finding, s signals) model.ConcernLevel {
+	if isAppleNamespace(f) && !s.unsigned {
+		return model.Minimal
+	}
+	score := 0
+	switch { // trust
+	case s.unsigned:
+		score += 2
+	case !s.acceptedSigned:
+		score++ // signed-but-not-Gatekeeper-accepted, or unknown provenance
+	}
+	switch pathBucket(f.Subject.Path) { // location
+	case "tmp", "hidden":
+		score += 2
+	case "user":
+		score++
+	}
+	if s.listener { // behavior
+		score += 2
+	} else if s.connection {
+		score++
+	}
+	if s.persistence {
+		score++
+	}
+	if s.screen || s.fullDisk || s.inputMon || s.accessibility {
+		score++
+	}
+	return concernBand(score)
+}
+
+// concernBand maps the additive concern score to a band. Mirrors internal/egress band() thresholds so
+// the two concern surfaces read on one scale (the enum is shared; the score inputs differ by domain).
+func concernBand(score int) model.ConcernLevel {
+	switch {
+	case score >= 4:
+		return model.Elevated
+	case score >= 3:
+		return model.Notable
+	case score >= 1:
+		return model.Low
+	default:
+		return model.Minimal
+	}
+}
+
+// isAppleNamespace reports whether a finding is first-party Apple code — a com.apple.* bundle label,
+// a /System path, or a codesign authority Gatekeeper accepted as Apple's. This is the recede-to-floor
+// signal; it is deliberately Apple-only (a NOTARIZED third party is trusted but not floored, since
+// notarized spyware exists).
+func isAppleNamespace(f model.Finding) bool {
+	if strings.HasPrefix(f.Subject.Label, "com.apple.") {
+		return true
+	}
+	if strings.HasPrefix(f.Subject.Path, "/System/") {
+		return true
+	}
+	for _, e := range f.Evidence {
+		if e.Kind == model.KindCodesign {
+			a := e.Facts["authority"]
+			if strings.Contains(a, "Apple") || a == "Software Signing" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pathBucket coarsely classifies where a subject lives, most-concerning first (tmp/hidden > user >
+// system). Empty path (a PID-only subject) buckets as "" (no location signal).
+func pathBucket(p string) string {
+	switch {
+	case p == "":
+		return ""
+	case hasAnyPrefix(p, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"):
+		return "tmp"
+	case strings.Contains(p, "/."):
+		return "hidden"
+	case strings.Contains(p, "/Users/"):
+		return "user"
+	default:
+		return "system"
+	}
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // signals is the boolean shape of a finding, extracted once.

@@ -190,3 +190,38 @@ func TestAssess_LivenessFromRunningSet(t *testing.T) {
 		t.Errorf("a live process is active, got %q", a.Liveness)
 	}
 }
+
+// #4 concern heuristic: Apple-signed system code recedes to Minimal (the ~300-row floor); an unsigned
+// binary in a user path making network connections stands out; a lone notarized quiet app stays low.
+func TestConcernOf(t *testing.T) {
+	codesign := func(signed, authority string) model.Evidence {
+		return model.Evidence{Kind: model.KindCodesign, Facts: map[string]string{"signed": signed, "authority": authority}}
+	}
+	proc := func(fact string) model.Evidence {
+		return model.Evidence{Kind: model.KindProcess, Facts: map[string]string{"net": fact}}
+	}
+	cases := []struct {
+		name string
+		f    model.Finding
+		want model.ConcernLevel
+	}{
+		{"apple system daemon floors at minimal", model.Finding{
+			Subject:  model.Subject{Label: "com.apple.somed", Path: "/System/Library/x"},
+			Evidence: []model.Evidence{codesign("true", "Software Signing")},
+		}, model.Minimal},
+		{"unsigned user-path networking binary stands out", model.Finding{
+			Subject:  model.Subject{Path: "/Users/x/Downloads/thing"},
+			Evidence: []model.Evidence{codesign("false", ""), proc("connection")},
+		}, model.Elevated}, // unsigned(2) + user(1) + connection(1) = 4 → Elevated
+		{"notarized quiet third-party app stays low/minimal", model.Finding{
+			Subject:  model.Subject{Path: "/Applications/Foo.app"},
+			Evidence: []model.Evidence{codesign("true", "Developer ID Application: Foo")},
+		}, model.Minimal},
+	}
+	for _, c := range cases {
+		got := Assess([]model.Finding{c.f}, nil)[0].Concern
+		if got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}

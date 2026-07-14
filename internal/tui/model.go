@@ -41,7 +41,7 @@ type Model struct {
 	Gaps        []string
 	Selected    int // index into visible()
 	Filter      string
-	SortByRec   bool // false = sort by score desc
+	Sort        sortMode // score (default) → rec → concern, cycled by `s`
 	Focus       focusMode
 	Pending     model.Assessment         // the item shown in the confirm modal
 	Done        map[string]bool          // Subject.Key() of quarantined items
@@ -52,6 +52,27 @@ type Model struct {
 
 func New(assessments []model.Assessment, gaps []string) Model {
 	return Model{Assessments: assessments, Gaps: gaps, Done: map[string]bool{}, Liveness: map[string]mark.Liveness{}}
+}
+
+// sortMode is the Findings ordering, cycled by `s`. Score-desc is the default (highest raw signal
+// first); rec groups by action tier; concern groups by the trust×location×behavior band (issue #4).
+type sortMode int
+
+const (
+	findSortScore sortMode = iota
+	findSortRec
+	findSortConcern
+)
+
+func (m sortMode) label() string {
+	switch m {
+	case findSortRec:
+		return "recommendation"
+	case findSortConcern:
+		return "concern"
+	default:
+		return "score"
+	}
 }
 
 func recRank(r model.Recommendation) int {
@@ -76,12 +97,18 @@ func (m Model) visible() []model.Assessment {
 		out = append(out, a)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if m.SortByRec {
+		switch m.Sort {
+		case findSortRec:
 			if recRank(out[i].Recommendation) != recRank(out[j].Recommendation) {
 				return recRank(out[i].Recommendation) < recRank(out[j].Recommendation)
 			}
+		case findSortConcern:
+			// Higher concern first; ConcernLevel is an ascending iota so compare descending.
+			if out[i].Concern != out[j].Concern {
+				return out[i].Concern > out[j].Concern
+			}
 		}
-		return out[i].Score > out[j].Score
+		return out[i].Score > out[j].Score // tiebreak (and the default order)
 	})
 	return out
 }

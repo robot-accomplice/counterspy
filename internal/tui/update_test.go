@@ -32,11 +32,19 @@ func TestUpdate_NavClampsAtEnds(t *testing.T) {
 	}
 }
 
-func TestUpdate_ToggleSort(t *testing.T) {
+func TestUpdate_CycleSort(t *testing.T) {
 	m := threeQ()
 	m, _ = update(m, tcell.KeyRune, 's')
-	if !m.SortByRec {
-		t.Fatal("s should enable sort-by-rec")
+	if m.Sort != findSortRec {
+		t.Fatalf("first s → sort-by-rec, got %v", m.Sort)
+	}
+	m, _ = update(m, tcell.KeyRune, 's')
+	if m.Sort != findSortConcern {
+		t.Fatalf("second s → sort-by-concern, got %v", m.Sort)
+	}
+	m, _ = update(m, tcell.KeyRune, 's')
+	if m.Sort != findSortScore {
+		t.Fatalf("third s wraps back to score, got %v", m.Sort)
 	}
 }
 

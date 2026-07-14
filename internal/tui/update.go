@@ -68,7 +68,8 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		case 'k':
 			return moveSel(m, -1, n), nil
 		case 's':
-			m.SortByRec = !m.SortByRec
+			m.Sort = (m.Sort + 1) % 3
+			m.Toast = "sorted by " + m.Sort.label()
 		case '/':
 			m.Focus = focusFilter
 		case '?':
