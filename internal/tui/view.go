@@ -61,17 +61,23 @@ func view(m Model, s tcell.Screen) {
 		drawText(s, 0, row, def.Foreground(colWarn), truncate("terminal too narrow — resize", w))
 		return
 	}
-	// Panel labels + layout. Reserve the last two rows for footer (h-1) and toast (h-2).
+	// Section rules give the view the same pane structure as the exfil view: a rule closes the
+	// header/counts band, the FINDINGS/DETAIL labels sit in their own band, and a rule opens the
+	// list/detail content. Reserve the last rows for footer (h-1), toast (h-2) and its rule (h-3).
 	split := w / 2
+	drawHRule(s, row, w) // header | labels
+	row++
 	labelRow := row
 	drawText(s, 2, labelRow, def.Foreground(colDim), "FINDINGS")
 	drawText(s, split+2, labelRow, def.Foreground(colDim), "DETAIL")
-	listTop := labelRow + 1
-	contentBottom := h - 3
+	drawHRule(s, labelRow+1, w) // labels | content
+	listTop := labelRow + 2
+	contentBottom := h - 4
 	if contentBottom < listTop {
 		drawText(s, 2, listTop-1, def.Foreground(colWarn), "terminal too small — resize")
 		return
 	}
+	drawHRule(s, h-3, w) // content | footer
 	for y := listTop; y <= contentBottom; y++ {
 		s.SetContent(split, y, '│', nil, def.Foreground(colDivider))
 	}
@@ -87,17 +93,17 @@ func view(m Model, s tcell.Screen) {
 		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i], m.Liveness[vis[i].Subject.Key()])
 	}
 	if len(vis) == 0 {
-		if !m.ShowMonitor && mon > 0 {
-			drawText(s, 2, listTop, def.Foreground(colDim), fmt.Sprintf("nothing needs your attention — %d monitored item(s) hidden (press m)", mon))
-		} else {
-			drawText(s, 2, listTop, def.Foreground(colDim), "no findings match")
+		msg := "no findings match"
+		if m.Filter == "" {
+			msg = "nothing to report — the scan surfaced no findings"
 		}
+		drawText(s, 2, listTop, def.Foreground(colDim), msg)
 	} else if m.Selected < len(vis) {
 		drawDetail(s, split+2, listTop, contentBottom, w-split-3, vis[m.Selected])
 	}
 
 	drawText(s, 2, h-1, def.Foreground(colDim), truncate(
-		"j/k move · q quarantine · u restore · m monitor · s sort · / filter · ? help · Q quit", w-3))
+		"⇥ switch · j/k move · q quarantine · u restore · s sort · / filter · ? help · Q quit", w-3))
 	if m.Focus == focusFilter {
 		drawText(s, 2, h-1, def.Foreground(colAccent), truncate("/"+m.Filter+"_  (esc clears)", w-3))
 	}
@@ -298,7 +304,6 @@ func drawHelp(s tcell.Screen) {
 		"u            restore this session's quarantine",
 		"g            mark selected as a FALSE positive (legit)",
 		"b            mark selected as correctly flagged (bad)",
-		"m            show / hide Monitor tier",
 		"s            sort by score / recommendation",
 		"/            filter by name   ·   esc clears",
 		"?            toggle this help",

@@ -11,7 +11,8 @@ import (
 	"counterspy/internal/model"
 )
 
-const sparkLen = 24 // recent out-rate samples kept per app for the sparkline
+const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence) — wide enough for
+// the zoom graph; the tree's small sparklines downsample this to their column width.
 
 // Monitor holds the sampling state (previous cumulative bytes + per-app spark history) and
 // the injectable exec/join seams. Sample() is called once per tick.
@@ -22,6 +23,10 @@ type Monitor struct {
 	spark     map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
 	sparkPID  map[int][]uint64    // per-PID out-rate history — instance-row sparkline
 	sparkConn map[string][]uint64 // per-connKey out-rate history — connection-row sparkline
+
+	sparkIn     map[string][]uint64 // per-app in-rate history
+	sparkInPID  map[int][]uint64    // per-PID in-rate history
+	sparkInConn map[string][]uint64 // per-connKey in-rate history
 
 	runNettop func() []byte
 	runLsof   func() []byte
@@ -39,11 +44,18 @@ func New(interval float64) *Monitor {
 		spark:     map[string][]uint64{},
 		sparkPID:  map[int][]uint64{},
 		sparkConn: map[string][]uint64{},
+
+		sparkIn:     map[string][]uint64{},
+		sparkInPID:  map[int][]uint64{},
+		sparkInConn: map[string][]uint64{},
 		runNettop: func() []byte {
 			// Hierarchical output (no -P): process rows carry per-PID totals AND connection
 			// sub-rows carry per-connection bytes, so one call feeds both ParseNettop and
 			// ParseNettopConns. ParseNettop skips the connection rows (no name.pid).
-			b, _ := exec.Command("nettop", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			// -n disables DNS/hostname resolution: WITHOUT it nettop blocks ~5s per sample (making
+			// the live view/zoom graph crawl); WITH it a sample returns in ~10ms and endpoints stay
+			// as IPs, which is exactly what the IP-based parser wants.
+			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
 		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
@@ -75,6 +87,7 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	// row shows a real trend, not a flat line. Prune connKeys gone this tick.
 	liveConn := make(map[string]bool, len(curConn))
 	rateOf := make(map[string]uint64, len(curConn))
+	rateInOf := make(map[string]uint64, len(curConn))
 	// First pass: advance each UNIQUE connKey's ring exactly once (two lsof FDs to the same
 	// remote share a key — advancing per-entry would grow the ring 2x/tick and desync rows).
 	for pid, cs := range conns {
@@ -94,6 +107,17 @@ func (m *Monitor) Sample() []model.EgressGroup {
 				s = s[len(s)-sparkLen:]
 			}
 			m.sparkConn[k] = s
+
+			var rin uint64
+			if prev, ok := m.prevConn[k]; ok {
+				rin = RateIn(prev, curConn[k], m.interval)
+			}
+			rateInOf[k] = rin
+			si := append(m.sparkInConn[k], rin)
+			if len(si) > sparkLen {
+				si = si[len(si)-sparkLen:]
+			}
+			m.sparkInConn[k] = si
 		}
 	}
 	// Second pass: assign the (once-advanced) rate + spark to every connection sharing a key.
@@ -102,12 +126,19 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			k := connKey(pid, cs[i].Endpoint.IP, cs[i].Endpoint.Port)
 			cs[i].OutRate = rateOf[k]
 			cs[i].Spark = m.sparkConn[k]
+			cs[i].InRate = rateInOf[k]
+			cs[i].InSpark = m.sparkInConn[k]
 		}
 	}
 	m.prevConn = curConn
 	for k := range m.sparkConn {
 		if !liveConn[k] {
 			delete(m.sparkConn, k)
+		}
+	}
+	for k := range m.sparkInConn {
+		if !liveConn[k] {
+			delete(m.sparkInConn, k)
 		}
 	}
 
@@ -130,13 +161,14 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		app := appName(path, pid)
 		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than
 		// attributing the process's entire historical cumulative output to a single tick.
-		var rate uint64
+		var rate, rateIn uint64
 		if prev, ok := m.prev[pid]; ok {
 			rate = RateOut(prev, cur[pid], m.interval)
+			rateIn = RateIn(prev, cur[pid], m.interval)
 		}
 		insts = append(insts, Instance{
 			PID: pid, App: app, Path: path, Ancestry: collect.Ancestry(procs, pid),
-			Trust: m.trustOf(path), OutRate: rate, OutTotal: cur[pid].Out, InRate: 0,
+			Trust: m.trustOf(path), OutRate: rate, OutTotal: cur[pid].Out, InRate: rateIn,
 			Conns: conns[pid], Capabilities: m.capsOf(path),
 		})
 	}
@@ -157,6 +189,33 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		}
 		m.spark[k] = s
 	}
+	summedIn := map[string]uint64{}
+	for _, in := range insts {
+		k := in.Path
+		if k == "" {
+			k = in.App
+		}
+		summedIn[k] += in.InRate
+	}
+	for k, r := range summedIn {
+		s := append(m.sparkIn[k], r)
+		if len(s) > sparkLen {
+			s = s[len(s)-sparkLen:]
+		}
+		m.sparkIn[k] = s
+	}
+	// Prune app keys gone this tick (every live instance seeds `summed`), so the app-level maps
+	// stay bounded like the per-PID/conn rings instead of growing per distinct app-path ever seen (T-14).
+	for k := range m.spark {
+		if _, live := summed[k]; !live {
+			delete(m.spark, k)
+		}
+	}
+	for k := range m.sparkIn {
+		if _, live := summed[k]; !live {
+			delete(m.sparkIn, k)
+		}
+	}
 	// Advance per-PID spark ring buffers so each instance row has its own sparkline. Prune
 	// PIDs absent this tick (process gone / no established connections) to keep the map bounded.
 	livePID := make(map[int]bool, len(insts))
@@ -167,19 +226,31 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			s = s[len(s)-sparkLen:]
 		}
 		m.sparkPID[in.PID] = s
+
+		si := append(m.sparkInPID[in.PID], in.InRate)
+		if len(si) > sparkLen {
+			si = si[len(si)-sparkLen:]
+		}
+		m.sparkInPID[in.PID] = si
 	}
 	for pid := range m.sparkPID {
 		if !livePID[pid] {
 			delete(m.sparkPID, pid)
 		}
 	}
+	for pid := range m.sparkInPID {
+		if !livePID[pid] {
+			delete(m.sparkInPID, pid)
+		}
+	}
 	m.prev = cur
 
-	groups := Aggregate(insts, m.spark)
+	groups := Aggregate(insts, m.spark, m.sparkIn)
 	for i := range groups {
 		// Attach each instance's own history (Aggregate stays per-app; per-PID lives here).
 		for j := range groups[i].Members {
 			groups[i].Members[j].Spark = m.sparkPID[groups[i].Members[j].PID]
+			groups[i].Members[j].InSpark = m.sparkInPID[groups[i].Members[j].PID]
 		}
 		groups[i].Concern = Concern(groups[i])
 		groups[i].ExfilRisk, groups[i].Candidate = Exfil(groups[i])

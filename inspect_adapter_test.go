@@ -1,0 +1,122 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"syscall"
+	"testing"
+
+	"counterspy/internal/inspect"
+	"counterspy/internal/model"
+)
+
+// The coverage mapping is pinned so a future tier added to inspect.Coverage forces a deliberate
+// decision in toInspectView rather than silently defaulting (cp-insC Audit F-3). Readable content
+// is populated ONLY for the plaintext tier; an encrypted/metadata flow exposes byte volumes but
+// never the (cipher)text.
+func TestToInspectView_CoverageMapping(t *testing.T) {
+	cases := []struct {
+		in          inspect.Coverage
+		want        model.InspectCoverage
+		wantContent bool
+	}{
+		{inspect.CoverageNone, model.InspectNone, false},
+		{inspect.CoverageMetadata, model.InspectMetadata, false},
+		{inspect.CoveragePlaintext, model.InspectPlaintext, true},
+	}
+	for _, c := range cases {
+		plain := c.in == inspect.CoveragePlaintext
+		r := inspect.Result{Coverage: c.in, SNI: "api.example.com", Verdict: "v",
+			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n"),
+			OutboundPlaintext: plain, InboundPlaintext: plain}
+		v := toInspectView(r)
+		if v.Coverage != c.want {
+			t.Errorf("coverage %d → %d, want %d", c.in, v.Coverage, c.want)
+		}
+		hasContent := v.Sent != "" || v.Received != ""
+		if hasContent != c.wantContent {
+			t.Errorf("coverage %d: content present=%v, want %v", c.in, hasContent, c.wantContent)
+		}
+		// Byte volumes map from the raw bytes and are reported for ANY coverage, so an encrypted
+		// flow still conveys its shape (one direction may legitimately be 0 — not asserted here).
+		if v.SentBytes != len(r.Outbound) || v.RecvBytes != len(r.Inbound) {
+			t.Errorf("coverage %d: byte volumes must equal len(Outbound)/len(Inbound)", c.in)
+		}
+		if v.SNI != "api.example.com" {
+			t.Errorf("SNI must pass through, got %q", v.SNI)
+		}
+	}
+}
+
+// §6: when only ONE direction is plaintext, the encrypted direction's bytes must NOT be shown as
+// text — even though flow-wide coverage is Plaintext. (cp-insE-bidir Audit F-1)
+func TestToInspectView_EncryptedDirectionNotShown(t *testing.T) {
+	r := inspect.Result{
+		Coverage: inspect.CoveragePlaintext, // flow-wide OR: inbound is readable
+		Outbound: []byte("\x16\x03\x01ciphertexthandshake"), OutboundPlaintext: false,
+		Inbound: []byte("HTTP/1.1 200 OK\r\n\r\nreadable body"), InboundPlaintext: true,
+	}
+	v := toInspectView(r)
+	if v.Sent != "" {
+		t.Fatalf("encrypted outbound must NOT be shown as text, got %q", v.Sent)
+	}
+	if v.Received == "" {
+		t.Fatal("the plaintext inbound direction must be shown")
+	}
+	// Both volumes still reported so the encrypted direction's activity is visible.
+	if v.SentBytes == 0 || v.RecvBytes == 0 {
+		t.Fatal("byte volumes for both directions must still be reported")
+	}
+}
+
+// A capture failure on the engine result is surfaced on the view (§9 fail-loud), not swallowed.
+func TestToInspectView_SurfacesError(t *testing.T) {
+	v := toInspectView(inspect.Result{Coverage: inspect.CoverageNone, Verdict: "capture failed: x", Err: errors.New("boom")})
+	if v.Err != "boom" {
+		t.Fatalf("engine error must reach the view, got %q", v.Err)
+	}
+}
+
+// sanitizeMultiline keeps line structure (readable protocols are multi-line) but strips terminal
+// control/escape chars so a crafted payload can't inject ANSI into the pane.
+func TestSanitizeMultiline(t *testing.T) {
+	in := "GET /x HTTP/1.1\nHost: e\x1b[31mvil\nX: ok"
+	got := sanitizeMultiline(in)
+	if strings.Contains(got, "\x1b") {
+		t.Fatalf("escape char survived sanitize: %q", got)
+	}
+	if strings.Count(got, "\n") != 2 {
+		t.Fatalf("newlines must be preserved, got %q", got)
+	}
+}
+
+// A non-root capture failure (the common case — the monitor is unprivileged but /dev/bpf isn't)
+// must read as an actionable "relaunch with sudo", not a raw errno; other failures pass through.
+func TestCaptureFailVerdict(t *testing.T) {
+	perm := captureFailVerdict(syscall.EACCES)
+	if !strings.Contains(perm, "sudo") || strings.Contains(perm, "permission denied") {
+		t.Fatalf("permission error should give the actionable sudo message, got %q", perm)
+	}
+	if got := captureFailVerdict(errors.New("device gone")); got != "capture failed: device gone" {
+		t.Fatalf("a non-permission error should surface verbatim, got %q", got)
+	}
+}
+
+func TestRemoteAddrPort(t *testing.T) {
+	if _, ok := remoteAddrPort(model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}}); !ok {
+		t.Error("valid IPv4 endpoint must parse")
+	}
+	if _, ok := remoteAddrPort(model.Conn{Endpoint: model.Endpoint{IP: "not-an-ip", Port: 443}}); ok {
+		t.Error("garbage endpoint must not parse")
+	}
+}
+
+// --no-inspect yields a nil Inspector (disabled); the default is a live inspector.
+func TestNewInspector(t *testing.T) {
+	if newInspector(true) != nil {
+		t.Error("--no-inspect must disable inspection (nil Inspector)")
+	}
+	if newInspector(false) == nil {
+		t.Error("default must provide a live inspector")
+	}
+}

@@ -9,7 +9,7 @@ import (
 
 // Version is stamped into every manifest so an incident can be traced to the exact
 // build (weights, allowlist, rules) that produced a quarantine (ABORT C4).
-const Version = "v0.4.0"
+const Version = "v0.5.0"
 
 // Clean strips control/escape characters from attacker-influenced strings (labels,
 // paths, argv) before they reach a terminal — so a crafted value can't inject ANSI or

@@ -29,3 +29,14 @@ func TestCadence(t *testing.T) {
 		}
 	}
 }
+
+func TestRateIn(t *testing.T) {
+	// 2000 inbound bytes over 2s = 1000 B/s.
+	if got := RateIn(Bytes{In: 100}, Bytes{In: 2100}, 2.0); got != 1000 {
+		t.Fatalf("RateIn = %d, want 1000", got)
+	}
+	// A counter reset (cur < prev) yields 0, never a huge spike (mirrors RateOut).
+	if got := RateIn(Bytes{In: 5000}, Bytes{In: 10}, 1.0); got != 0 {
+		t.Fatalf("RateIn on reset = %d, want 0", got)
+	}
+}

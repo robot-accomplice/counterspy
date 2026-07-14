@@ -65,3 +65,30 @@ func TestTrustLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestPortEnc(t *testing.T) {
+	cases := []struct {
+		port int
+		want EncKind
+	}{
+		{443, EncTLS}, {993, EncTLS}, {8443, EncTLS}, {5228, EncTLS},
+		{80, EncClear}, {21, EncClear}, {143, EncClear},
+		{587, EncUnknown}, {5222, EncUnknown}, // STARTTLS: begins clear, honestly unknown
+		{27123, EncUnknown}, {0, EncUnknown},
+	}
+	for _, c := range cases {
+		if got := PortEnc(c.port); got != c.want {
+			t.Errorf("PortEnc(%d) = %d, want %d", c.port, got, c.want)
+		}
+	}
+	// The TLS glyph is a bare key; cleartext is the same key with a combining overlay.
+	if r, comb := EncGlyph(EncTLS); r != GlyphEncrypted || len(comb) != 0 {
+		t.Errorf("EncTLS glyph should be a bare key, got %q %v", r, comb)
+	}
+	if r, comb := EncGlyph(EncClear); r != GlyphCleartext || len(comb) != 0 {
+		t.Errorf("EncClear glyph should be the cleartext box, got %q %v", r, comb)
+	}
+	if r, comb := EncGlyph(EncUnknown); r != 0 || comb != nil {
+		t.Errorf("EncUnknown must render nothing, got %q %v", r, comb)
+	}
+}

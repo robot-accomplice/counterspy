@@ -42,7 +42,6 @@ type Model struct {
 	Selected    int // index into visible()
 	Filter      string
 	SortByRec   bool // false = sort by score desc
-	ShowMonitor bool
 	Focus       focusMode
 	Pending     model.Assessment         // the item shown in the confirm modal
 	Done        map[string]bool          // Subject.Key() of quarantined items
@@ -66,13 +65,11 @@ func recRank(r model.Recommendation) int {
 	}
 }
 
-// visible applies filter + monitor-collapse + sort. Pure.
+// visible applies filter + sort. Pure. Every tier — including Monitor — is shown; the tool gains
+// nothing by hiding the low-tier items behind a toggle.
 func (m Model) visible() []model.Assessment {
 	out := make([]model.Assessment, 0, len(m.Assessments))
 	for _, a := range m.Assessments {
-		if !m.ShowMonitor && a.Recommendation == model.RecMonitor {
-			continue
-		}
 		if m.Filter != "" && !strings.Contains(strings.ToLower(a.Subject.Display()), strings.ToLower(m.Filter)) {
 			continue
 		}

@@ -14,17 +14,15 @@ func mk(label string, rec model.Recommendation, score int) model.Assessment {
 	}
 }
 
-func TestVisible_HidesMonitorUntilToggled(t *testing.T) {
+// Every tier is shown, Monitor included — there is no hide-monitor toggle (we gain nothing by
+// leaving low-tier items out of the default view).
+func TestVisible_ShowsAllTiersIncludingMonitor(t *testing.T) {
 	m := New([]model.Assessment{
 		mk("q1", model.RecQuarantine, 12),
 		mk("m1", model.RecMonitor, 2),
 	}, nil)
-	if len(m.visible()) != 1 {
-		t.Fatalf("monitor should be hidden by default, got %d", len(m.visible()))
-	}
-	m.ShowMonitor = true
 	if len(m.visible()) != 2 {
-		t.Fatalf("monitor should show when toggled, got %d", len(m.visible()))
+		t.Fatalf("all tiers (incl. Monitor) should be visible by default, got %d", len(m.visible()))
 	}
 }
 

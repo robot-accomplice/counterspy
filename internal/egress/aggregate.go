@@ -27,7 +27,7 @@ type Instance struct {
 // render the binary → instance → connection tree. Grouping is by binary PATH (not name) so
 // two distinct binaries that happen to share a process name stay separate rows; the App name
 // is only the display label. `spark` maps the group key (path) → recent summed out-rate history.
-func Aggregate(insts []Instance, spark map[string][]uint64) []model.EgressGroup {
+func Aggregate(insts []Instance, spark, inSpark map[string][]uint64) []model.EgressGroup {
 	byKey := map[string]*model.EgressGroup{}
 	order := []string{}
 	dests := map[string]map[string]bool{}
@@ -71,6 +71,7 @@ func Aggregate(insts []Instance, spark map[string][]uint64) []model.EgressGroup 
 		g := byKey[key]
 		g.Destinations = distinctEndpoints(g.Conns)
 		g.Spark = spark[key]
+		g.InSpark = inSpark[key]
 		g.Cadence = Cadence(g.Spark)
 		sort.Strings(g.Capabilities)
 		out = append(out, *g)

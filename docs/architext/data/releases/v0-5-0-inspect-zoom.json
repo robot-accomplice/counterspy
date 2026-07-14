@@ -1,0 +1,184 @@
+{
+  "id": "v0-5-0-inspect-zoom",
+  "version": "0.5.0",
+  "name": "Inspection interceptor & egress zoom",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Turns the egress monitor from 'what/where/how much' into 'let me look': native /dev/bpf per-flow inspection with an honest coverage verdict (plaintext vs encrypted-metadata-only), a btm-style per-app zoom dashboard with a braille line graph (by PID or by destination), a port-heuristic encryption glyph across the views, and a live-speed fix (nettop -n) that took sampling from ~5s to ~10ms.",
+  "targetWindow": "v0.5.0 on the spec/exfil-inspect-interceptor branch",
+  "lastUpdated": "2026-07-14T00:00:00.000Z",
+  "updateSource": "SDD + swarm execution of the exfil inspection interceptor + zoom dashboard",
+  "scope": {
+    "required": [
+      {
+        "id": "inspect-interceptor",
+        "title": "Per-flow inspection: native /dev/bpf capture + tier-0/1 coverage verdict",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "`i` on an exfil flow captures it via native /dev/bpf (BIOCSETIF/BIOCSETF, IPv4/IPv6 + TCP framing, link-layer strip, host+TCP kernel filter) and returns an HONEST coverage verdict: plaintext shown masked-until-viewed, or ENCRYPTED reported as metadata-only (size + destination, no payload). Bidirectional, per-direction plaintext gating so an encrypted direction is never shown as text. Engine keeps internal/tui -> model/mark only; root I/O in a main adapter behind the Inspector seam.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/inspect/ ./internal/tui/ .", "root smoke test (COUNTERSPY_LIVE_CAPTURE=1): loopback TLS SNI + filter-drop proof"]
+      },
+      {
+        "id": "trend-modes",
+        "title": "Bidirectional trend: in/out/combined sparklines with legend",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "In-rate collection mirrored across the egress pipeline (per-conn/per-PID/per-app history rings); the TREND column and a contextual legend toggle out / in / combined (`t`) with share-of-peak intensity and green->amber direction coloring.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/egress/ ./internal/tui/"]
+      },
+      {
+        "id": "zoom-dashboard",
+        "title": "btm-style per-app zoom dashboard with a braille line graph",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "`z` blows a group into a four-panel dashboard: a braille LINE graph (Bresenham-interpolated, full-width, one color-matched line per PID or per destination), a selectable PID/destinations table with %-of-group share, destinations, and group metadata. `g` moves focus between the PIDs and destinations boxes (arrow-nav + graph grouping follow the focused box); `i` inspects the selection. Stable plot order (no color flicker); Inspection > Zoom > tree modal precedence.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": ["inspect-interceptor", "trend-modes"],
+        "evidence": ["go test ./internal/tui/ (plotSeries, transitions, focus, render smoke)"]
+      },
+      {
+        "id": "encryption-annotation",
+        "title": "Encryption glyph across the views",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "A sealed-box glyph (TLS) / open-box glyph (cleartext) / blank (unknown) annotates each flow. In the tree and zoom it is a PORT heuristic (well-known TLS vs cleartext ports; STARTTLS stays unknown); in the inspector it reflects the real captured verdict. Documented in the generated legend + README.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": ["inspect-interceptor"],
+        "evidence": ["go test ./internal/mark/ ./internal/tui/", "README legend sync test"]
+      },
+      {
+        "id": "egress-live-speed",
+        "title": "Live-speed fix + faster cadence",
+        "kind": "hardening",
+        "status": "complete",
+        "summary": "Diagnosed by timing the real command: nettop was blocking ~5.03s/sample on reverse-DNS. `nettop -n` returns the same snapshot in ~10ms (endpoints stay IPs, which the parser wants). Sample cadence to ~3Hz (0.3s) and the history ring to 60 samples, so the live view + zoom graph actually update at the tick rate.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": [],
+        "evidence": ["measured nettop -L 1 = 5.03s vs nettop -n -L 1 = 0.01s", "go test ./internal/egress/ ."]
+      },
+      {
+        "id": "console-restructure",
+        "title": "Console restructure + always-show-Monitor",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "Section rules give the exfil and findings views btm-like pane structure; the inspect view is split into title/identity/assessment/content sections and explains WHY an encrypted flow has nothing to view (glyph, not emoji). Removed the hide-Monitor toggle (every tier shown by default); moved the Tab switch-modes hint into the footers; asserted the window title so it stops flipping to 'nettop'.",
+        "owner": "Project maintainers",
+        "workstreamId": "inspect-zoom",
+        "dependsOn": [],
+        "evidence": ["go test ./internal/tui/ ."]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "true-4tuple",
+        "title": "True 4-tuple flow correlation (local port upstream)",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Capture the LOCAL port in the egress collector and thread it through model.Conn + inspect.Flow so same-remote/different-local-port flows never conflate, and scope the kernel BPF filter on it.",
+        "reason": "Scope/dependency: needs new collector data (not a code slip); the current host+remote-port+TCP filter plus userspace correlation covers the common case. Tracked as swarm ticket T-8.",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "tcp-reassembly",
+        "title": "Full TCP segment reassembly",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Sequence tracking + reordering so multi-segment plaintext is reconstructed before the plaintext/encrypted decision, not just first-segment framing.",
+        "reason": "Sequencing: the tier-0/1 verdict (SNI / first-segment plaintext / metadata) is correct without it; reassembly is a depth improvement best layered on the working interceptor. Tracked as T-10.",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "zoom-cpu-mem",
+        "title": "CPU% / Mem% columns in the zoom PID panel",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Add per-PID CPU/mem (ps -axo %cpu,%mem) alongside the network columns in the zoom dashboard.",
+        "reason": "Scope: keeps v0.5.0 network-focused and avoids a new collector; revisit only if the PID panel has spare real estate and it proves pertinent in use.",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "renamed-interpreter-evasion",
+        "title": "Arbitrary-renamed interpreter symlink evasion",
+        "kind": "hardening",
+        "status": "deferred",
+        "summary": "A symlink under a PATH dir pointing at an Apple-signed interpreter (e.g. /opt/x -> python3) run with an inline flag defeats name-based isTrustedShim detection.",
+        "reason": "Wrong layer: closing it needs readlink/stat resolution of argv[0], which is filesystem I/O and breaks the pure-over-bytes persistence parser; belongs in the codesign I/O collector. Attacker also needs write to a PATH dir. Tracked as T-13.",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": [
+      {
+        "id": "tls-decryption",
+        "title": "TLS decryption / MITM",
+        "kind": "feature",
+        "summary": "CounterSpy never decrypts. An encrypted flow is reported as metadata-only by design; injecting a trust anchor to MITM the user's own traffic is a different, hostile-shaped product and explicitly not this release."
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "inspect-zoom",
+      "name": "Inspection interceptor & egress zoom",
+      "owner": "Project maintainers",
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "From egress observation to per-flow inspection + a btm-style zoom dashboard. Built SDD + swarm (single-writer + adversarial fan-out per checkpoint), with a live-capture RCA (4 native-BPF bugs), a review-driven §6 per-direction content fix, a nettop DNS-latency fix diagnosed from real timing, and a line-graph rework. Decoupling invariant held throughout.",
+      "progress": 100,
+      "itemIds": ["inspect-interceptor", "trend-modes", "zoom-dashboard", "encryption-annotation", "egress-live-speed", "console-restructure"],
+      "evidence": ["go test ./... (all pass, -race)", "go vet ./...", "architext validate"]
+    }
+  ],
+  "blockers": [],
+  "milestones": [
+    {
+      "id": "inspect-built",
+      "label": "Inspection interceptor Phase A built + live-verified",
+      "status": "complete",
+      "targetWindow": "v0.5.0",
+      "order": 1,
+      "itemIds": ["inspect-interceptor", "trend-modes"]
+    },
+    {
+      "id": "zoom-built",
+      "label": "Zoom dashboard + encryption glyph + live-speed fix",
+      "status": "complete",
+      "targetWindow": "v0.5.0",
+      "order": 2,
+      "itemIds": ["zoom-dashboard", "encryption-annotation", "egress-live-speed", "console-restructure"]
+    },
+    {
+      "id": "v050-tagged",
+      "label": "v0.5.0 tagged",
+      "status": "complete",
+      "targetWindow": "v0.5.0",
+      "order": 3,
+      "itemIds": []
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "full-gate-v050",
+      "label": "go test ./... (all pass, -race) + vet + gofmt + architext validate",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "live-capture-smoke",
+      "label": "Root live-capture smoke test (loopback TLS SNI + filter-drop) + real-device RCA",
+      "kind": "test",
+      "status": "complete"
+    }
+  ]
+}

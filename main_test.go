@@ -798,6 +798,32 @@ func TestScanSpinner_ShowsProgressAndClears(t *testing.T) {
 	if !strings.HasSuffix(out, "\r\033[K") {
 		t.Fatalf("spinner should clear its line on stop, got %q", out)
 	}
+	// The braille glyph is tinted with the mint accent so the progress line reads as chrome.
+	if !strings.Contains(out, "\033[38;5;79m") {
+		t.Fatalf("spinner glyph should be mint-tinted, got %q", out)
+	}
+}
+
+// NO_COLOR must strip the spinner's tint (https://no-color.org) while still rendering progress.
+func TestScanSpinner_NoColorDropsTint(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var buf bytes.Buffer
+	var done, total int64
+	atomic.StoreInt64(&total, 3)
+	atomic.StoreInt64(&done, 1)
+	stop := make(chan struct{})
+	fin := make(chan struct{})
+	go func() { scanSpinner(&buf, &done, &total, stop); close(fin) }()
+	time.Sleep(120 * time.Millisecond)
+	close(stop)
+	<-fin
+	out := buf.String()
+	if strings.Contains(out, "\033[38;5;79m") {
+		t.Fatalf("NO_COLOR must drop the mint tint, got %q", out)
+	}
+	if !strings.Contains(out, "1/3") {
+		t.Fatalf("progress must still render under NO_COLOR, got %q", out)
+	}
 }
 
 // collectWithSpinner runs the collectors (mocked here — no shelling out), surfaces gaps, and

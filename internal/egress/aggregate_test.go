@@ -16,7 +16,7 @@ func TestAggregate_CollapsesInstancesAndConns(t *testing.T) {
 			Conns: []model.Conn{{PID: 99, Endpoint: model.Endpoint{IP: "17.1.1.1", Port: 443}, Proto: "tcp"}}},
 	}
 	// Spark is keyed by binary PATH now (grouping is path-based).
-	groups := Aggregate(insts, map[string][]uint64{"/x/backuptool": {600, 650, 620}})
+	groups := Aggregate(insts, map[string][]uint64{"/x/backuptool": {600, 650, 620}}, nil)
 	var bt *model.EgressGroup
 	for i := range groups {
 		if groups[i].App == "backuptool" {
@@ -58,7 +58,7 @@ func TestAggregate_DifferentPathsStaySeparate(t *testing.T) {
 		{PID: 222, App: "node", Path: "/opt/x/node", Trust: "notarized", OutRate: 50, OutTotal: 500,
 			Conns: []model.Conn{{PID: 222, Endpoint: model.Endpoint{IP: "10.0.0.2", Port: 8080}, Proto: "tcp", OutRate: 50}}},
 	}
-	groups := Aggregate(insts, map[string][]uint64{"/usr/local/bin/node": {100}, "/opt/x/node": {50}})
+	groups := Aggregate(insts, map[string][]uint64{"/usr/local/bin/node": {100}, "/opt/x/node": {50}}, nil)
 	if len(groups) != 2 {
 		t.Fatalf("groups = %d, want 2 (different binary paths must NOT collapse)", len(groups))
 	}
@@ -82,5 +82,18 @@ func TestAggregate_DifferentPathsStaySeparate(t *testing.T) {
 	}
 	if a.Members[0].PID != 111 || b.Members[0].PID != 222 {
 		t.Fatalf("members not attributed to the right path-group: %+v", groups)
+	}
+}
+
+func TestAggregate_InSpark(t *testing.T) {
+	insts := []Instance{{PID: 1, App: "x", Path: "/x", OutRate: 10, InRate: 40}}
+	spark := map[string][]uint64{"/x": {1, 2, 3}}
+	inSpark := map[string][]uint64{"/x": {7, 8, 9}}
+	g := Aggregate(insts, spark, inSpark)[0]
+	if g.InRate != 40 {
+		t.Fatalf("in-rate must aggregate, got %d", g.InRate)
+	}
+	if len(g.InSpark) != 3 || g.InSpark[2] != 9 {
+		t.Fatalf("in-history must attach to the group, got %v", g.InSpark)
 	}
 }

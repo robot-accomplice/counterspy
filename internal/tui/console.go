@@ -21,7 +21,7 @@ const (
 // (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
 // happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
 // closes `tick` (or exits) to stop.
-func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-chan struct{}, clip func(string) error) error {
+func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error) error {
 	mode := modeFindings
 	em := NewEgress()
 	var lastManifest string
@@ -49,12 +49,18 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 	setSampling := func() { sampling.Store(mode == modeExfil && !em.Paused) }
 
 	draw := func() {
-		if mode == modeFindings {
+		switch {
+		case em.Inspection != nil: // full-screen inspection pane replaces everything
+			drawInspect(s, em.Inspection, em.Reveal)
+		case em.Zoom != nil: // group-zoom dashboard replaces the tree (inspection stacks above it)
+			drawEgressZoom(s, em)
+		case mode == modeFindings:
 			view(m, s)
-		} else {
+			drawConsoleTabs(s, mode, m.ReadOnly)
+		default:
 			egressView(em, s)
+			drawConsoleTabs(s, mode, m.ReadOnly)
 		}
-		drawConsoleTabs(s, mode, m.ReadOnly)
 		s.Show()
 	}
 	draw()
@@ -62,7 +68,9 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 	for {
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab {
+			// Tab switches faces only when the inspection overlay isn't owning the screen (it
+			// must not be left dangling behind the other face).
+			if em.Inspection == nil && em.Zoom == nil && (ev.Key() == tcell.KeyTab || ev.Key() == tcell.KeyBacktab) {
 				if mode == modeFindings {
 					mode = modeExfil
 					setSampling()
@@ -98,6 +106,16 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, tick <-ch
 					} else {
 						next.Status = "copy unavailable"
 					}
+				}
+				if next.InspectReq != nil { // capture+inspect I/O off the pure update (§4)
+					target := *next.InspectReq
+					next.InspectReq = nil
+					view := model.InspectView{Verdict: "inspection disabled (--no-inspect)"}
+					if inspector != nil {
+						view = inspector.Inspect(target.conn)
+					}
+					next.Inspection = &inspection{target: target, view: view}
+					next.Reveal = false
 				}
 				em = next
 				setSampling()
@@ -197,7 +215,7 @@ func drawConsoleTabs(s tcell.Screen, mode consoleMode, readOnly bool) {
 	x = tab(x, "Findings", mode == modeFindings)
 	x = drawText(s, x, 0, def.Foreground(colDivider), " ⇄ ")
 	x = tab(x, "Exfiltration", mode == modeExfil)
-	x = drawText(s, x+1, 0, def.Foreground(colDim), "⇥")
+	// The ⇥ switch hint lives in the footer with the other key hints, not up here.
 	if readOnly && mode == modeFindings {
 		drawText(s, x+2, 0, def.Foreground(colWarn), "· read-only")
 	}

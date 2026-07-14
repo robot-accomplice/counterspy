@@ -34,6 +34,59 @@ const (
 	GlyphSocket    = '↔' // holds a network listener
 )
 
+// Encryption annotation: a sealed box (▣) marks a TLS/encrypted flow, an open box (□) marks
+// cleartext, absent = unknown. Both are single runes from the Geometric Shapes block (like the
+// trust glyphs), so they render where a padlock/key emoji would tofu. In the tree and zoom this is
+// a HEURISTIC from the destination port only (no capture); the inspection pane reflects the real
+// captured verdict.
+const (
+	GlyphEncrypted = '▣'
+	GlyphCleartext = '□'
+)
+
+// EncKind is the encryption classification of a flow.
+type EncKind int
+
+const (
+	EncUnknown EncKind = iota
+	EncTLS             // a well-known TLS-by-default port
+	EncClear           // a well-known cleartext port
+)
+
+// tlsPorts / clearPorts are the well-known ports we classify. STARTTLS ports (587 submission, 5222
+// xmpp) are deliberately absent — they begin in the clear and may or may not upgrade, so claiming
+// either would be dishonest; they stay EncUnknown.
+var tlsPorts = map[int]bool{443: true, 4433: true, 5228: true, 5061: true, 563: true, 636: true,
+	853: true, 990: true, 992: true, 993: true, 995: true, 6514: true, 8443: true, 9443: true, 465: true}
+var clearPorts = map[int]bool{21: true, 23: true, 25: true, 70: true, 79: true, 80: true, 110: true,
+	119: true, 143: true, 389: true, 3128: true, 8000: true, 8080: true}
+
+// PortEnc classifies a destination port as TLS, cleartext, or unknown — a port-only heuristic, not
+// a captured fact.
+func PortEnc(port int) EncKind {
+	switch {
+	case tlsPorts[port]:
+		return EncTLS
+	case clearPorts[port]:
+		return EncClear
+	default:
+		return EncUnknown
+	}
+}
+
+// EncGlyph returns the base rune and combining runes to render for an EncKind — (0, nil) for
+// unknown (nothing drawn). Callers render via a screen's combining-aware SetContent.
+func EncGlyph(k EncKind) (rune, []rune) {
+	switch k {
+	case EncTLS:
+		return GlyphEncrypted, nil
+	case EncClear:
+		return GlyphCleartext, nil
+	default:
+		return 0, nil
+	}
+}
+
 // Concern maps a recommendation tier to its glyph.
 func Concern(r model.Recommendation) rune {
 	switch r {
@@ -224,6 +277,7 @@ func Legend() []LegendRow {
 		{GlyphActive, "liveness", "running", "running"},
 		{GlyphVestigial, "liveness", "vestigial (installed, not running)", "vestigial"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
+		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
 	}
 }
 

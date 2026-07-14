@@ -10,6 +10,14 @@ func RateOut(prev, cur Bytes, intervalSec float64) uint64 {
 	return uint64(float64(cur.Out-prev.Out) / intervalSec)
 }
 
+// RateIn is RateOut for the INbound counter: bytes/sec, clamped to 0 on a counter reset.
+func RateIn(prev, cur Bytes, intervalSec float64) uint64 {
+	if intervalSec <= 0 || cur.In < prev.In {
+		return 0
+	}
+	return uint64(float64(cur.In-prev.In) / intervalSec)
+}
+
 // Cadence classifies an out-rate history (oldest→newest) into a coarse pattern:
 //
 //	one-off  — sent in exactly one sample, silent otherwise
