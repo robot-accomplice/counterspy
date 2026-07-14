@@ -42,20 +42,17 @@ all through the code-sign trust + provenance lens.
 </p>
 
 **Zoom (`z`)** — blow up any app into a btm-style dashboard: a braille throughput graph (one line
-per PID, or per destination via `g`), a selectable table with each PID's rate and %-of-group
-share, its destinations, and group metadata.
+per PID, or **per destination** via `g` — shown here), a selectable, color-matched table with each
+row's rate and %-of-group share, its destinations, and group metadata. `g` moves focus between the
+PIDs and destinations boxes.
 
 <p align="center">
-  <img src="docs/screenshots/zoom-pid.png" alt="CounterSpy zoom dashboard: per-PID throughput graph, share table, destinations, and metadata for one app" width="880">
+  <img src="docs/screenshots/zoom-dest.png" alt="CounterSpy zoom dashboard, by destination: a braille throughput graph, a color-matched destinations table with per-endpoint share, and group metadata" width="880">
 </p>
 
 **Inspect (`i`) — honest per-flow coverage.** Capture and inspect a single flow. It never
 overstates what it can see: an **encrypted** flow is reported as exactly that — size and
 destination, no payload — and plaintext is shown masked until you press `v`.
-
-<p align="center">
-  <img src="docs/screenshots/inspect.png" alt="CounterSpy flow inspection: an encrypted flow honestly reported as metadata-only" width="880">
-</p>
 
 **Plain CLI report (`scan`)** — an executive summary and only the actionable findings. Synthesis,
 not a dump.
