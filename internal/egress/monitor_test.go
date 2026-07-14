@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"strings"
 	"testing"
 
 	"counterspy/internal/collect"
@@ -43,6 +44,38 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	}
 	if g.ExfilRisk < model.Low {
 		t.Fatalf("exfil risk should be set from capabilities: %s", g.ExfilRisk)
+	}
+}
+
+// #9: attacker-influenced identity strings (app name / path / ancestry from a crafted argv/exe
+// path) are run through Clean at the source, so an ANSI/newline payload can't reach storage or the
+// terminal — defense-in-depth over the JSON encoder and the TUI's render-time Clean.
+func TestMonitor_CleansAttackerIdentityStrings(t *testing.T) {
+	m := New(2)
+	m.runNettop = func() []byte {
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,evil.4821,0,200000\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"evil 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/tmp/ev\x1b[31mil serve"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/tmp/ev\x1b[31mil"} } // ANSI in the basename
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	groups := m.Sample()
+	if len(groups) == 0 || len(groups[0].Members) == 0 {
+		t.Fatal("expected one group with a member")
+	}
+	g := groups[0]
+	for _, s := range []string{g.App, g.Path, g.Ancestry, g.Members[0].Path} {
+		if strings.ContainsRune(s, 0x1b) || strings.ContainsRune(s, '\n') {
+			t.Fatalf("identity string reached output uncleaned: %q", s)
+		}
 	}
 }
 

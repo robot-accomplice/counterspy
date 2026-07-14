@@ -651,7 +651,14 @@ func submitFeedback(cfg feedback.Config, store *feedback.Store, tx feedback.Tran
 		return err
 	}
 	fmt.Fprintf(out, "  shared %d record(s). Thank you.\n", len(pending))
-	return store.MarkSent(pending)
+	if err := store.MarkSent(pending); err != nil {
+		// Sent, but the local mark didn't stick — surface it loudly (§13 fail-loud): those records
+		// may re-send next run. The endpoint dedups on nonce+fingerprint, so this is a warning,
+		// not data loss.
+		fmt.Fprintln(out, "  warning: records were sent but could not be marked locally — they may re-send next run (the endpoint dedups):", err)
+		return err
+	}
+	return nil
 }
 
 // chooseTransmitter uses the configured HTTP endpoint when set, else falls back to a local
