@@ -1,0 +1,68 @@
+name: Checks
+
+# Reusable gate — the single source of truth for "is this code releasable?". Called by CI (every
+# push/PR) and by Release (before it publishes), so a release passes the exact same bar as CI.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # Code-signature checks call Security.framework via cgo; the macOS runner has clang, so this
+  # compiles and the darwin integration tests run without sudo or external tools.
+  CGO_ENABLED: "1"
+
+jobs:
+  checks:
+    # macOS runner: codesign/lsof/ps/nettop exist here, and the suite is mock-driven, so tests
+    # need neither sudo nor a live network — they run hermetically in CI.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/'))"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test (race + coverage)
+        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out
+
+      - name: coverage gate (>= 80%)
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9.]+%' | tr -d '%')"
+          echo "Total coverage: ${total}%"
+          awk "BEGIN { exit !(${total} >= 80.0) }" || {
+            echo "::error::coverage ${total}% is below the 80% gate"; exit 1;
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+      # Publishes coverage to Codecov for the live README badge. Requires the Codecov app +
+      # a CODECOV_TOKEN secret (passed by the caller via `secrets: inherit`). Non-fatal until set up.
+      - name: upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          slug: robot-accomplice/counterspy
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

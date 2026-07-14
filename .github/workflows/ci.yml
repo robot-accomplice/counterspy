@@ -1,66 +1,38 @@
 name: CI
 
+# Runs on every push to the long-lived branches and on every PR (feature→develop, develop→main).
+# Feature-branch pushes are validated through their PRs.
 on:
   push:
-    branches: ["main", "feat/**", "swarm/**"]
+    branches: [main, develop]
   pull_request:
 
 permissions:
   contents: read
 
-env:
-  # Code-signature checks call Security.framework via cgo; the macOS runner has clang, so
-  # this compiles and the darwin integration test runs without sudo or external tools.
-  CGO_ENABLED: "1"
-
 jobs:
-  build-test:
-    # macOS runner: codesign/lsof/ps/nettop exist here, and the suite is mock-driven, so
-    # tests need neither sudo nor a live network — they run hermetically in CI.
+  # The full standard gate: gofmt, vet, build, race tests, coverage ≥80%, Codecov.
+  checks:
+    uses: ./.github/workflows/checks.yml
+    secrets: inherit
+
+  # Validate the release build + goreleaser config on every run (snapshot, no publish) so a broken
+  # .goreleaser.yaml or a build that only fails under release flags is caught here — before a tag,
+  # not during the release.
+  release-build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/'))"
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
-          fi
-
-      - name: vet
-        run: go vet ./...
-
-      - name: build
-        run: go build ./...
-
-      - name: test (race + coverage)
-        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out
-
-      - name: coverage gate (>= 80%)
-        run: |
-          total="$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9.]+%' | tr -d '%')"
-          echo "Total coverage: ${total}%"
-          awk "BEGIN { exit !(${total} >= 80.0) }" || {
-            echo "::error::coverage ${total}% is below the 80% gate"; exit 1;
-          }
-
-      - uses: actions/upload-artifact@v4
+      - name: goreleaser build check (snapshot, no publish)
+        uses: goreleaser/goreleaser-action@v6
         with:
-          name: coverage
-          path: coverage.out
-
-      # Publishes coverage to Codecov for the live README badge. Requires the Codecov GitHub
-      # app installed on the repo + a CODECOV_TOKEN repo secret. Non-fatal until that's set up.
-      - name: upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.out
-          slug: robot-accomplice/counterspy
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          version: "~> v2"
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
