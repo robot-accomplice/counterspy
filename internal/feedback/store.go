@@ -49,14 +49,34 @@ func (s *Store) load() ([]entry, error) {
 }
 
 func (s *Store) save(es []entry) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(es, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o600)
+	// Atomic write: a crash mid-write must not corrupt the store. Write a temp file in the SAME
+	// directory (so the rename is atomic — same filesystem), fsync it, then rename over the target.
+	// os.CreateTemp already opens the temp at 0600, matching the store's permissions.
+	tmp, err := os.CreateTemp(dir, ".store-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // no-op after a successful rename; cleans up every error path
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.path)
 }
 
 // Add upserts a record by fingerprint (relabel wins; a re-added sent record re-opens).
