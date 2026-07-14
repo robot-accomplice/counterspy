@@ -362,11 +362,12 @@
       "id": "mod-interpret",
       "type": "module",
       "name": "internal/interpret",
-      "summary": "Pure, rule-based synthesizer: turns each Finding into a verdict, category, and recommendation (Quarantine/Investigate/Monitor).",
+      "summary": "Pure, rule-based synthesizer: turns each Finding into a verdict, category, recommendation (Quarantine/Investigate/Monitor), a liveness run-state (active/armed/dormant), and a coarse concern band (trust×location×behavior) used for coloring/sorting the Findings view.",
       "responsibilities": [
-        "Assess([]Finding) []Assessment",
+        "Assess([]Finding, running) []Assessment",
         "Categorize (keylogger/backdoor/surveillance-capable/...)",
-        "Recommend action"
+        "Recommend action (dormant remnants capped at Monitor)",
+        "Derive liveness (active/armed/dormant) and concern band (minimal→elevated)"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -381,7 +382,8 @@
         "mod-score"
       ],
       "dataHandled": [
-        "scan-findings"
+        "scan-findings",
+        "local-decision"
       ],
       "security": [
         "Deterministic — no LLM in the decision path; verdicts are auditable"
@@ -391,7 +393,8 @@
         "scan-pipeline"
       ],
       "relatedDecisions": [
-        "dec-deterministic-synthesis"
+        "dec-deterministic-synthesis",
+        "dec-liveness-scoring"
       ],
       "knownRisks": [
         "risk-false-positive-volume"
@@ -597,6 +600,47 @@
       "verification": [
         "go test ./internal/feedback/",
         "TestEgressOnly"
+      ]
+    },
+    {
+      "id": "mod-ack",
+      "type": "module",
+      "name": "internal/ack",
+      "summary": "Local, revisitable triage-decision store: records that the user reviewed a finding and chose to 'leave it'. Deliberately separate from internal/feedback — an ack is private and NEVER transmitted; it only affects how the Findings view flags a row. Fingerprints the finding's material state so a later change re-flags it 'reviewed · changed' rather than silently masking new signal.",
+      "responsibilities": [
+        "Fingerprint(Assessment) — stable digest of score + evidence shape (Facts excluded)",
+        "Persist/clear local ack decisions keyed by Subject.Key()",
+        "Atomic write (temp+fsync+rename) under the invoking user's home"
+      ],
+      "owner": "Project maintainers",
+      "sourcePaths": [
+        "internal/ack/ack.go"
+      ],
+      "runtime": "in-process (local file I/O only)",
+      "interfaces": [
+        "Fingerprint",
+        "Store"
+      ],
+      "dependencies": [
+        "mod-model"
+      ],
+      "dataHandled": [
+        "local-decision"
+      ],
+      "security": [
+        "Local-only: acks are never transmitted (no network path in the package)",
+        "Stored under the invoking user's home, resolved even under sudo"
+      ],
+      "observability": [
+        "local ack store (~/.config/counterspy/ack.json)"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [],
+      "knownRisks": [],
+      "verification": [
+        "go test ./internal/ack/"
       ]
     },
     {
