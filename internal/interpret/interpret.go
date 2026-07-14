@@ -18,14 +18,33 @@ func Assess(findings []model.Finding) []model.Assessment {
 	for _, f := range findings {
 		s := signalsOf(f)
 		cat := categorize(s)
+		live := livenessState(f)
 		out = append(out, model.Assessment{
 			Finding:        f,
 			Category:       cat,
 			Verdict:        verdict(f, s),
-			Recommendation: recommend(f, s, cat),
+			Recommendation: recommend(f, s, cat, live),
+			Liveness:       live,
 		})
 	}
 	return out
+}
+
+// livenessState derives the finding's run-state from EVIDENCE (no live process lookup, so scoring
+// stays pure). It only distinguishes "dormant" here — a persistence remnant that CANNOT execute:
+// its target is missing/renamed, or its plist is a disabled ".bak" variant (the com.ironclad.agent
+// case). Active vs armed (running or not) is a display refinement filled in later with the live
+// process set; a subject with neither signal stays "" (issue #23).
+func livenessState(f model.Finding) string {
+	for _, e := range f.Evidence {
+		if e.Kind != model.KindPersistence {
+			continue
+		}
+		if strings.Contains(e.Summary, "missing/renamed") || strings.Contains(e.Facts["plist"], ".bak") {
+			return model.LivenessDormant
+		}
+	}
+	return ""
 }
 
 // signals is the boolean shape of a finding, extracted once.
@@ -127,9 +146,14 @@ func verdict(f model.Finding, s signals) string {
 //   - "weak" categories (persistence-only / permission-grant / unknown) never
 //     auto-Quarantine without a tripwire, softening the score-only escalation that
 //     flagged benign unsigned dev tools.
-func recommend(f model.Finding, s signals, cat string) model.Recommendation {
+func recommend(f model.Finding, s signals, cat string, liveness string) model.Recommendation {
 	if f.Tripwire != "" {
 		return model.RecQuarantine
+	}
+	// A dormant remnant (disabled .bak or missing target) cannot execute — cap it at Monitor so a
+	// dead artifact never reads as urgently as a live, loaded one (issue #23). A tripwire still wins.
+	if liveness == model.LivenessDormant {
+		return model.RecMonitor
 	}
 	weak := cat == "persistence-only" || cat == "permission-grant" || cat == "unknown"
 	if s.acceptedSigned && !s.unsigned {

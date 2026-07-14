@@ -133,3 +133,28 @@ func TestAssess_LowScoreMonitor(t *testing.T) {
 		t.Errorf("recommendation=%q want Monitor", a[0].Recommendation)
 	}
 }
+
+// #23: a dormant persistence remnant (missing target / disabled .bak plist) cannot execute, so it
+// caps at Monitor even at a score that would otherwise Investigate — the com.ironclad.agent case
+// (a dead .bak remnant must not read as urgently as a live agent).
+func TestAssess_DormantRemnantCapsAtMonitor(t *testing.T) {
+	sub := model.Subject{Path: "/x/agent"}
+	f := model.Finding{Subject: sub, Score: 12, Kinds: []model.SignalKind{model.KindPersistence},
+		Evidence: []model.Evidence{{Subject: sub, Kind: model.KindPersistence,
+			Summary: "persistence target is missing/renamed", Weight: 2,
+			Facts: map[string]string{"plist": "/Users/x/Library/LaunchAgents/com.evil.plist.bak.1700000000"}}}}
+	a := Assess([]model.Finding{f})[0]
+	if a.Liveness != model.LivenessDormant {
+		t.Fatalf("missing target / .bak plist → dormant, got %q", a.Liveness)
+	}
+	if a.Recommendation != model.RecMonitor {
+		t.Fatalf("a dormant remnant must cap at Monitor regardless of score, got %s", a.Recommendation)
+	}
+	// Sanity: the same finding NOT dormant would have surfaced (score 12 ≥ ShowThreshold → Investigate).
+	live := model.Finding{Subject: sub, Score: 12, Kinds: []model.SignalKind{model.KindPersistence},
+		Evidence: []model.Evidence{{Subject: sub, Kind: model.KindPersistence, Summary: "user-level LaunchAgent", Weight: 1,
+			Facts: map[string]string{"plist": "/Users/x/Library/LaunchAgents/com.evil.plist"}}}}
+	if a2 := Assess([]model.Finding{live})[0]; a2.Liveness == model.LivenessDormant || a2.Recommendation == model.RecMonitor {
+		t.Fatalf("a non-dormant persistence finding must not be capped by liveness: %+v", a2.Recommendation)
+	}
+}
