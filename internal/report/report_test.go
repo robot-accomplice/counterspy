@@ -117,15 +117,18 @@ func TestRender_OmitsMonitorNoiseFromDetail(t *testing.T) {
 }
 
 func TestRenderJSON_RoundTrips(t *testing.T) {
-	b, err := RenderJSON(sample())
+	b, err := RenderJSON(sample(), []string{"TCC privacy-grant signal unavailable — run with sudo"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var back []model.Assessment
+	var back Snapshot
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back[0].Recommendation != model.RecQuarantine || back[0].Subject.Label != "com.evil" {
-		t.Errorf("json round-trip lost data: %+v", back[0])
+	if back.Assessments[0].Recommendation != model.RecQuarantine || back.Assessments[0].Subject.Label != "com.evil" {
+		t.Errorf("json round-trip lost data: %+v", back.Assessments[0])
+	}
+	if len(back.Gaps) != 1 || back.ToolVersion == "" {
+		t.Errorf("snapshot must carry gaps + tool version: %+v", back)
 	}
 }

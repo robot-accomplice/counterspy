@@ -114,10 +114,9 @@ func runScan(flags []string, stdout io.Writer) int {
 	assessments := filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 
 	if asJSON {
-		for _, g := range gaps { // gaps to stderr — keep --json clean
-			fmt.Fprintln(os.Stderr, "note:", g)
-		}
-		b, err := report.RenderJSON(assessments)
+		// Gaps ride inside the snapshot now (not stderr) so a `--from` load can surface the same
+		// "signal unavailable" notes a live scan shows, instead of reading as a clean bill (#8).
+		b, err := report.RenderJSON(assessments, gaps)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "render:", err)
 			return 1
@@ -421,12 +420,13 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	var assessments []model.Assessment
 	var gaps []string
 	if from != "" {
-		as, err := loadSnapshot(from)
+		as, g, err := loadSnapshot(from)
 		if err != nil {
 			fmt.Fprintln(stdout, "console: cannot read snapshot:", err)
 			return 1
 		}
 		assessments = as
+		gaps = g // a snapshot's collector gaps now surface in --from, same as a live scan (#8)
 	} else {
 		// Show the progress spinner while collecting (before the alt-screen opens) so the
 		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
@@ -539,32 +539,43 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	return 0
 }
 
-// loadSnapshot decodes a `scan --json` snapshot ([]model.Assessment) from a file or stdin ("-").
+// loadSnapshot decodes a `scan --json` snapshot from a file or stdin ("-"), returning the
+// assessments AND any collector gaps recorded at scan time so --from can surface them (#8).
 // maxSnapshotBytes caps an untrusted --from snapshot so a hostile file can't OOM the
-// "safe to open" read-only workflow (ABORT-TUI Attacker #1).
+// "safe to open" read-only workflow (ABORT-TUI Attacker #1). A pre-#8 snapshot was a bare
+// []Assessment; that shape is still accepted (gaps unknown → empty) so old snapshots keep loading.
 const maxSnapshotBytes = 16 << 20 // 16 MiB
 
-func loadSnapshot(path string) ([]model.Assessment, error) {
+func loadSnapshot(path string) ([]model.Assessment, []string, error) {
 	var rc io.Reader
 	if path == "-" {
 		rc = os.Stdin
 	} else {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer f.Close()
 		rc = f
 	}
 	b, err := io.ReadAll(io.LimitReader(rc, maxSnapshotBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(b) > maxSnapshotBytes {
-		return nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
+		return nil, nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
 	}
+	// Current wrapped form: {tool_version, gaps, assessments}.
+	var snap report.Snapshot
+	if err := json.Unmarshal(b, &snap); err == nil && snap.Assessments != nil {
+		return snap.Assessments, snap.Gaps, nil
+	}
+	// Back-compat: a bare []Assessment from a pre-#8 snapshot (gaps unknown).
 	var as []model.Assessment
-	return as, json.Unmarshal(b, &as)
+	if err := json.Unmarshal(b, &as); err != nil {
+		return nil, nil, err
+	}
+	return as, nil, nil
 }
 
 // cliActor adapts internal/act to the tui.Actor interface, capturing the run root+ts and
