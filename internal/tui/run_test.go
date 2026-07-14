@@ -3,9 +3,6 @@ package tui
 import (
 	"errors"
 	"testing"
-	"time"
-
-	"github.com/gdamore/tcell/v2"
 
 	"counterspy/internal/model"
 )
@@ -22,39 +19,6 @@ func (f *fakeActor) Quarantine(a model.Assessment) (string, error) {
 func (f *fakeActor) Restore(string) error               { f.restored++; return nil }
 func (f *fakeActor) Label(model.Assessment, bool) error { return nil }
 
-func TestRun_QuarantineFlow(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
-	}
-	s.SetSize(120, 40)
-	fa := &fakeActor{}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'q') // open modal
-	inject(tcell.KeyEnter, 0)  // confirm
-	inject(tcell.KeyRune, 'Q') // quit
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run did not exit on quit")
-	}
-	if len(fa.quarantined) != 1 || fa.quarantined[0] != "evil" {
-		t.Fatalf("quarantine not called for 'evil': %v", fa.quarantined)
-	}
-}
-
 // errActor lets each test configure exactly what Quarantine/Restore/Label return.
 type errActor struct {
 	quarantineManifest string
@@ -69,199 +33,93 @@ func (e *errActor) Quarantine(model.Assessment) (string, error) {
 func (e *errActor) Restore(string) error               { return e.restoreErr }
 func (e *errActor) Label(model.Assessment, bool) error { return e.labelErr }
 
-func TestRun_NonKeyEventRedraws(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
+func applyOne(m Model, op string, a model.Assessment, actor Actor, lm *string) Model {
+	return applyFindingsCmd(m, Cmd{Op: op, A: a}, actor, lm)
+}
+
+func TestApplyFindingsCmd_QuarantineSuccess(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	var lm string
+	m := New([]model.Assessment{a}, nil)
+	m = applyOne(m, "quarantine", a, &fakeActor{}, &lm)
+	if !m.Done[a.Subject.Key()] {
+		t.Fatal("quarantined item should be marked Done")
 	}
-	s.SetSize(120, 40)
-	fa := &fakeActor{}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-
-	time.Sleep(15 * time.Millisecond)
-	s.PostEvent(tcell.NewEventInterrupt(nil)) // a non-EventKey event → redraw-and-continue branch
-	time.Sleep(15 * time.Millisecond)
-	s.InjectKey(tcell.KeyRune, 'Q', tcell.ModNone)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run did not exit on quit")
+	if lm != "/tmp/manifest.json" {
+		t.Fatalf("lastManifest not set: %q", lm)
+	}
+	if want := "quarantined "; m.Toast[:len(want)] != want {
+		t.Fatalf("toast = %q", m.Toast)
 	}
 }
 
-func TestRun_QuarantinePartialManifestOnError(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_QuarantinePartialManifestOnError(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	var lm string
+	m := applyOne(New([]model.Assessment{a}, nil), "quarantine", a,
+		&errActor{quarantineManifest: "/tmp/partial.json", quarantineErr: errors.New("boom")}, &lm)
+	if lm != "/tmp/partial.json" {
+		t.Fatalf("partial manifest must be recorded for undo, got %q", lm)
 	}
-	s.SetSize(120, 40)
-	fa := &errActor{quarantineManifest: "/tmp/partial.json", quarantineErr: errors.New("bootout failed")}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'q')
-	inject(tcell.KeyEnter, 0)
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "partial state recorded") {
-		t.Fatalf("a quarantine error WITH a manifest should surface the partial-state toast:\n%s", screenText(s))
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if m.Done[a.Subject.Key()] {
+		t.Fatal("a failed quarantine must not mark Done")
 	}
 }
 
-func TestRun_QuarantineErrorNoManifest(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_QuarantineErrorNoManifest(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	var lm string
+	m := applyOne(New([]model.Assessment{a}, nil), "quarantine", a,
+		&errActor{quarantineErr: errors.New("boom")}, &lm)
+	if lm != "" {
+		t.Fatalf("no manifest → nothing to undo, got %q", lm)
 	}
-	s.SetSize(120, 40)
-	fa := &errActor{quarantineErr: errors.New("permission denied")}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'q')
-	inject(tcell.KeyEnter, 0)
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "quarantine failed (nothing changed)") {
-		t.Fatalf("a quarantine error with no manifest should say nothing changed:\n%s", screenText(s))
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if want := "quarantine failed"; m.Toast[:len(want)] != want {
+		t.Fatalf("toast = %q", m.Toast)
 	}
 }
 
-func TestRun_RestoreNothingQuarantinedYet(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
-	}
-	s.SetSize(120, 40)
-	fa := &fakeActor{}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'u')
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "nothing quarantined this session") {
-		t.Fatalf("restoring before any quarantine should say nothing to restore:\n%s", screenText(s))
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_RestoreNothingYet(t *testing.T) {
+	var lm string
+	m := applyOne(New(nil, nil), "restore", model.Assessment{}, &fakeActor{}, &lm)
+	if m.Toast != "nothing quarantined this session" {
+		t.Fatalf("toast = %q", m.Toast)
 	}
 }
 
-func TestRun_RestoreSuccessAfterQuarantine(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
-	}
-	s.SetSize(120, 40)
-	fa := &fakeActor{}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'q')
-	inject(tcell.KeyEnter, 0) // quarantine "evil" → sets lastManifest
-	inject(tcell.KeyRune, 'u')
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "restored (reloads at next login)") {
-		t.Fatalf("a successful restore should confirm reload:\n%s", screenText(s))
-	}
-	if fa.restored != 1 {
-		t.Fatalf("Restore should have been called once, got %d", fa.restored)
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_RestoreSuccessClearsDone(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	lm := "/tmp/manifest.json"
+	m := New([]model.Assessment{a}, nil)
+	m.Done = map[string]bool{a.Subject.Key(): true}
+	m = applyOne(m, "restore", model.Assessment{}, &fakeActor{}, &lm)
+	if len(m.Done) != 0 {
+		t.Fatal("restore must clear Done (containment no longer holds)")
 	}
 }
 
-func TestRun_RestoreErrorAfterQuarantine(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
-	}
-	s.SetSize(120, 40)
-	fa := &errActor{quarantineManifest: "/tmp/manifest.json", restoreErr: errors.New("disk full")}
-	m := New([]model.Assessment{mk("evil", model.RecQuarantine, 14)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'q')
-	inject(tcell.KeyEnter, 0) // quarantine ok → sets lastManifest
-	inject(tcell.KeyRune, 'u')
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "restore finished with issues") {
-		t.Fatalf("a restore error should surface the issues toast:\n%s", screenText(s))
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_RestoreError(t *testing.T) {
+	lm := "/tmp/manifest.json"
+	m := applyOne(New(nil, nil), "restore", model.Assessment{},
+		&errActor{restoreErr: errors.New("nope")}, &lm)
+	if want := "restore finished with issues"; m.Toast[:len(want)] != want {
+		t.Fatalf("toast = %q", m.Toast)
 	}
 }
 
-func TestRun_LabelErrorBranch(t *testing.T) {
-	s := tcell.NewSimulationScreen("")
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
+func TestApplyFindingsCmd_LabelErrorAndSuccess(t *testing.T) {
+	a := mk("evil", model.RecQuarantine, 14)
+	var lm string
+	e := applyOne(New([]model.Assessment{a}, nil), "labelFP", a, &errActor{labelErr: errors.New("x")}, &lm)
+	if want := "could not record label"; e.Toast[:len(want)] != want {
+		t.Fatalf("error toast = %q", e.Toast)
 	}
-	s.SetSize(120, 40)
-	fa := &errActor{labelErr: errors.New("disk full")}
-	m := New([]model.Assessment{mk("beacon", model.RecInvestigate, 8)}, nil)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(s, m, fa) }()
-	inject := func(k tcell.Key, r rune) {
-		time.Sleep(15 * time.Millisecond)
-		s.InjectKey(k, r, tcell.ModNone)
-	}
-	inject(tcell.KeyRune, 'g')
-	time.Sleep(15 * time.Millisecond)
-	if !simContains(s, "could not record label") {
-		t.Fatalf("a label error should surface a toast:\n%s", screenText(s))
-	}
-	inject(tcell.KeyRune, 'Q')
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	ok := applyOne(New([]model.Assessment{a}, nil), "labelTP", a, &fakeActor{}, &lm)
+	if want := "marked "; ok.Toast[:len(want)] != want {
+		t.Fatalf("success toast = %q", ok.Toast)
 	}
 }
 
-// The clone-on-write keeps two Model snapshots independent (Audit F-1).
 func TestWithDone_ClonesNotAliases(t *testing.T) {
 	a := map[string]bool{"x": true}
 	b := withDone(a, "y")
@@ -269,6 +127,6 @@ func TestWithDone_ClonesNotAliases(t *testing.T) {
 		t.Fatal("withDone must not mutate the input map")
 	}
 	if !b["x"] || !b["y"] {
-		t.Fatal("withDone must carry old + new keys")
+		t.Fatal("result should contain both old and new keys")
 	}
 }

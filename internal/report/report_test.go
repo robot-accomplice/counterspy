@@ -5,8 +5,48 @@ import (
 	"strings"
 	"testing"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
+
+func TestRenderShowsClusterAndKey(t *testing.T) {
+	a := model.Assessment{
+		Finding: model.Finding{
+			Subject:  model.Subject{Path: "/tmp/xmrig"},
+			Evidence: []model.Evidence{{Kind: model.KindCodesign, Facts: map[string]string{"signed": "false"}}},
+		},
+		Recommendation: model.RecQuarantine,
+		Verdict:        "unsigned miner",
+	}
+	live := map[string]mark.Liveness{"path:/tmp/xmrig": {RunState: mark.GlyphActive, Socket: mark.GlyphSocket}}
+	out := Render([]model.Assessment{a}, nil, false, live)
+
+	if !strings.Contains(out, "⚑ ○ ▸ ↔") {
+		t.Errorf("expected mark cluster in output:\n%s", out)
+	}
+	if !strings.Contains(out, mark.LegendLine()) {
+		t.Errorf("expected legend footer in output:\n%s", out)
+	}
+	if !strings.Contains(out, string(mark.GlyphQuarantine)+" 1 Quarantine") {
+		t.Errorf("expected tier-glyph summary '⚑ 1 Quarantine':\n%s", out)
+	}
+}
+
+// cp-T5 Audit F-2: a finding with no codesign/liveness evidence renders blank
+// trust + liveness slots at the Render call site, keeping the cluster aligned.
+func TestRenderBlankSlotsCluster(t *testing.T) {
+	a := model.Assessment{
+		Finding:        model.Finding{Subject: model.Subject{Label: "bareproc"}},
+		Recommendation: model.RecInvestigate,
+		Verdict:        "weak isolated signal",
+	}
+	out := Render([]model.Assessment{a}, nil, false, nil)
+	// concern ▲, then three blank slots: "▲      " (glyph + 3×"  " gaps/blanks)
+	want := mark.Cluster(mark.GlyphInvestigate, 0, mark.Liveness{})
+	if !strings.Contains(out, want) {
+		t.Errorf("expected blank-slot cluster %q in output:\n%s", want, out)
+	}
+}
 
 func sample() []model.Assessment {
 	return []model.Assessment{
@@ -32,7 +72,7 @@ func sample() []model.Assessment {
 }
 
 func TestRender_LeadsWithSummaryAndVerdict(t *testing.T) {
-	out := Render(sample(), nil, false)
+	out := Render(sample(), nil, false, nil)
 	// Executive summary counts by recommendation.
 	for _, want := range []string{"1 Quarantine", "1 Monitor"} {
 		if !strings.Contains(out, want) {
@@ -54,7 +94,7 @@ func TestRender_SanitizesAttackerControlledStrings(t *testing.T) {
 		Recommendation: model.RecQuarantine, Category: "backdoor",
 		Verdict: "line1\nline2\x1b[31m",
 	}}
-	out := Render(as, nil, false)
+	out := Render(as, nil, false, nil)
 	if strings.Contains(out, "\x1b") || strings.Contains(out, "\x1b[2K") {
 		t.Errorf("ANSI escape leaked into output:\n%q", out)
 	}
@@ -62,7 +102,7 @@ func TestRender_SanitizesAttackerControlledStrings(t *testing.T) {
 
 // A collector gap is surfaced in the summary (fail loud).
 func TestRender_SurfacesGaps(t *testing.T) {
-	out := Render(sample(), []string{"TCC privacy-grant signal unavailable"}, false)
+	out := Render(sample(), []string{"TCC privacy-grant signal unavailable"}, false, nil)
 	if !strings.Contains(out, "TCC privacy-grant signal unavailable") {
 		t.Errorf("gap not surfaced:\n%s", out)
 	}
@@ -70,7 +110,7 @@ func TestRender_SurfacesGaps(t *testing.T) {
 
 // The low-signal Monitor item is summarized, not front-paged with full evidence.
 func TestRender_OmitsMonitorNoiseFromDetail(t *testing.T) {
-	out := Render(sample(), nil, false)
+	out := Render(sample(), nil, false, nil)
 	if strings.Contains(out, "pid:42 shows weak") {
 		t.Error("Monitor-tier items should be counted in the summary, not detailed")
 	}

@@ -11,7 +11,29 @@ import (
 
 func eg(app string, c model.ConcernLevel, rate uint64) model.EgressGroup {
 	return model.EgressGroup{App: app, Path: "/x/" + app, Concern: c, OutRate: rate,
-		Conns: []model.Conn{{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Proto: "tcp"}}}
+		Conns: []model.Conn{{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Proto: "tcp"}},
+		Members: []model.EgressInstance{{
+			PID: 100, Path: "/x/" + app, Trust: "signed", OutRate: rate,
+			Conns: []model.Conn{{PID: 100, Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Proto: "tcp", OutRate: rate}},
+		}},
+	}
+}
+
+// egMulti builds a group with 2 members (pid 1 has 2 conns, pid 2 has 1 conn), for exercising
+// all 3 levels of the tree.
+func egMulti(app string) model.EgressGroup {
+	return model.EgressGroup{
+		App: app, Path: "/x/" + app,
+		Members: []model.EgressInstance{
+			{PID: 1, Path: "/x/" + app, Conns: []model.Conn{
+				{PID: 1, Endpoint: model.Endpoint{IP: "1.1.1.1", Port: 443}, Proto: "tcp"},
+				{PID: 1, Endpoint: model.Endpoint{IP: "2.2.2.2", Port: 80}, Proto: "tcp"},
+			}},
+			{PID: 2, Path: "/x/" + app, Conns: []model.Conn{
+				{PID: 2, Endpoint: model.Endpoint{IP: "3.3.3.3", Port: 53}, Proto: "udp"},
+			}},
+		},
+	}
 }
 
 func TestEgressUpdate_QuitAndPause(t *testing.T) {
@@ -25,18 +47,48 @@ func TestEgressUpdate_QuitAndPause(t *testing.T) {
 	}
 }
 
-func TestEgressUpdate_ExpandCollapseAddsChildRows(t *testing.T) {
-	m := NewEgress().withGroups([]model.EgressGroup{eg("a", model.Elevated, 900)})
+// TestVisibleRows_ThreeLevelTree walks all 3 levels: collapsed app -> expand app (reveals
+// instances) -> expand an instance (reveals its conns) -> collapse each level back down.
+func TestVisibleRows_ThreeLevelTree(t *testing.T) {
+	m := NewEgress().withGroups([]model.EgressGroup{egMulti("app")})
 	if n := len(m.visibleRows()); n != 1 {
-		t.Fatalf("collapsed = %d rows, want 1", n)
+		t.Fatalf("collapsed app = %d rows, want 1", n)
 	}
-	m, _ = egressUpdate(m, tcell.KeyEnter, 0) // expand selected
-	if n := len(m.visibleRows()); n != 2 {    // group + its 1 conn
-		t.Fatalf("expanded = %d rows, want 2", n)
+
+	m, _ = egressUpdate(m, tcell.KeyEnter, 0) // expand the app (selected row 0 = header)
+	if n := len(m.visibleRows()); n != 3 {    // header + 2 instances
+		t.Fatalf("app-expanded = %d rows, want 1 + len(Members) = 3", n)
 	}
-	m, _ = egressUpdate(m, tcell.KeyLeft, 0) // collapse
+
+	m.Selected = 1 // pid 1's instance row (has 2 conns)
+	m, _ = egressUpdate(m, tcell.KeyRight, 0)
+	if n := len(m.visibleRows()); n != 5 { // header + 2 instances + pid 1's 2 conns
+		t.Fatalf("instance-expanded = %d rows, want 5", n)
+	}
+
+	m, _ = egressUpdate(m, tcell.KeyLeft, 0) // collapse pid 1's conns (selection still on its row)
+	if n := len(m.visibleRows()); n != 3 {
+		t.Fatalf("instance-collapsed = %d rows, want 3", n)
+	}
+
+	m.Selected = 0
+	m, _ = egressUpdate(m, tcell.KeyLeft, 0) // collapse the app
 	if n := len(m.visibleRows()); n != 1 {
-		t.Fatalf("re-collapsed = %d rows, want 1", n)
+		t.Fatalf("app-collapsed = %d rows, want 1", n)
+	}
+}
+
+// TestEgressUpdate_ExpandConnRowIsNoOp confirms leaf (conn) rows have no further level to open.
+func TestEgressUpdate_ExpandConnRowIsNoOp(t *testing.T) {
+	m := NewEgress().withGroups([]model.EgressGroup{egMulti("app")})
+	m, _ = egressUpdate(m, tcell.KeyEnter, 0) // expand app
+	m.Selected = 1
+	m, _ = egressUpdate(m, tcell.KeyEnter, 0) // expand pid 1's instance
+	m.Selected = 2                            // first conn row under pid 1
+	before := len(m.visibleRows())
+	m, _ = egressUpdate(m, tcell.KeyRight, 0) // expanding a leaf is a no-op
+	if n := len(m.visibleRows()); n != before {
+		t.Fatalf("expanding a conn (leaf) row should be a no-op, rows changed %d -> %d", before, n)
 	}
 }
 
@@ -137,5 +189,24 @@ func TestEgressUpdate_SortCyclesAllFourModes(t *testing.T) {
 		if seen[i] != w {
 			t.Fatalf("sort cycle step %d = %v, want %v (full sequence %v)", i, seen[i], w, seen)
 		}
+	}
+}
+
+func TestEgressUpdate_TrendToggle(t *testing.T) {
+	m := NewEgress()
+	if m.Trend != trendOut {
+		t.Fatal("default trend mode must be out")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendIn {
+		t.Fatal("t → in")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendCombined {
+		t.Fatal("t → combined")
+	}
+	m, _ = egressUpdate(m, tcell.KeyRune, 't')
+	if m.Trend != trendOut {
+		t.Fatal("t → back to out")
 	}
 }

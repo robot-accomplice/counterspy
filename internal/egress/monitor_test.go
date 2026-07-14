@@ -16,15 +16,20 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
 	}
 	m.procs = func() map[int]*collect.Proc {
-		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/Users/jon/.hidden/daemon"}}
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/Users/jon/.hidden/daemon serve"}}
+	}
+	// exePaths resolves the REAL executable path (spaces intact) — the fix for the
+	// "Application" mislabel. A spaced path must yield its true base name, not "Application".
+	m.exePaths = func() map[int]string {
+		return map[int]string{4821: "/Users/jon/Library/Application Support/Foo/foo"}
 	}
 	m.trustOf = func(path string) string { return "unsigned" }
 	m.capsOf = func(path string) []string { return []string{"screen", "keystrokes"} }
 
 	m.Sample()           // first tick: establishes the baseline, rate 0
 	groups := m.Sample() // second tick: cur==prev cumulative here, so rate 0 — assert structure
-	if len(groups) != 1 || groups[0].App == "" {
-		t.Fatalf("expected one group, got %+v", groups)
+	if len(groups) != 1 || groups[0].App != "foo" {
+		t.Fatalf("expected one group named 'foo' (spaced path resolved), got %+v", groups)
 	}
 	g := groups[0]
 	if g.Trust != "unsigned" || !g.Background {
@@ -38,6 +43,82 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	}
 	if g.ExfilRisk < model.Low {
 		t.Fatalf("exfil risk should be set from capabilities: %s", g.ExfilRisk)
+	}
+}
+
+// Every instance row gets its OWN sparkline: per-PID out-rate history must accumulate across
+// ticks and attach to each group member (not just the app-level Spark). Guards the "sparklines
+// on every line" behavior.
+func TestMonitor_PerPIDSparkAttachedToMembers(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 100000 * tick // cumulative climbs 100000/tick → per-tick rate 100000
+		return []byte("time,,bytes_in,bytes_out\n15:04:0" + itoa(tick) + ".0,daemon." + itoa(4821) +
+			",0," + itoa(out) + "\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → rate 0, one sample recorded
+	groups := m.Sample() // tick 2: rate 100000, second sample recorded
+	if len(groups) != 1 || len(groups[0].Members) != 1 {
+		t.Fatalf("expected one group with one member, got %+v", groups)
+	}
+	sp := groups[0].Members[0].Spark
+	if len(sp) != 2 {
+		t.Fatalf("member Spark should hold 2 ticks of history, got %v", sp)
+	}
+	if sp[0] != 0 {
+		t.Fatalf("first-sight sample should be rate 0, got %d", sp[0])
+	}
+	if sp[1] == 0 {
+		t.Fatalf("second sample should be the non-zero out-rate, got %d", sp[1])
+	}
+}
+
+// A PID that vanishes (no established connections next tick) must be pruned from the per-PID
+// history so the map stays bounded over a long session.
+func TestMonitor_PerPIDSparkPrunesDeadPIDs(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,0,200000\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.sparkPID) != 1 {
+		t.Fatalf("expected 1 tracked PID after first tick, got %d", len(m.sparkPID))
+	}
+	present = false
+	m.Sample()
+	if len(m.sparkPID) != 0 {
+		t.Fatalf("dead PID should be pruned from per-PID history, still have %d", len(m.sparkPID))
 	}
 }
 
@@ -58,6 +139,7 @@ func TestMonitor_DeterministicOrderAndFirstSightRateZero(t *testing.T) {
 		m.procs = func() map[int]*collect.Proc {
 			return map[int]*collect.Proc{100: {PID: 100, Cmd: "/x/a"}, 200: {PID: 200, Cmd: "/x/b"}}
 		}
+		m.exePaths = func() map[int]string { return map[int]string{100: "/x/a", 200: "/x/b"} }
 		m.trustOf = func(string) string { return "unsigned" }
 		m.capsOf = func(string) []string { return nil }
 		return m
@@ -78,5 +160,230 @@ func TestMonitor_DeterministicOrderAndFirstSightRateZero(t *testing.T) {
 		if a[i].App != b[i].App {
 			t.Fatalf("nondeterministic order at %d: %q vs %q", i, a[i].App, b[i].App)
 		}
+	}
+}
+
+// Every connection leaf row gets its OWN sparkline + rate: nettop's per-connection byte rows
+// are correlated with the lsof-discovered connection and accumulate across ticks.
+func TestMonitor_PerConnRateAndSpark(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 50000 * tick // cumulative climbs 50000/tick → per-tick rate 50000
+		return []byte("time,,bytes_in,bytes_out\n" +
+			"15:04:0" + itoa(tick) + ".0,daemon.4821,0," + itoa(out) + "\n" +
+			"15:04:0" + itoa(tick) + ".0,tcp4 10.0.0.2:5<->198.51.100.7:443,0," + itoa(out) + "\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → conn rate 0
+	groups := m.Sample() // tick 2: conn rate 50000
+	conns := groups[0].Members[0].Conns
+	if len(conns) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+	if conns[0].OutRate != 50000 {
+		t.Fatalf("per-connection OutRate: got %d want 50000", conns[0].OutRate)
+	}
+	if len(conns[0].Spark) != 2 || conns[0].Spark[1] == 0 {
+		t.Fatalf("per-connection Spark should hold 2 samples ending non-zero, got %v", conns[0].Spark)
+	}
+}
+
+// Two connections to the SAME remote endpoint share a connKey; the spark ring must advance
+// once per tick, not once per FD (else duplicate rows desync and the ring grows too fast).
+func TestMonitor_PerConnSparkDedupsSharedKey(t *testing.T) {
+	m := New(1)
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		out := 1000 * tick
+		return []byte(",bytes_in,bytes_out,\n" +
+			"daemon.4821,0," + itoa(out) + ",\n" +
+			"tcp4 10.0.0.2:5<->9.9.9.9:443,0," + itoa(out) + ",\n")
+	}
+	m.runLsof = func() []byte {
+		// two FDs from the same PID to the same remote endpoint
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->9.9.9.9:443 (ESTABLISHED)\n" +
+			"daemon 4821 root 11u IPv4 0x2 0t0 TCP 10.0.0.3:6->9.9.9.9:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	m.Sample()
+	if got := len(m.sparkConn[connKey(4821, "9.9.9.9", 443)]); got != 2 {
+		t.Fatalf("shared connKey ring should advance once/tick (2 ticks → 2 samples), got %d", got)
+	}
+}
+
+func TestMonitor_PerConnPrunesDeadConns(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if present {
+			return []byte(",bytes_in,bytes_out,\ndaemon.42,0,1000,\ntcp4 10.0.0.1:5<->9.9.9.9:443,0,1000,\n")
+		}
+		return []byte(",bytes_in,bytes_out,\ndaemon.42,0,1000,\n") // conn gone
+	}
+	m.runLsof = func() []byte {
+		if present {
+			return []byte("H\nd 42 u 10u IPv4 0x1 0t0 TCP 10.0.0.1:5->9.9.9.9:443 (ESTABLISHED)\n")
+		}
+		return []byte("H\n")
+	}
+	m.procs = func() map[int]*collect.Proc { return map[int]*collect.Proc{42: {PID: 42, Cmd: "/x/d"}} }
+	m.exePaths = func() map[int]string { return map[int]string{42: "/x/d"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.sparkConn) != 1 {
+		t.Fatalf("expected 1 tracked connection, got %d", len(m.sparkConn))
+	}
+	present = false
+	m.Sample()
+	if len(m.sparkConn) != 0 {
+		t.Fatalf("dead connection should be pruned, still have %d", len(m.sparkConn))
+	}
+}
+
+// The mirror of TestMonitor_PerPIDSparkAttachedToMembers for INbound: a PID with climbing
+// cumulative bytes_in must yield a non-zero InRate and a populated InSpark at group + member
+// level. Guards the "in-rate is actually computed" fix (it was hardcoded 0).
+func TestMonitor_InRateAndInSpark(t *testing.T) {
+	m := New(1) // interval 1s → rate == byte delta
+	tick := 0
+	m.runNettop = func() []byte {
+		tick++
+		in := 100000 * tick // cumulative in climbs 100000/tick → per-tick in-rate 100000
+		return []byte("time,,bytes_in,bytes_out\n15:04:0" + itoa(tick) + ".0,daemon." + itoa(4821) +
+			"," + itoa(in) + ",0\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()           // tick 1: first sighting → in-rate 0, one sample recorded
+	groups := m.Sample() // tick 2: in-rate 100000, second sample recorded
+	if len(groups) != 1 {
+		t.Fatalf("want one group, got %d", len(groups))
+	}
+	g := groups[0]
+	if g.InRate == 0 {
+		t.Fatal("group in-rate must be computed, not hardcoded 0")
+	}
+	if len(g.InSpark) != 2 {
+		t.Fatalf("group in-history should hold 2 ticks, got %v", g.InSpark)
+	}
+	if g.Members[0].InRate == 0 || len(g.Members[0].InSpark) != 2 {
+		t.Fatalf("instance must carry in-rate + in-history, got rate=%d spark=%v",
+			g.Members[0].InRate, g.Members[0].InSpark)
+	}
+}
+
+// The in-rate rings must be bounded like the out-rings: a dead PID / connKey is pruned from
+// sparkInPID and sparkInConn (F-1: without this, a regression dropping the in-ring prune blocks
+// would leak memory undetected on a long-running monitor). Also asserts conn-level InRate/InSpark.
+func TestMonitor_InRingsPruneDeadKeys(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,300000,0\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	groups := m.Sample()
+	if len(m.sparkInPID) != 1 || len(m.sparkInConn) != 1 {
+		t.Fatalf("in-rings must track the live key: pid=%d conn=%d", len(m.sparkInPID), len(m.sparkInConn))
+	}
+	// Conn-level in-rate + in-history are populated on the connection leaf.
+	if c := groups[0].Members[0].Conns; len(c) != 1 || len(c[0].InSpark) == 0 {
+		t.Fatalf("connection must carry in-history, got %+v", groups[0].Members[0].Conns)
+	}
+
+	present = false
+	m.Sample()
+	if len(m.sparkInPID) != 0 {
+		t.Fatalf("dead PID must be pruned from sparkInPID, still have %d", len(m.sparkInPID))
+	}
+	if len(m.sparkInConn) != 0 {
+		t.Fatalf("dead connKey must be pruned from sparkInConn, still have %d", len(m.sparkInConn))
+	}
+}
+
+// The app-level spark maps must be bounded like the per-PID/conn rings: an app gone this tick is
+// pruned from both m.spark and m.sparkIn (T-14 — otherwise they grow per distinct app-path ever seen).
+func TestMonitor_AppSparkPrunesDeadApps(t *testing.T) {
+	m := New(1)
+	present := true
+	m.runNettop = func() []byte {
+		if !present {
+			return []byte("time,,bytes_in,bytes_out\n")
+		}
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,daemon.4821,100000,200000\n")
+	}
+	m.runLsof = func() []byte {
+		if !present {
+			return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n")
+		}
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"daemon 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/x/daemon"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{4821: "/x/daemon"} }
+	m.trustOf = func(string) string { return "unsigned" }
+	m.capsOf = func(string) []string { return nil }
+
+	m.Sample()
+	if len(m.spark) != 1 || len(m.sparkIn) != 1 {
+		t.Fatalf("app rings should track the live app: out=%d in=%d", len(m.spark), len(m.sparkIn))
+	}
+	present = false
+	m.Sample()
+	if len(m.spark) != 0 {
+		t.Fatalf("dead app must be pruned from m.spark, still have %d", len(m.spark))
+	}
+	if len(m.sparkIn) != 0 {
+		t.Fatalf("dead app must be pruned from m.sparkIn, still have %d", len(m.sparkIn))
 	}
 }

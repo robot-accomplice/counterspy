@@ -21,7 +21,7 @@ func RenderEgressJSON(groups []model.EgressGroup) ([]byte, error) {
 func RenderEgress(groups []model.EgressGroup, color bool) string {
 	p := pen{color}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n  %s  %s\n", p.s(sBold+sMint, "CounterSpy"), p.s(sDim, "egress observation"))
+	fmt.Fprintf(&b, "\n  %s  %s\n", p.s(sBold+sMint, "CounterSpy"), p.s(sDim, "Exfiltration — outbound traffic"))
 	for _, g := range groups {
 		style := sGray
 		switch g.Concern {

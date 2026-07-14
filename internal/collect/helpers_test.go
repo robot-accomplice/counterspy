@@ -8,19 +8,6 @@ import (
 
 // --- Part C: direct tests for pure helpers ---
 
-func TestExtractAuthority_FirstLineWins(t *testing.T) {
-	s := "Executable=/bin/x\nAuthority=Developer ID Application: Foo\nAuthority=Apple Root CA\n"
-	if got := extractAuthority(s); got != "Developer ID Application: Foo" {
-		t.Errorf("extractAuthority = %q, want first Authority= line", got)
-	}
-}
-
-func TestExtractAuthority_NoneReturnsEmpty(t *testing.T) {
-	if got := extractAuthority("no authority lines here\n"); got != "" {
-		t.Errorf("extractAuthority = %q, want empty", got)
-	}
-}
-
 func TestExpand_TildeExpandsToHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

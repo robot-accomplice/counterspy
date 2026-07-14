@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/interpret"
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
@@ -44,8 +47,8 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "scan":
 		return runScan(args[1:], stdout)
-	case "tui":
-		return runTUI(args[1:], stdout)
+	case "console":
+		return runConsole(args[1:], stdout)
 	case "restore":
 		if len(args) < 2 {
 			fmt.Fprintln(stdout, "usage: counterspy restore <manifest.json>")
@@ -60,8 +63,6 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "feedback":
 		return runFeedback(args[1:], stdout)
-	case "egress":
-		return runEgress(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		fmt.Fprintln(stdout)
@@ -83,18 +84,18 @@ Commands:
   scan                     Print a ranked report to the terminal (the plain CLI)
       --json                 emit machine-readable JSON instead of the report
       --interactive          after the report, prompt to quarantine each finding
-  tui                      Open the interactive terminal UI for triage (the visual mode)
+  console                  Open the interactive UI: Findings triage + the Exfiltration monitor,
+                           switched with Tab / Shift-Tab (the visual mode)
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+      --json                 print the Exfiltration report as JSON and exit (no live UI)
+      --once                 print the Exfiltration report once and exit (no live UI)
   restore <manifest.json>  Undo a quarantine from its manifest
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
-  egress                   Observe per-app outbound traffic (live TUI on a tty, report/--json otherwise)
-      --json                 emit machine-readable JSON instead of the report
-      --once                 print a single report and exit (no live loop)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)
 
 Run under sudo for full visibility (the TCC privacy-grant signal needs it).
-Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy tui
+Plain CLI report:  sudo counterspy scan       Interactive UI:  sudo counterspy console
 `, model.Version)
 }
 
@@ -106,7 +107,7 @@ func runScan(flags []string, stdout io.Writer) int {
 	var ev []model.Evidence
 	var gaps []string
 	if !dry {
-		ev, gaps = collectAll()
+		ev, gaps = collectWithSpinner()
 	}
 	assessments := filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 
@@ -122,7 +123,7 @@ func runScan(flags []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled()))
+	fmt.Fprint(stdout, report.Render(assessments, gaps, colorEnabled(), livenessFor(assessments)))
 	if interactive {
 		quarantineLoop(assessments, stdout, os.Stdin, actQuarantiner{})
 	}
@@ -146,7 +147,21 @@ var evidenceCollectors = []collectorSpec{
 
 // collectAll fans out the collectors and returns any signal GAPS as friendly notes —
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
-func collectAll() ([]model.Evidence, []string) {
+// livenessFor resolves the paths referenced by running processes (best-effort)
+// and classifies each assessment's liveness. A ps failure degrades to "nothing
+// known running" — persistence then reads vestigial rather than crashing (T-4/#23).
+func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
+	running, _ := collect.CollectRunningPaths()
+	return mark.Classify(assessments, running)
+}
+
+func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
+
+// collectAllWithProgress runs the collectors, then the per-binary code-signature checks
+// CONCURRENTLY (a bounded pool — each CollectCodesign spawns 3 subprocesses, so serial over
+// hundreds of binaries is the dominant startup cost). onCodesign, if non-nil, is called after
+// each binary completes so callers can render progress.
+func collectAllWithProgress(onCodesign func(done, total int)) ([]model.Evidence, []string) {
 	var ev []model.Evidence
 	var gaps []string
 	add := func(gap string, fn func() ([]model.Evidence, error)) {
@@ -164,7 +179,8 @@ func collectAll() ([]model.Evidence, []string) {
 	// Skip .plist files (they aren't signed binaries — codesigning one yields a bogus
 	// "unsigned") and anything that isn't a regular existing file.
 	seen := map[string]bool{}
-	for _, e := range append([]model.Evidence{}, ev...) {
+	var paths []string
+	for _, e := range ev {
 		p := e.Subject.Path
 		if p == "" || seen[p] || strings.HasSuffix(p, ".plist") {
 			continue
@@ -173,9 +189,99 @@ func collectAll() ([]model.Evidence, []string) {
 			continue
 		}
 		seen[p] = true
-		ev = append(ev, collect.CollectCodesign(p)...)
+		paths = append(paths, p)
 	}
+	return append(ev, codesignAll(paths, collect.CollectCodesign, onCodesign)...), gaps
+}
+
+// codesignWorkers bounds concurrency for the code-signature checks. codesign/spctl are
+// subprocess-bound (I/O), so oversubscribing the CPU count is the win.
+const codesignWorkers = 16
+
+// codesignAll runs cs over paths concurrently (bounded pool) and returns the evidence in a
+// deterministic order (by input path index). cs is injected so tests need not shell out.
+// onDone, if non-nil, fires once per completed path with the running done/total count.
+func codesignAll(paths []string, cs func(string) []model.Evidence, onDone func(done, total int)) []model.Evidence {
+	total := len(paths)
+	if total == 0 {
+		return nil
+	}
+	results := make([][]model.Evidence, total)
+	sem := make(chan struct{}, codesignWorkers)
+	var wg sync.WaitGroup
+	var done int64
+	for i := range paths {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			results[i] = cs(paths[i])
+			<-sem
+			if onDone != nil {
+				onDone(int(atomic.AddInt64(&done, 1)), total)
+			}
+		}(i)
+	}
+	wg.Wait()
+	// The per-worker onDone ticks carry unique counts (1..total) but are invoked
+	// concurrently, so the LAST callback the caller observes is not guaranteed to be
+	// the one with done==total. Emit a deterministic final tick after all workers
+	// finish so progress always ends at total/total (fixes a flaky freeze at "N/M").
+	if onDone != nil {
+		onDone(total, total)
+	}
+	var out []model.Evidence
+	for _, r := range results {
+		out = append(out, r...)
+	}
+	return out
+}
+
+// collectWithSpinner runs collection, animating a progress line on stderr when it is a tty
+// so the multi-second code-signature phase is never a silent wait. Piped/non-tty stays quiet.
+func collectWithSpinner() ([]model.Evidence, []string) {
+	if !isTerminal(os.Stderr) {
+		return collectAll()
+	}
+	var done, total int64
+	stop := make(chan struct{})
+	spinnerDone := make(chan struct{})
+	go func() { scanSpinner(os.Stderr, &done, &total, stop); close(spinnerDone) }()
+	ev, gaps := collectAllWithProgress(func(d, t int) {
+		atomic.StoreInt64(&done, int64(d))
+		atomic.StoreInt64(&total, int64(t))
+	})
+	close(stop)
+	<-spinnerDone // ensure the spinner cleared its line before the report prints
 	return ev, gaps
+}
+
+// scanSpinner animates a braille spinner + progress line on w until stop closes.
+func scanSpinner(w io.Writer, done, total *int64, stop <-chan struct{}) {
+	frames := []rune("⣾⣽⣻⢿⡿⣟⣯⣷")
+	// Tint the braille glyph with the shared mint accent (report sMint, 38;5;79 — CounterSpy
+	// chrome); the message stays default. NO_COLOR drops the tint (the caller already gates the
+	// whole spinner on a tty).
+	col, reset := "\033[38;5;79m", "\033[0m"
+	if os.Getenv("NO_COLOR") != "" {
+		col, reset = "", ""
+	}
+	t := time.NewTicker(90 * time.Millisecond)
+	defer t.Stop()
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			fmt.Fprint(w, "\r\033[K") // clear the line
+			return
+		case <-t.C:
+			d, tot := atomic.LoadInt64(done), atomic.LoadInt64(total)
+			msg := "collecting signals…"
+			if tot > 0 {
+				msg = fmt.Sprintf("checking code signatures  %d/%d", d, tot)
+			}
+			fmt.Fprintf(w, "\r\033[K%s%c%s %s", col, frames[i%len(frames)], reset, msg)
+		}
+	}
 }
 
 // isTerminal reports whether f is a real character-device terminal. A package var so
@@ -296,37 +402,49 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 	return out
 }
 
-func runTUI(flags []string, stdout io.Writer) (code int) {
+// runConsole is the unified interactive UI: Findings triage + the Exfiltration monitor in one
+// screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
+// Exfiltration report (what `egress --json/--once` used to do).
+func runConsole(flags []string, stdout io.Writer) (code int) {
+	if has(flags, "--json") || has(flags, "--once") {
+		return exfilReport(flags, stdout)
+	}
+	// The console needs a real terminal; refuse (and guide) when piped BEFORE doing a scan, so
+	// `console > out.txt` exits fast instead of collecting evidence it will never render.
+	if !isTerminal(os.Stdout) {
+		fmt.Fprintln(stdout, "console needs a terminal — use `counterspy scan` (or `console --json`).")
+		return 2
+	}
 	from := flagValue(flags, "--from")
 	var assessments []model.Assessment
 	var gaps []string
 	if from != "" {
 		as, err := loadSnapshot(from)
 		if err != nil {
-			fmt.Fprintln(stdout, "tui: cannot read snapshot:", err)
+			fmt.Fprintln(stdout, "console: cannot read snapshot:", err)
 			return 1
 		}
 		assessments = as
 	} else {
-		ev, g := collectAll()
+		// Show the progress spinner while collecting (before the alt-screen opens) so the
+		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
+		ev, g := collectWithSpinner()
 		assessments = filterAllowed(interpret.Assess(score.Score(ev)), userAllowlist())
 		gaps = g
 	}
 
-	// The TUI needs a real terminal; refuse (and guide) when piped.
-	if !isTerminal(os.Stdout) {
-		fmt.Fprintln(stdout, "TUI needs a terminal — use `counterspy scan` (or `--json`).")
-		return 2
-	}
 	screen, err := newScreen()
 	if err != nil {
-		fmt.Fprintln(stdout, "tui: cannot open screen:", err)
+		fmt.Fprintln(stdout, "console: cannot open screen:", err)
 		return 1
 	}
 	if err := screen.Init(); err != nil {
-		fmt.Fprintln(stdout, "tui: cannot init screen:", err)
+		fmt.Fprintln(stdout, "console: cannot init screen:", err)
 		return 1
 	}
+	// Assert our own window title. Without this the terminal derives the title from the foreground
+	// child process, so it flips to "nettop" every time the egress monitor samples.
+	screen.SetTitle("CounterSpy")
 	// finiOnce guarantees the terminal is restored exactly once no matter which path
 	// (signal, panic, error, or success) triggers it first.
 	var finiOnce sync.Once
@@ -353,7 +471,7 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 	// screen that's about to clear) (ABORT-TUI Future-Me #1).
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "tui: internal error: %v\n%s\n", r, debug.Stack())
+			fmt.Fprintf(os.Stderr, "console: internal error: %v\n%s\n", r, debug.Stack())
 			code = 1
 		}
 	}()
@@ -374,9 +492,40 @@ func runTUI(flags []string, stdout io.Writer) (code int) {
 		assessments[i].Actions = plannedActions(assessments[i].Finding)
 	}
 	m := tui.New(assessments, gaps)
+	m.Liveness = livenessFor(assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
-	if err := tui.Run(screen, m, actor); err != nil {
-		fmt.Fprintln(stdout, "tui:", err)
+
+	// Exfiltration sampler + a ~3Hz ticker. RunConsole samples LAZILY (only while Exfiltration is
+	// the visible mode), so the ticker fires regardless but no nettop/lsof work happens in
+	// Findings mode. The ticker closes `tick` on stop so RunConsole's sample goroutine ends.
+	// 0.3s keeps the live view — and the zoom graph — advancing briskly (bounded by nettop/lsof
+	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
+	const interval = 0.3
+	mon := newEgressMonitor(interval)
+	tick := make(chan struct{})
+	stop := make(chan struct{})
+	defer close(stop) // ends the ticker → closes tick → ends RunConsole's sample goroutine (also on panic)
+	go func() {
+		defer close(tick)
+		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				select {
+				case tick <- struct{}{}:
+				default:
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	// The `i` inspection overlay captures a flow's packets via native /dev/bpf (root); --no-inspect
+	// disables it entirely for locked-down environments (spec §5.3), leaving a nil Inspector.
+	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy)
+	if err != nil {
+		fmt.Fprintln(stdout, "console:", err)
 		return 1
 	}
 	fini() // restore the terminal BEFORE the feedback prompt/messages (stdin cooked, stdout visible)
@@ -559,89 +708,22 @@ var newScreen = func() (tcell.Screen, error) { return tcell.NewScreen() }
 
 // runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
 // TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
-func runEgress(flags []string, stdout io.Writer) int {
-	asJSON := has(flags, "--json")
-	once := has(flags, "--once")
-	interval := 2.0
-	mon := newEgressMonitor(interval)
-
-	isTTY := isTerminal(os.Stdout)
-	if once || asJSON || !isTTY {
-		mon.Sample()           // establish a baseline
-		groups := mon.Sample() // second sample carries rates
-		if asJSON {
-			b, err := report.RenderEgressJSON(groups)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "render:", err)
-				return 1
-			}
-			fmt.Fprintln(stdout, string(b))
-			return 0
+// exfilReport prints the non-interactive Exfiltration report (or JSON) — the output the old
+// `egress --once/--json` produced, now reached via `console --once/--json`.
+func exfilReport(flags []string, stdout io.Writer) int {
+	mon := newEgressMonitor(2.0)
+	mon.Sample()           // establish a baseline
+	groups := mon.Sample() // second sample carries rates
+	if has(flags, "--json") {
+		b, err := report.RenderEgressJSON(groups)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "render:", err)
+			return 1
 		}
-		fmt.Fprint(stdout, report.RenderEgress(groups, colorEnabled()))
+		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
-	return runEgressTUI(mon, interval, stdout)
-}
-
-// runEgressTUI mirrors runTUI's screen/signal/fini handling for the live "egress top" view.
-func runEgressTUI(mon tui.Sampler, interval float64, stdout io.Writer) (code int) {
-	screen, err := newScreen()
-	if err != nil {
-		fmt.Fprintln(stdout, "egress: cannot open screen:", err)
-		return 1
-	}
-	if err := screen.Init(); err != nil {
-		fmt.Fprintln(stdout, "egress: cannot init screen:", err)
-		return 1
-	}
-	var finiOnce sync.Once
-	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	sigDone := make(chan struct{})
-	defer func() { signal.Stop(sigCh); close(sigDone) }()
-	go func() {
-		select {
-		case <-sigCh:
-			fini()
-			os.Exit(130)
-		case <-sigDone: // normal exit — unregister and return instead of leaking this goroutine
-		}
-	}()
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "egress: internal error: %v\n%s\n", r, debug.Stack())
-			code = 1
-		}
-	}()
-	defer fini()
-
-	tick := make(chan struct{})
-	stop := make(chan struct{})
-	go func() {
-		defer close(tick) // sole sender closes the channel, so RunEgress's forwarder ends cleanly
-		t := time.NewTicker(time.Duration(interval * float64(time.Second)))
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				select {
-				case tick <- struct{}{}:
-				default:
-				}
-			case <-stop:
-				return
-			}
-		}
-	}()
-	err = tui.RunEgress(screen, mon, tick)
-	close(stop) // ends the ticker goroutine, which closes tick, which ends RunEgress's forwarder
-	fini()
-	if err != nil {
-		fmt.Fprintln(stdout, "egress:", err)
-		return 1
-	}
+	fmt.Fprint(stdout, report.RenderEgress(groups, colorEnabled()))
 	return 0
 }
 
@@ -655,6 +737,13 @@ func flagValue(flags []string, name string) string {
 		}
 	}
 	return ""
+}
+
+// pbcopy writes s to the macOS clipboard (the egress TUI's copy-path action).
+func pbcopy(s string) error {
+	c := exec.Command("pbcopy")
+	c.Stdin = strings.NewReader(s)
+	return c.Run()
 }
 
 func dim(s string) string {

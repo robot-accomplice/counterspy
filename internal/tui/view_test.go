@@ -6,8 +6,42 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
+
+func TestView_RendersMarkCluster(t *testing.T) {
+	s := simScreen(t)
+	a := model.Assessment{
+		Finding:        model.Finding{Subject: model.Subject{Path: "/tmp/xmrig", Label: "xmrig"}, Evidence: []model.Evidence{{Kind: model.KindCodesign, Facts: map[string]string{"signed": "false"}}}},
+		Recommendation: model.RecQuarantine,
+		Category:       "backdoor",
+	}
+	m := New([]model.Assessment{a}, nil)
+	m.Liveness = map[string]mark.Liveness{"path:/tmp/xmrig": {RunState: mark.GlyphActive, Socket: mark.GlyphSocket}}
+	view(m, s)
+	s.Show()
+	out := screenText(s)
+	for _, g := range []string{"⚑", "○", "▸", "↔", "xmrig"} {
+		if !strings.Contains(out, g) {
+			t.Errorf("expected %q on the finding row:\n%s", g, out)
+		}
+	}
+}
+
+func TestView_HelpShowsMarkLegend(t *testing.T) {
+	s := simScreen(t)
+	m := New([]model.Assessment{mk("x", model.RecInvestigate, 6)}, nil)
+	m.Focus = focusHelp
+	view(m, s)
+	s.Show()
+	out := screenText(s)
+	for _, want := range []string{"Marks", "unsigned", "vestigial", "revoked"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help overlay should list the mark legend (missing %q):\n%s", want, out)
+		}
+	}
+}
 
 func screenText(s tcell.SimulationScreen) string {
 	cells, w, h := s.GetContents()
@@ -36,11 +70,30 @@ func simScreen(t *testing.T) tcell.SimulationScreen {
 	return s
 }
 
-func TestView_RendersSummaryAndHidesMonitor(t *testing.T) {
+// The findings view carries the same pane structure as the exfil view: a rule closes the header
+// band and another sits directly above the footer (row h-3 at the 120x40 sim size).
+func TestView_SectionRules(t *testing.T) {
+	s := simScreen(t)
+	m := New([]model.Assessment{mk("evil.updater", model.RecQuarantine, 14)}, nil)
+	view(m, s)
+	s.Show()
+	isRule := func(y int) bool {
+		r, _, _, _ := s.GetContent(marginX, y)
+		return r == '─'
+	}
+	if !isRule(2) { // rows 0 title, 1 counts, then the header band is closed by a rule at row 2
+		t.Error("expected a rule closing the header band")
+	}
+	if !isRule(40 - 3) { // rule directly above the footer (h-3; toast h-2, footer h-1)
+		t.Error("expected a rule directly above the footer (row h-3)")
+	}
+}
+
+func TestView_RendersSummaryAndShowsMonitor(t *testing.T) {
 	s := simScreen(t)
 	m := New([]model.Assessment{
 		mk("evil.updater", model.RecQuarantine, 14),
-		mk("zoom", model.RecMonitor, 2),
+		mk("lowbeacon", model.RecMonitor, 2),
 	}, nil)
 	view(m, s)
 	s.Show()
@@ -48,8 +101,8 @@ func TestView_RendersSummaryAndHidesMonitor(t *testing.T) {
 	if !strings.Contains(out, "CounterSpy") || !strings.Contains(out, "evil.updater") {
 		t.Fatalf("summary/finding missing:\n%s", out)
 	}
-	if strings.Contains(out, "zoom") {
-		t.Fatalf("monitor item should be hidden by default:\n%s", out)
+	if !strings.Contains(out, "lowbeacon") {
+		t.Fatalf("Monitor-tier item must be visible by default (no hide toggle):\n%s", out)
 	}
 }
 
@@ -238,16 +291,6 @@ func TestView_NoFindingsMatchMessage(t *testing.T) {
 	}
 }
 
-func TestView_MonitorHiddenMessage(t *testing.T) {
-	s := simScreen(t)
-	m := New([]model.Assessment{mk("zoom", model.RecMonitor, 2)}, nil)
-	view(m, s)
-	s.Show()
-	if !strings.Contains(screenText(s), "monitored item(s) hidden") {
-		t.Fatalf("all-monitor list should explain the hidden items:\n%s", screenText(s))
-	}
-}
-
 func TestView_FilterFooterReplacesHelp(t *testing.T) {
 	s := simScreen(t)
 	m := New([]model.Assessment{mk("x", model.RecInvestigate, 6)}, nil)
@@ -314,5 +357,23 @@ func TestDrawModal_ClampsToSmallScreen(t *testing.T) {
 	s.Show()
 	if !strings.Contains(screenText(s), "Quarantine") {
 		t.Fatalf("clamped modal should still render:\n%s", screenText(s))
+	}
+}
+
+// cp-T7 review F-1/F-4: the ? overlay must not draw off-screen on a small terminal
+// (the mark legend grew the box). Clamped box + row clipping keep it in bounds.
+func TestView_HelpOverlayFitsSmallTerminal(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(40, 20) // narrower than bw=60 and shorter than the box height
+	m := New([]model.Assessment{mk("x", model.RecInvestigate, 6)}, nil)
+	m.Focus = focusHelp
+	view(m, s) // must not panic / index off-screen
+	s.Show()
+	cells, w, h := s.GetContents()
+	if len(cells) != w*h {
+		t.Fatalf("screen buffer size mismatch: %d != %d*%d", len(cells), w, h)
 	}
 }

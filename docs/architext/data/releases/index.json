@@ -1,5 +1,5 @@
 {
-  "currentReleaseId": "v0-4-0-egress",
+  "currentReleaseId": "v0-5-0-inspect-zoom",
   "releases": [
     {
       "id": "v0-3-0-feedback",
@@ -84,6 +84,27 @@
         "stretch": 0
       },
       "file": "v0-4-0-egress.json"
+    },
+    {
+      "id": "v0-5-0-inspect-zoom",
+      "version": "0.5.0",
+      "name": "Inspection interceptor & egress zoom",
+      "status": "complete",
+      "posture": "on-track",
+      "targetWindow": "v0.5.0 on the spec/exfil-inspect-interceptor branch",
+      "lastUpdated": "2026-07-14T00:00:00.000Z",
+      "summary": "Turns the egress monitor from 'what/where/how much' into 'let me look': native /dev/bpf per-flow inspection with an honest coverage verdict (plaintext vs encrypted-metadata-only), a btm-style per-app zoom dashboard with a braille line graph (by PID or by destination), a port-heuristic encryption glyph across the views, and a live-speed fix (nettop -n) that took sampling from ~5s to ~10ms.",
+      "counts": {
+        "features": 9,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 0,
+        "complete": 6,
+        "inProgress": 0,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-5-0-inspect-zoom.json"
     }
   ]
 }

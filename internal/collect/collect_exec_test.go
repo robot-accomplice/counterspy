@@ -10,83 +10,53 @@ import (
 
 // --- Part B: exec-edge collectors via injected mocks ---
 
+// withSigProbe injects a fake code-signature backend so CollectCodesign is exercised
+// hermetically (no Security.framework / no shelling out) on any platform.
+func withSigProbe(t *testing.T, fn func(string) (string, bool, string, bool)) {
+	t.Helper()
+	orig := sigProbe
+	sigProbe = fn
+	t.Cleanup(func() { sigProbe = orig })
+}
+
 func TestCollectCodesign_Unsigned(t *testing.T) {
-	origCombined, origAccepts := execCombined, execAccepts
-	defer func() { execCombined = origCombined; execAccepts = origAccepts }()
-
-	execCombined = func(name string, args ...string) ([]byte, error) {
-		if name == "codesign" {
-			return []byte("code object is not signed at all"), errors.New("exit status 1")
-		}
-		t.Fatalf("unexpected exec name %q", name)
-		return nil, nil
-	}
-	execAccepts = func(name string, args ...string) bool {
-		if name == "spctl" {
-			return false
-		}
-		t.Fatalf("unexpected exec name %q", name)
-		return false
-	}
-
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "code object is not signed at all", false, "", false
+	})
 	ev := CollectCodesign("/tmp/unsigned")
-	if len(ev) != 1 {
-		t.Fatalf("want 1 evidence, got %d", len(ev))
+	if len(ev) != 1 || ev[0].Facts["signed"] != "false" {
+		t.Fatalf("expected one signed=false evidence, got %+v", ev)
 	}
-	if ev[0].Facts["signed"] != "false" {
-		t.Errorf("expected signed=false, got %v", ev[0].Facts)
+}
+
+// With no signature backend on this platform, CollectCodesign yields no evidence.
+func TestCollectCodesign_NoBackend(t *testing.T) {
+	withSigProbe(t, nil)
+	if ev := CollectCodesign("/tmp/x"); ev != nil {
+		t.Fatalf("no backend should yield nil evidence, got %+v", ev)
 	}
 }
 
 func TestCollectCodesign_SignedAndAccepted(t *testing.T) {
-	origCombined, origAccepts := execCombined, execAccepts
-	defer func() { execCombined = origCombined; execAccepts = origAccepts }()
-
-	callCount := 0
-	execCombined = func(name string, args ...string) ([]byte, error) {
-		callCount++
-		if name != "codesign" {
-			t.Fatalf("unexpected exec name %q", name)
-		}
-		// first call is --verify --deep (no error output); second is -dv --verbose=2 (authority)
-		if callCount == 1 {
-			return []byte(""), nil
-		}
-		return []byte("Executable=/Applications/Safari.app/Contents/MacOS/Safari\nAuthority=Developer ID Application: Apple Inc.\nAuthority=Apple Root CA\n"), nil
-	}
-	execAccepts = func(name string, args ...string) bool {
-		if name != "spctl" {
-			t.Fatalf("unexpected exec name %q", name)
-		}
-		return true
-	}
-
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "", true, "Developer ID Application: Apple Inc.", false
+	})
 	ev := CollectCodesign("/Applications/Safari.app")
-	if len(ev) != 1 {
-		t.Fatalf("want 1 evidence, got %d", len(ev))
-	}
-	if ev[0].Facts["signed"] != "true" {
-		t.Errorf("expected signed=true, got %v", ev[0].Facts)
+	if len(ev) != 1 || ev[0].Facts["signed"] != "true" {
+		t.Fatalf("expected one signed=true evidence, got %+v", ev)
 	}
 	if ev[0].Facts["authority"] != "Developer ID Application: Apple Inc." {
-		t.Errorf("expected authority fact (accepted case), got %v", ev[0].Facts)
+		t.Errorf("expected the authority fact when accepted, got %v", ev[0].Facts)
 	}
 }
 
 func TestCollectCodesign_SignedButRejected(t *testing.T) {
-	origCombined, origAccepts := execCombined, execAccepts
-	defer func() { execCombined = origCombined; execAccepts = origAccepts }()
-
-	execCombined = func(name string, args ...string) ([]byte, error) {
-		return []byte("Authority=Self Signed\n"), nil
-	}
-	execAccepts = func(name string, args ...string) bool {
-		return false // Gatekeeper rejects
-	}
-
+	withSigProbe(t, func(string) (string, bool, string, bool) {
+		return "", false, "Self Signed", false // valid-ish signature, but not accepted
+	})
 	ev := CollectCodesign("/tmp/selfsigned")
-	if len(ev) != 1 {
-		t.Fatalf("want 1 evidence, got %d", len(ev))
+	if len(ev) != 1 || ev[0].Facts["signed"] != "true" {
+		t.Fatalf("expected one signed=true evidence, got %+v", ev)
 	}
 	if _, ok := ev[0].Facts["authority"]; ok {
 		t.Errorf("authority must be dropped when not accepted, got %v", ev[0].Facts)

@@ -44,7 +44,7 @@ func TestRun_LabelReachesActorViaSimScreen(t *testing.T) {
 	s.InjectKey(tcell.KeyRune, 'Q', tcell.ModNone) // quit
 	la := &labelActor{}
 	m := New([]model.Assessment{mk("beacon", model.RecInvestigate, 8)}, nil)
-	if err := Run(s, m, la); err != nil {
+	if err := RunConsole(s, m, la, fakeSampler{}, nil, make(chan struct{}), nil); err != nil {
 		t.Fatal(err)
 	}
 	if la.calls != 1 || la.lastFP != true || la.labeled.Subject.Label != "beacon" {

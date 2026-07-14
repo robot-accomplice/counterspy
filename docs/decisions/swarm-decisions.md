@@ -154,3 +154,299 @@ SEVERITY SPLIT surfaced (QA high vs Audit low on the snapshot trust boundary); E
 - **D. Unrecovered panic** (Audit F-2 low): runTUI wraps Run in a deferred recover → Fini + clean error.
 - Confirmed strong: Actor seam gives STRONGER decoupling than spec'd (tui imports only model+tcell);
   session-scoped manifest semantics correct.
+
+## Handover + substrate reconciliation (fresh-context resume) — 2026-07-12
+
+Resumed CounterSpy under a fresh orchestrator session; coordinated a live handover
+with the retired writer session (via ccd_session_mgmt) rather than reconstructing
+from the bus alone. Key reconciliations recorded so a future resume is not misled
+by the stale cp-* picture:
+
+- **Execution model:** the project has moved OFF the cp-* fan-out checkpoint model
+  onto **gitflow + PR**, CI-gated (build/vet/gofmt/test --race + >=80% coverage per
+  package). The `.swarm/` bus checkpoints end at cp-tui-3 (2026-07-09); egress,
+  feedback, and the TUI spinner shipped since via PR, reviewed through gitflow.
+- **Swarm value retained:** the swarm's parallel read-only reviewer fan-out
+  (Antagonist + Audit subagents on each diff) + single-writer discipline is kept as
+  the quality mechanism; only the shipped artifact changed (cp-* bus entry -> git PR).
+  No spawn_task chips (they would create a second writer).
+- **Branch/PR posture at handover:** main = v0.4.0; develop = integration target.
+  Open PRs -> develop: #25 feature/native-codesign (trust-semantics shift, awaiting
+  Jon's human decision) and #26 bug/tui-startup-spinner (spinner, green).
+- **Current work:** feature/symbology-legend off develop. Spec + plan committed
+  (docs/superpowers/{specs,plans}/2026-07-1*-symbology-legend*). Three-axis mark
+  vocabulary (concern/trust/liveness), uniform-cadence cluster, documented drift-proof
+  key. Closes T-4 (real exec path per PID) + #23 (active-vs-vestigial). Liveness is
+  display-only (scorer untouched). PR #25 coupling flagged, not decided here (spec §8).
+
+## cp-T1 (Task 1: internal/mark vocabulary) — reviewed 2026-07-12
+Antagonist(haiku)+Audit(sonnet) read-only fan-out on the diff. CROSS-REVIEWER CONFIRMED:
+- **F-1 (crit, both, high-conf): isAppleAuthority substring-spoof.** A Gatekeeper-accepted
+  Developer-ID cert with "Apple" in the CN forged ● Apple-system. FIX-NOW (unanimous): exclude
+  the "Developer ID" leaf prefix before Apple matching. T-3's accepted-gate already blocks
+  self-signed fakes; the reachable case was a legit-notarized third-party CN — now closed.
+- **F-2 (high, Audit): spoof case untested.** FIX-NOW: added devid-apple-spoof + installer-spoof tests.
+- **DEFER (justified): multi-codesign-evidence tie-break** (both, low). Not reachable — codesign.go
+  emits exactly one codesign Evidence per finding (verified). Revisit only if that invariant changes.
+- **WON'T-FIX (justified): case-sensitive "signed"** (our collector emits canonical lowercase) and
+  **Concern default->Monitor** (safe low-noise default by design).
+
+## Symbology & legend feature — SHIPPED to PR — 2026-07-12
+feature/symbology-legend → PR #27 (base develop). 9 plan tasks, each through an Antagonist+Audit
+fan-out. Real catches: cp-T1 ● Apple-spoof (crit), cp-T2 vestigial-mislabel (high), cp-T4/ESC-1
+comm=→full-argv correlation, cp-T5 nil-liveness prod bug (high), cp-T7 ?-overlay off-screen (crit),
+cp-T9 Architext gap (med). CI gate green (-race, coverage ≥83%/pkg). Architext mod-mark recorded.
+OPEN FOLLOW-UPS: (1) PR #25 native-codesign coupling — revisit mark.Trust ◆/◇ mapping on merge (spec §8);
+(2) T-7 interpreter-wrapper: liveness now argv-matches it, but the DETECTION/scoring side (pickTarget
+interpreter-awareness) remains open; (3) cosmetic: egress TRUST column oversized for a 1-glyph value.
+
+## RESUME NOTE — Exfiltration inspection interceptor (#3), Phase A in progress — 2026-07-12
+
+Session got large; this note lets a compacted OR fresh session resume identically.
+
+### Operating model (unchanged)
+Single-writer swarm, orchestrator+subagents substrate. Each reviewable unit = a checkpoint:
+implement test-first → commit → spawn read-only Antagonist(haiku)+Audit(sonnet) fan-out on the
+diff → vote/remediate → advance. Ship as gitflow branch → PR → develop, CI-gated (build+cgo,
+vet, gofmt across ALL tracked files, test --race, >=80% coverage/pkg). No spawn_task chips.
+Persist findings to .swarm/bus/inbox/{findings,coding}.md. NATIVE-FIRST principle (maintainer):
+never shell out to an external process when a native/in-process path exists (BPF via syscall, not
+tcpdump; Security.framework, not codesign CLI). Pre-push: gofmt -l over git ls-files '*.go'.
+
+### Where things stand
+develop has: symbology marks, native codesign (◆/◇ reconciled), CI flake fix, spinner, heat
+sparklines, per-connection sparklines, console unification (one `console` command, Tab-switch
+Findings⇄Exfiltration, lazy sampling). All merged & green.
+
+### #3 interceptor — spec APPROVED, on branch `spec/exfil-inspect-interceptor` (pushed):
+- Spec: docs/superpowers/specs/2026-07-12-exfil-inspect-interceptor.md (READ FIRST). Decisions:
+  native BPF only (no tcpdump/gopacket); tier-2 native interposition only (no shelled frida/dtrace);
+  redaction masked-by-default w/ reveal toggle; consent opt-in per session; tiers 2 & 4 need own consent.
+- Tiers: 0 metadata(SNI/JA3/cert/sizes, always) · 1 plaintext flows · 2 SSL_write hook · 3 keylog · 4 proxy+CA.
+- DONE checkpoint 1: internal/inspect/tls.go — pure TLS ClientHello SNI parser + tests (bounds-checked).
+- NEXT checkpoints (in order): (a) Ethernet/IP/TCP framing parser (pure, fixtures) → captured packet to TLS record;
+  (b) native BPF capture of the selected 4-tuple behind an injectable seam (root; /dev/bpf via x/sys); tests mock the seam;
+  (c) flow↔connection correlation (4-tuple ↔ the Exfiltration row's pid+local+remote);
+  (d) tier orchestration + honest per-flow coverage verdict (internal/inspect);
+  (e) the `i` inspection view in internal/tui (new mode off an Exfiltration row) + consent gate;
+  (f) bundle Phase A into ONE PR when the vertical slice renders SNI/metadata for a real flow.
+- Phase B: SSL_write-hook feasibility SPIKE (native DYLD-interpose helper / task_for_pid / libdtrace-cgo)
+  against a non-hardened target BEFORE building tier 2. Phase C: keylog + proxy. Then #4 highlighting
+  (keyword/regex + key/secret heuristics; also drives the mask-by-default redaction) on surfaced plaintext.
+- Grounding confirmed on this host: /dev/bpf* present, dtrace ships, tcpdump present (NOT to be used — native-first).
+
+## RESUME NOTE UPDATE — Phase A engine COMPLETE — 2026-07-12 (session 2)
+
+internal/inspect package built + tested (branch spec/exfil-inspect-interceptor, all pushed):
+- tls.go        — ClientHelloSNI (pure, bounds-checked) ✓ tested
+- framing.go    — ParseIPPacket → TCPSegment (4-tuple via netip + payload) ✓ tested
+- linklayer.go  — stripLinkLayer (Ethernet/null/raw → IP) ✓ tested
+- capture.go    — PacketSource seam + fixtureSource ✓ tested
+- bpf_darwin.go — openLiveCapture: native /dev/bpf via x/sys/unix (root I/O edge; compile+vet
+                  verified; LIVE sudo capture NOT yet run — no interactive sudo in sandbox. TODO:
+                  a maintainer should run a root smoke: sudo go test -run LiveCapture with curl traffic)
+- bpf_other.go  — non-darwin stub
+- inspect.go    — Inspect(src,flow,maxPackets) Result: correlate by remote, SNI, HONEST coverage
+                  verdict (TLS→metadata-only no-payload; plaintext→payload; none). ✓ tested
+
+REMAINING Phase A (checkpoint e), then the Phase A PR:
+1. The `i` inspection VIEW in internal/tui: a new mode/overlay reached by pressing `i` on an
+   Exfiltration connection row. Build a Flow{PID, Remote} from the selected row (the row already
+   carries pid + remote endpoint via model.Conn), call inspect.Inspect over a live capture, render:
+   header (app·pid·local→remote·trust glyph) + the coverage verdict line + metadata (SNI) + the
+   content pane (when plaintext), esc/i returns. Reuse internal/mark for the trust glyph.
+   NOTE: internal/tui may import internal/inspect only if inspect stays a pure-ish leaf (it imports
+   netip + x/sys via bpf_darwin — check the tui decoupling invariant in imports_test.go; inspect is
+   NOT model-shaped, so this likely needs the capture wired in MAIN, not tui: pass an inspect
+   function/result into the tui via a seam, keeping tui importing only model+mark+inspect-types, OR
+   do the capture in main and hand the tui a Result. Decide at implementation — prefer main owns the
+   root capture, tui renders a Result via an injected `inspect func(Flow) Result` seam.)
+2. CONSENT gate: first `i` in a session prompts "capture this flow's packets? [y/N]" before any
+   capture. A --no-inspect flag disables it. (spec §5)
+3. Wire openLiveCapture in main (root); the console's `i` handler builds the Flow, opens capture,
+   runs Inspect with a timeout/packet cap, shows the Result. Capture stops on view close.
+4. Redaction (spec §6): mask obvious secrets in the rendered payload by default (bearer/AKIA/PEM/
+   high-entropy) with a reveal toggle — this overlaps #4 highlighting; can land with #4.
+5. Bundle Phase A into ONE PR → develop; swarm fan-out; CI gate.
+Then Phase B: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
+
+## cp-insA (inspect ENGINE ff4b81b..835f229) — deferred fan-out, resolved 2026-07-12 (session 3 resume)
+The Phase A engine (tls/framing/linklayer/capture/bpf/inspect) was committed a→d but never
+fan-out-reviewed (findings bus had no entry). Standing obligation → reviewed before building the view.
+Antagonist(haiku)+Audit(sonnet), read-only, on the engine diff. Outcome:
+- **F-1 4-tuple correlation** (QA high + Audit high, CROSS-CONFIRMED): DEFER (T-8). model.Conn has NO
+  local endpoint (egress/parse.go:116 + egress.go:11 verified) — the row is remote-keyed, so per-remote
+  match is the most specific identity that exists; over-merge is same-pid-same-remote, display-only,
+  observe-only. Spec §3 "row carries its local endpoint" is INACCURATE — code wins; spec reconciled.
+- **Audit F-1 no kernel BPF filter** (crit→HIGH): FIX in Phase A (T-9), its own checkpoint with the live
+  wiring. Whole-interface capture violates §6 least-privilege; reclassed high (over-captured bytes are
+  discarded in userspace, never shown/stored). cBPF host+port filter before the Phase A PR.
+- **Audit F-3 silent error swallow** (high, §9 fail-loud): FIX-NOW — surface capture failure on Result.
+- **Audit F-4 no SNI reassembly** (med): PARTIAL FIX-NOW (SNI over accumulated same-remote buffer) + T-10 (full reassembly).
+- **Audit F-5 BPF record-walker untested** (med): FIX-NOW — darwin fixture test.
+- **Audit F-6 ifreq no size assert** (med): FIX-NOW trivial. **F-7 TLS record types** (low): FIX-NOW one-liner.
+No human escalation: all engineering calls with recorded justifications. Remediation = next checkpoint (cp-insB).
+
+## cp-insC (i inspection view) — reviewed 2026-07-12 (session 3)
+Antagonist(haiku)+Audit(sonnet), read-only, on the cp-insC diff. Both independently confirmed the
+security invariants: consent is a real by-construction, session-scoped gate (§5); redaction applied
+every draw with no raw-Content path when masked; InspectView.Content is display-only (never disk/log/net,
+§6); decoupling invariant holds (tui deps = model+mark only, NO internal/inspect); observe-only.
+Antagonist CLEAN (10× -race stress, no flake). Audit found:
+- **F-1 (med, CONFIRMED): PEM partial leak** — masked only complete BEGIN…END. FIX-NOW: added a
+  dangling-BEGIN→EOF fallback (rePEMOpen) + a partial-PEM test. §6 hardened.
+- **F-4 (info): message named a nonexistent --no-inspect flag** — FIX-NOW: softened to
+  "inspection unavailable in this build"; cp-insD adds the real flag.
+- **F-2 (med, PLAUSIBLE): sync Inspect seam UI-freeze** — ACCEPT sync seam (RunConsole can wrap it async
+  later WITHOUT an interface change, so nothing's locked in); bound the capture in cp-insD's adapter
+  (T-11: read deadline + packet + wall-clock cap, worst-case <~1.5s); async upgrade → T-12 if needed.
+- **F-3 (low): Coverage duplication has no exhaustiveness guard** — DEFER to cp-insD (the adapter maps
+  them there; add an exhaustive switch + test so a future tier forces both files to change).
+No human escalation — engineering calls with recorded justifications.
+
+## cp-insD (live capture wiring) — reviewed 2026-07-12 (session 3)
+Antagonist(haiku)+Audit(sonnet) on the cp-insD diff (vendored x/net excluded). Antagonist CLEAN.
+Audit CLEAN on fd-safety (all paths close, no double-close), BPF jump-skips (independently re-derived),
+dep mechanics (v0.6.0, no cascade), UDP-dial side-effect-freeness. Findings:
+- **F-2 (high, CONFIRMED): read-timeout hang** — setReadTimeout was best-effort, so a swallowed
+  BIOCSRTIMEOUT failure would let a blocking read hang the sync UI past maxWait (defeats T-11). FIX-NOW:
+  replaced with an ESSENTIAL non-blocking fd (unix.SetNonblock, fatal on failure) + EAGAIN-sleep poll,
+  so the deadline loop always runs regardless of any ioctl. Bound now guaranteed.
+- **F-4 (low): spec didn't record the x/net/bpf native-first relaxation** — FIX-NOW: added spec §10.4.
+- **F-1 (med): host-only filter, not 4-tuple** — DEFER (T-9-ref). Not a regression; host-scoping is the
+  bulk of §6, userspace enforces port, true 4-tuple needs the local port (T-8). Port kernel-filter is a refinement.
+- **F-3 (low): default in coverage switch** — WON'T-FIX (Go has no exhaustive-switch; default is the safe honest fallback).
+- **F-5 (info): stale x/net pin** — WON'T-FIX (deliberate, avoids the x/sys 0.38→0.47 cascade).
+No human escalation. cp-insD + remediation is CI-green; the /dev/bpf path awaits the maintainer root smoke test.
+
+## RESUME NOTE — Phase A (exfil inspection interceptor #3) COMPLETE, awaiting root smoke test + PR — 2026-07-12 (session 3)
+The full Phase A vertical is built, reviewed (Antagonist+Audit per checkpoint), and CI-green:
+- **Engine** (internal/inspect): tls/framing/linklayer/capture + native /dev/bpf + tier-0/1 orchestration.
+  Was committed a→d but UNREVIEWED; session 3 ran the deferred fan-out (cp-insA) → remediated (cp-insB:
+  fail-loud errors, split-hello SNI, BPF-walk tests, size assert, TLS record-type hardening).
+- **UI** (internal/tui): the `i` inspection view — consent gate (§5), full-screen pane (header + honest
+  coverage verdict + SNI + content pane), reveal toggle, pure model.Redact (§6). Decoupling invariant held
+  (tui imports only model+mark). cp-insC reviewed → remediated (PEM partial-leak, honest disabled msg).
+- **Live wiring** (cp-insD): scoped kernel BPF filter (host+TCP, via x/net/bpf assembler — VM-tested in CI;
+  maintainer relaxed native-first §10.4), bounded capture (non-blocking fd + deadline, T-11), main adapter
+  (Result→InspectView, --no-inspect flag). Reviewed → remediated (non-blocking-fd deadline guarantee, spec update).
+CHECKPOINTS: cp-insA/B/C/C-rem/D/D-rem. All go build/vet/test (-race)/gofmt/decoupling-invariant GREEN.
+
+### THE ONE THING LEFT before the Phase A PR (root, unrunnable in CI):
+Maintainer runs the /dev/bpf smoke test on a real Mac:
+  go build -o /tmp/counterspy . && sudo /tmp/counterspy console
+  → Tab to Exfiltration → expand an app/pid → press `i` on a connection row → `y` at the consent gate.
+  EXPECT: the inspection pane shows the flow header + a coverage verdict (SNI for a TLS flow, or plaintext
+  content masked-by-default with `r` to reveal). Also verify `sudo /tmp/counterspy console --no-inspect`
+  disables `i`. If capture returns "capture failed"/nothing, that path (bpf open/bind/BIOCSETF/read) needs debugging.
+Then: bundle Phase A into ONE PR → develop (swarm already reviewed each checkpoint), CI gate.
+OPEN TICKETS: T-8 (local-port 4-tuple), T-9-ref (kernel port scoping), T-10 (full reassembly), T-11/T-12 (done/optional).
+Phase B next: SSL_write-hook feasibility SPIKE (native DYLD-interpose / task_for_pid / libdtrace-cgo).
+
+## cp-insE (root smoke test) — reviewed 2026-07-12 (session 3)
+Built a deterministic root smoke test for the /dev/bpf path (uncoverable in CI). Antagonist(haiku)+
+Audit(sonnet) fan-out. Antagonist CLEAN (SNI comes strictly from captured bytes; no false-pass; empty
+capture FAILS). Audit found:
+- **F-1 (high, CONFIRMED): the SNI test doesn't prove the BIOCSETF filter engaged** — on loopback both
+  ends are 127.0.0.1 so a host filter passes everything regardless. FIX-NOW: added a companion negative
+  test (TestLiveCapture_FilterDropsUnscopedTraffic) — a capture scoped to a bogus TEST-NET host while
+  loopback traffic flows, asserting the RAW source is silent (proves the filter dropped it in-kernel).
+- **F-3 (low): dial goroutine not joined** — FIX-NOW: driveLoopbackTLS returns a WaitGroup-backed wait().
+- **F-4 (low): no discoverable pointer** — FIX-NOW: spec §9 now documents the opt-in root smoke command.
+- **F-2 (med): host-only scope** — subsumed (T-9-ref); the negative test proves the filter engages at all.
+Both tests gated by COUNTERSPY_LIVE_CAPTURE=1; `go test ./...` stays green without root. The maintainer
+runs one sudo command to validate the whole root path; I can't (sudo needs a password).
+
+## RCA — live capture EFAULT "bad address" — 2026-07-13 (session 3)
+Jon ran the feature live; `i` on an IPv6 flow → "capture failed: bad address". Systematic-debugging:
+- The bare EFAULT was ambiguous across 6 syscalls + 2 paths → added per-syscall+interface diagnostics
+  (Phase 1). Jon re-ran the loopback smoke test → deterministic repro, localized to `bpf lo0
+  BIOCSBLEN: bad address`. IPv6 was a red herring — the bug is general capture SETUP.
+- Root cause (verified in vendored x/sys source, not guessed): BIOCSBLEN/BIOCIMMEDIATE are pointer-
+  passing u_int ioctls on macOS; IoctlSetInt passes BY VALUE → kernel derefs the length as an address
+  → EFAULT. BIOCGBLEN worked (IoctlGetInt passes a pointer). Fix: IoctlSetPointerInt for both.
+- Live capture had NEVER worked; invisible in CI because nothing exercises BIOCSBLEN without root — this
+  is exactly why the root smoke test earns its keep. Fix committed; awaiting Jon's GREEN smoke run.
+- Found during RCA (not bundled): T-13 — the BIOCSETF insns KeepAlive hazard (separate change).
+
+## Phase A VALIDATED LIVE — 2026-07-13 (session 3)
+Jon ran the root smoke test after the BIOCSBLEN fix: BOTH tests GREEN.
+- TestLiveCapture_LoopbackTLS_SNI PASS — recovered SNI="counterspy.smoke.test", coverage=metadata,
+  honest verdict. The full /dev/bpf read path works end to end.
+- TestLiveCapture_FilterDropsUnscopedTraffic PASS — raw source silent → BIOCSETF filter engaged.
+The interceptor's live capture is now proven, not just compiled. T-13 (KeepAlive) closed as a
+follow-up. REMAINING before the Phase A PR: Jon's eyeball on the real interactive console
+(`sudo counterspy console` → i on live TLS), then bundle Phase A → develop (already swarm-reviewed
+per checkpoint) + CI gate. Nothing pushed yet.
+
+## cp-tr1 (in-rate data layer) — reviewed 2026-07-13 (session 3, trend-modes)
+Antagonist(haiku)+Audit(sonnet) on aac1024..65272e1. Antagonist CLEAN. Audit CLEAN on display-only,
+mirror correctness, resource safety (per-PID/conn in-rings pruned), the InRate-was-0 fix. Findings:
+F-1 (low): test gap on in-ring prune + conn-level in-history → FIX-NOW (added TestMonitor_InRingsPruneDeadKeys).
+F-2 (low): app-level sparkIn unpruned, mirrors pre-existing unpruned out spark → DEFER (T-14, prune both).
+
+## cp-tr2 (trend toggle + relative/direction coloring) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet) on a69f23d..775adb9. Antagonist: no panics/flake; its F-1/F-2/F-3
+(footer/header/legend) are cp-tr3 (Task 9), not cp-tr2 defects. Audit CLEAN on spec fidelity (share-of-
+PEAK temperature; absIntensity removed cleanly), the plan deviation (dropping drawSparkline shim — sound),
+framePeak cost, display-only. Audit F-1 (med): no render-level mode test → FIX-NOW (added
+TestEgressView_TrendModeReachesTheTree, catches a hardcoded-trendOut wiring regression). No escalation.
+
+## cp-tr3 (trend legend + header + footer) — reviewed 2026-07-13
+Antagonist(haiku) vs Audit(sonnet) CONFLICTED on the layout (Antag CRITICAL overlap; Audit CLEAN).
+ADJUDICATED from code (Rule 8, not averaged): drawText→tcell SetContent is bounds-checked (OOB = no-op)
+→ no crash; the tiny-terminal overlap is cosmetic + pre-existing, cp-tr3 worsened by one row → added
+defensive guards (skip detail/legend at/above the header; clip legend to maxX). Audit substantive:
+F-1 combined label missing "combined" + F-4 duplicate mode switches → FIX-NOW via single-source
+trendGlyph/trendWord (fixes both). F-2/F-3 test gaps → FIX-NOW (per-mode header glyph + color-ramp assertions).
+No human escalation.
+
+## Exfil trend modes — FEATURE COMPLETE (swarm-executed) — 2026-07-13
+Plan docs/superpowers/plans/2026-07-13-exfil-trend-modes.md executed through the orchestrator+subagents
+swarm loop in 3 reviewed checkpoints + a gate:
+- cp-tr1 (data layer, tasks 1-4): in-rate + 3 in-rate rings + InSpark; FIXES Instance.InRate (was 0).
+  Antag CLEAN; Audit F-1 (test gap)→fixed, F-2 (app-ring prune)→T-14.
+- cp-tr2 (toggle + coloring, tasks 5-8): t cycles out/in/combined; tempColor share-of-PEAK (absIntensity
+  removed); directionColor green→amber; drawTrend per mode. Antag CLEAN; Audit F-1 (render-wiring test)→fixed.
+- cp-tr3 (legend+header+footer, task 9): mode glyph ↑/↓/⇅, self-coloring legend, t footer hint.
+  Reviewer CONFLICT on layout → adjudicated (SetContent bounds-checked; cosmetic-degenerate, guarded).
+  Audit F-1/F-4 (single-source trendGlyph/trendWord)→fixed; test gaps→fixed.
+- Gate (task 10): build/vet/test -race/decoupling-invariant/gofmt/architext all GREEN.
+Display-only throughout; no scoring/sort/collector-command change. Open: T-14 (prune app-level spark+sparkIn).
+Awaits Jon's live eyeball (sudo counterspy console → t to cycle modes).
+
+## cp-insE-bidir (bidirectional inspection) — reviewed 2026-07-13
+Deferred fan-out on the bidirectional change (0a85d8e), run per the standing obligation. Antag CLEAN on
+direction-matching/SNI; Audit found F-1 (HIGH): coverage OR is flow-wide but content was shown for BOTH
+directions once plaintext → an encrypted direction could render as text (§6). FIX-NOW: per-direction
+plaintext flags gate each pane; mixed-direction test added. Audit F-3 (process): bidirectional scope was
+maintainer-approved in chat but unrecorded → spec §10.5 + trail. Antag F-3 (RECEIVED pane silent-skip)→T-15.
+Antag F-2 / Audit F-4 (soft cap / shared budget) ACCEPT (bounded/low-risk). No human escalation.
+
+## cp-hk1 (T-14 app-spark prune + T-15 RECEIVED-pane) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet). Audit CLEAN (T-14 prune correctness/determinism, §6, and VERIFIED
+T-9/T-11 implemented in code before the reconcile). Antag F-1 (med): T-15 split clamp y+2 had no upper
+bound → could draw past the footer on a tiny terminal → FIX-NOW (cap sentMaxY at h-1) + F-2 tiny-terminal
+test. No escalation.
+
+## cp-t7 (T-7 inline-interpreter LOLBin persistence) -- reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet), both NOT-CLEAN. Reviewers' findings shared ONE root cause -- any
+Apple-signed shim (interpreter OR env) landing as Subject.Path imports its trusted signature onto
+attacker code -- so remediated SYSTEMICALLY via isTrustedShim(target) rather than patching each shape:
+  - A1 env-wrapper + Audit-F1 relative-script (no inline flag): isTrustedShim redirects any shim subject to the plist.
+  - A2 case-sensitivity: lowercased basename.
+  - Audit-F3 false positives (node -r = require): per-interpreter inline-flag map.
+  - Audit-F2 (verified from interpret.recommend + score thresholds + report.dedupe): wInlineCode=2 buried the
+    flagship case at Monitor-tier -> OVERRODE the earlier user-approved "2" to 5 (reaches Investigate standalone;
+    weak-category cap still prevents auto-Quarantine). User informed of the override with the evidence.
+Deferred with justification (Rule 16): T-13 arbitrary-renamed symlink (needs readlink I/O, wrong layer),
+T-14b inline_code text-render (reporting UX; state already recorded for RCA). No human escalation beyond the weight note.
+
+## cp-zoom (egress group zoom dashboard) — reviewed 2026-07-13
+Antagonist(haiku)+Audit(sonnet). Cross-confirmed 4 fixes: (1) graph colors keyed by PID not sort-rank
+(Audit F2) — was untested, colors swapped on rate crossings; (2) x-axis labeled "◄ older" instead of a
+false "60s" — the view layer can't know the sample cadence, so it must not assert a duration (Audit F1);
+(3) systemic Zoom.sel re-clamp on every keypress — fixes silent-i-no-op (Audit F3), negative sel and
+one-frame drift (Antag F1/F3) in one place; (4) pidShare clamps to 100 for sample jitter (Antag F2).
+Deferred (justified): height() overflow (Antag F4) needs ~10 PB/s — unrealistic. Braille math, precedence,
+decoupling all verified clean. No human escalation.

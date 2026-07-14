@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
 
@@ -42,9 +43,9 @@ func view(m Model, s tcell.Screen) {
 		drawText(s, x+2, 0, def.Foreground(colWarn), "TRIAGE ONLY — snapshot, quarantine disabled")
 	}
 	// Counts, chained so widths never collide.
-	x = drawText(s, 2, 1, def.Foreground(colQuarantine), fmt.Sprintf("● %d Quarantine", q))
-	x = drawText(s, x+3, 1, def.Foreground(colInvestigate), fmt.Sprintf("▲ %d Investigate", inv))
-	drawText(s, x+3, 1, def.Foreground(colMonitor), fmt.Sprintf("· %d Monitor", mon))
+	x = drawText(s, 2, 1, def.Foreground(colQuarantine), fmt.Sprintf("%c %d Quarantine", mark.GlyphQuarantine, q))
+	x = drawText(s, x+3, 1, def.Foreground(colInvestigate), fmt.Sprintf("%c %d Investigate", mark.GlyphInvestigate, inv))
+	drawText(s, x+3, 1, def.Foreground(colMonitor), fmt.Sprintf("%c %d Monitor", mark.GlyphMonitor, mon))
 
 	row := 2
 	for _, g := range m.Gaps {
@@ -60,17 +61,23 @@ func view(m Model, s tcell.Screen) {
 		drawText(s, 0, row, def.Foreground(colWarn), truncate("terminal too narrow — resize", w))
 		return
 	}
-	// Panel labels + layout. Reserve the last two rows for footer (h-1) and toast (h-2).
+	// Section rules give the view the same pane structure as the exfil view: a rule closes the
+	// header/counts band, the FINDINGS/DETAIL labels sit in their own band, and a rule opens the
+	// list/detail content. Reserve the last rows for footer (h-1), toast (h-2) and its rule (h-3).
 	split := w / 2
+	drawHRule(s, row, w) // header | labels
+	row++
 	labelRow := row
 	drawText(s, 2, labelRow, def.Foreground(colDim), "FINDINGS")
 	drawText(s, split+2, labelRow, def.Foreground(colDim), "DETAIL")
-	listTop := labelRow + 1
-	contentBottom := h - 3
+	drawHRule(s, labelRow+1, w) // labels | content
+	listTop := labelRow + 2
+	contentBottom := h - 4
 	if contentBottom < listTop {
 		drawText(s, 2, listTop-1, def.Foreground(colWarn), "terminal too small — resize")
 		return
 	}
+	drawHRule(s, h-3, w) // content | footer
 	for y := listTop; y <= contentBottom; y++ {
 		s.SetContent(split, y, '│', nil, def.Foreground(colDivider))
 	}
@@ -83,20 +90,20 @@ func view(m Model, s tcell.Screen) {
 		scrollTop = m.Selected - visibleRows + 1
 	}
 	for i := scrollTop; i < len(vis) && i < scrollTop+visibleRows; i++ {
-		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i])
+		drawListRow(s, listTop+(i-scrollTop), split, i == m.Selected, m.Done[vis[i].Subject.Key()], vis[i], m.Liveness[vis[i].Subject.Key()])
 	}
 	if len(vis) == 0 {
-		if !m.ShowMonitor && mon > 0 {
-			drawText(s, 2, listTop, def.Foreground(colDim), fmt.Sprintf("nothing needs your attention — %d monitored item(s) hidden (press m)", mon))
-		} else {
-			drawText(s, 2, listTop, def.Foreground(colDim), "no findings match")
+		msg := "no findings match"
+		if m.Filter == "" {
+			msg = "nothing to report — the scan surfaced no findings"
 		}
+		drawText(s, 2, listTop, def.Foreground(colDim), msg)
 	} else if m.Selected < len(vis) {
 		drawDetail(s, split+2, listTop, contentBottom, w-split-3, vis[m.Selected])
 	}
 
 	drawText(s, 2, h-1, def.Foreground(colDim), truncate(
-		"j/k move · q quarantine · u restore · m monitor · s sort · / filter · ? help · Q quit", w-3))
+		"⇥ switch · j/k move · q quarantine · u restore · s sort · / filter · ? help · Q quit", w-3))
 	if m.Focus == focusFilter {
 		drawText(s, 2, h-1, def.Foreground(colAccent), truncate("/"+m.Filter+"_  (esc clears)", w-3))
 	}
@@ -113,7 +120,7 @@ func view(m Model, s tcell.Screen) {
 }
 
 // drawListRow renders one finding row within the left pane [0, split).
-func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment) {
+func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Assessment, lv mark.Liveness) {
 	fg := tierColor(a.Recommendation)
 	if done {
 		fg = colDim
@@ -126,14 +133,16 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 		}
 		s.SetContent(0, y, '▎', nil, tcell.StyleDefault.Foreground(colSelBar).Background(colSelBg))
 	}
-	rec := strings.ToUpper(string(a.Recommendation))
+	// The four-slot cluster leads the row; its concern glyph + tier color carry the
+	// recommendation, so no separate REC word is needed (dense-cluster design §3).
+	cluster := mark.Cluster(mark.Concern(a.Recommendation), mark.Trust(a.Finding), lv)
 	scoreStr := fmt.Sprintf("%d", a.Score)
-	drawText(s, 2, y, st.Bold(!done), rec)
+	x := drawText(s, 2, y, st.Bold(!done), cluster)
 	name := a.Subject.Display()
 	if done {
 		name = "✓ " + name
 	}
-	nameX := 2 + 12
+	nameX := x + 1
 	nameW := split - 2 - nameX - len(scoreStr)
 	drawText(s, nameX, y, st, truncate(name, nameW))
 	drawText(s, split-2-len(scoreStr), y, st, scoreStr)
@@ -295,7 +304,6 @@ func drawHelp(s tcell.Screen) {
 		"u            restore this session's quarantine",
 		"g            mark selected as a FALSE positive (legit)",
 		"b            mark selected as correctly flagged (bad)",
-		"m            show / hide Monitor tier",
 		"s            sort by score / recommendation",
 		"/            filter by name   ·   esc clears",
 		"?            toggle this help",
@@ -303,14 +311,28 @@ func drawHelp(s tcell.Screen) {
 		"",
 		"--from <json> loads a snapshot as READ-ONLY triage",
 		"(quarantine is disabled; run a live scan to act)",
+		"",
+		"Marks",
 	}
+	rows = append(rows, mark.LegendCompact()...) // drift-proof: derived from mark.Legend()
 	w, h := s.Size()
-	bw, bh := 52, len(rows)+2
+	bw, bh := 60, len(rows)+2
+	// Clamp the box to the screen so it never draws off-screen on a small terminal
+	// (cp-T7 review F-1/F-2: the legend grew the box past 24 rows / 60 cols).
+	if bw > w {
+		bw = w
+	}
+	if bh > h {
+		bh = h
+	}
 	x0, y0 := (w-bw)/2, (h-bh)/2
 	box := drawBox(s, x0, y0, bw, bh)
 	for i, r := range rows {
+		if i >= bh-2 { // clip rows that don't fit inside the clamped box
+			break
+		}
 		st := box
-		if i == 0 {
+		if r == "Keys" || r == "Marks" {
 			st = box.Foreground(colAccent).Bold(true)
 		}
 		drawText(s, x0+2, y0+1+i, st, truncate(r, bw-4))

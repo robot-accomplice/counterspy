@@ -9,11 +9,14 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
 	"counterspy/internal/feedback"
+	"counterspy/internal/mark"
 	"counterspy/internal/model"
 	"counterspy/internal/tui"
 )
@@ -28,7 +31,7 @@ func TestRun_HelpFlags(t *testing.T) {
 			t.Fatalf("%q: exit %d, want 0", arg, code)
 		}
 		out := buf.String()
-		for _, want := range []string{"CounterSpy", model.Version, "scan", "tui", "feedback", "restore"} {
+		for _, want := range []string{"CounterSpy", model.Version, "scan", "console", "feedback", "restore"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%q help missing %q in:\n%s", arg, want, out)
 			}
@@ -44,7 +47,7 @@ func TestRun_NoArgsShowsUsage(t *testing.T) {
 		t.Fatalf("no-args exit %d, want 2", code)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "tui") || !strings.Contains(out, model.Version) {
+	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "console") || !strings.Contains(out, model.Version) {
 		t.Fatalf("no-args usage is anemic:\n%s", out)
 	}
 }
@@ -108,7 +111,7 @@ func TestRunEgress_JSONReport(t *testing.T) {
 	// Non-TTY (test) → report path; --json emits an array. --once avoids the live loop.
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := runEgress([]string{"--json", "--once"}, &buf); code != 0 {
+	if code := runConsole([]string{"--json", "--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	out := strings.TrimSpace(buf.String())
@@ -120,7 +123,7 @@ func TestRunEgress_JSONReport(t *testing.T) {
 func TestRunEgress_TextReport(t *testing.T) {
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := runEgress([]string{"--once"}, &buf); code != 0 {
+	if code := runConsole([]string{"--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(buf.String(), "backuptool") {
@@ -593,10 +596,10 @@ func TestRun_FeedbackDispatch(t *testing.T) {
 	}
 }
 
-func TestRun_EgressDispatch(t *testing.T) {
+func TestRun_ConsoleExfilDispatch(t *testing.T) {
 	withFakeEgress(t)
 	var buf bytes.Buffer
-	if code := run([]string{"egress", "--once"}, &buf); code != 0 {
+	if code := run([]string{"console", "--once"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.Contains(buf.String(), "backuptool") {
@@ -710,6 +713,7 @@ func (k *keyInjectingScreen) Init() error {
 }
 
 func TestRunTUI_FromSnapshotQuitsImmediately(t *testing.T) {
+	withFakeEgress(t)
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("SUDO_USER", "")
@@ -722,7 +726,7 @@ func TestRunTUI_FromSnapshotQuitsImmediately(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 0 {
+	if code := runConsole([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 0 {
 		t.Fatalf("exit %d: %s", code, buf.String())
 	}
 }
@@ -735,23 +739,132 @@ func TestRunTUI_NonTerminalRefuses(t *testing.T) {
 	// --from a snapshot: the terminal check runs after evidence is gathered, and a live
 	// scan would shell out to the real collectors — use the snapshot path to stay hermetic.
 	var buf bytes.Buffer
-	if code := runTUI([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
+	if code := runConsole([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
 		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(buf.String(), "TUI needs a terminal") {
+	if !strings.Contains(buf.String(), "console needs a terminal") {
 		t.Fatalf("missing message: %s", buf.String())
 	}
 }
 
-func TestRunEgressTUI_QuitsImmediately(t *testing.T) {
-	origNewScreen := newScreen
-	t.Cleanup(func() { newScreen = origNewScreen })
-	newScreen = func() (tcell.Screen, error) {
-		return &keyInjectingScreen{SimulationScreen: tcell.NewSimulationScreen(""), key: tcell.KeyRune, r: 'Q'}, nil
+// codesignAll runs the per-binary signature check concurrently with a mockable cs func
+// (no shelling out), returns evidence in deterministic input order, and reports progress.
+func TestCodesignAll_ConcurrentDeterministicWithProgress(t *testing.T) {
+	paths := []string{"/a", "/b", "/c", "/d"}
+	var calls int64
+	cs := func(p string) []model.Evidence {
+		atomic.AddInt64(&calls, 1)
+		return []model.Evidence{{Subject: model.Subject{Path: p}, Kind: model.KindCodesign}}
+	}
+	var lastDone, lastTotal int64
+	ev := codesignAll(paths, cs, func(done, total int) {
+		atomic.StoreInt64(&lastDone, int64(done))
+		atomic.StoreInt64(&lastTotal, int64(total))
+	})
+	if atomic.LoadInt64(&calls) != 4 {
+		t.Fatalf("cs called %d times, want 4", calls)
+	}
+	if len(ev) != 4 || ev[0].Subject.Path != "/a" || ev[3].Subject.Path != "/d" {
+		t.Fatalf("evidence not in deterministic input order: %+v", ev)
+	}
+	if lastDone != 4 || lastTotal != 4 {
+		t.Fatalf("final progress = %d/%d, want 4/4", lastDone, lastTotal)
+	}
+}
+
+func TestCodesignAll_EmptyNoWork(t *testing.T) {
+	if ev := codesignAll(nil, func(string) []model.Evidence { t.Fatal("cs must not run for empty input"); return nil }, nil); ev != nil {
+		t.Fatalf("empty input should return nil, got %+v", ev)
+	}
+}
+
+// The startup spinner renders a progress line and clears it on stop, so the multi-second
+// code-signature phase is never a silent wait.
+func TestScanSpinner_ShowsProgressAndClears(t *testing.T) {
+	var buf bytes.Buffer
+	var done, total int64
+	atomic.StoreInt64(&total, 10)
+	atomic.StoreInt64(&done, 4)
+	stop := make(chan struct{})
+	fin := make(chan struct{})
+	go func() { scanSpinner(&buf, &done, &total, stop); close(fin) }()
+	time.Sleep(120 * time.Millisecond) // ~1 tick at 90ms
+	close(stop)
+	<-fin
+	out := buf.String()
+	if !strings.Contains(out, "code signatures") || !strings.Contains(out, "4/10") {
+		t.Fatalf("spinner should render progress, got %q", out)
+	}
+	if !strings.HasSuffix(out, "\r\033[K") {
+		t.Fatalf("spinner should clear its line on stop, got %q", out)
+	}
+	// The braille glyph is tinted with the mint accent so the progress line reads as chrome.
+	if !strings.Contains(out, "\033[38;5;79m") {
+		t.Fatalf("spinner glyph should be mint-tinted, got %q", out)
+	}
+}
+
+// NO_COLOR must strip the spinner's tint (https://no-color.org) while still rendering progress.
+func TestScanSpinner_NoColorDropsTint(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var buf bytes.Buffer
+	var done, total int64
+	atomic.StoreInt64(&total, 3)
+	atomic.StoreInt64(&done, 1)
+	stop := make(chan struct{})
+	fin := make(chan struct{})
+	go func() { scanSpinner(&buf, &done, &total, stop); close(fin) }()
+	time.Sleep(120 * time.Millisecond)
+	close(stop)
+	<-fin
+	out := buf.String()
+	if strings.Contains(out, "\033[38;5;79m") {
+		t.Fatalf("NO_COLOR must drop the mint tint, got %q", out)
+	}
+	if !strings.Contains(out, "1/3") {
+		t.Fatalf("progress must still render under NO_COLOR, got %q", out)
+	}
+}
+
+// collectWithSpinner runs the collectors (mocked here — no shelling out), surfaces gaps, and
+// works on both the tty (spinner) and non-tty paths.
+func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
+	origCol := evidenceCollectors
+	evidenceCollectors = []collectorSpec{
+		{"unused gap", func() ([]model.Evidence, error) {
+			return []model.Evidence{{Subject: model.Subject{PID: 9}, Kind: model.KindProcess}}, nil
+		}},
+		{"a gap", func() ([]model.Evidence, error) { return nil, errors.New("boom") }},
+	}
+	t.Cleanup(func() { evidenceCollectors = origCol })
+	origTerm := isTerminal
+	t.Cleanup(func() { isTerminal = origTerm })
+
+	isTerminal = func(*os.File) bool { return true } // tty → spinner path
+	ev, gaps := collectWithSpinner()
+	if len(ev) != 1 || ev[0].Subject.PID != 9 {
+		t.Fatalf("evidence wrong: %+v", ev)
+	}
+	if len(gaps) != 1 || gaps[0] != "a gap" {
+		t.Fatalf("gap not surfaced: %+v", gaps)
 	}
 
-	var buf bytes.Buffer
-	if code := runEgressTUI(&fakeEgressSampler{}, 0.01, &buf); code != 0 {
-		t.Fatalf("exit %d: %s", code, buf.String())
+	isTerminal = func(*os.File) bool { return false } // non-tty → plain collectAll
+	if ev2, _ := collectWithSpinner(); len(ev2) != 1 {
+		t.Fatalf("non-tty path wrong: %+v", ev2)
+	}
+}
+
+// Task 6 / cp-T5 review: livenessFor marks a persistence target vestigial when it
+// is not among the running paths (best-effort; a real ps runs but our fake target
+// won't be running).
+func TestLivenessForMarksVestigialWhenNotRunning(t *testing.T) {
+	a := model.Assessment{Finding: model.Finding{
+		Subject:  model.Subject{Path: "/nope/definitely-not-running-xyz"},
+		Evidence: []model.Evidence{{Kind: model.KindPersistence, Facts: map[string]string{"target": "/nope/definitely-not-running-xyz"}}},
+	}}
+	got := livenessFor([]model.Assessment{a})
+	if got["path:/nope/definitely-not-running-xyz"].RunState != mark.GlyphVestigial {
+		t.Errorf("expected vestigial, got %+v", got["path:/nope/definitely-not-running-xyz"])
 	}
 }
