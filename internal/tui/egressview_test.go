@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,6 +10,35 @@ import (
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
 )
+
+// Expanding an app can push rows past the bottom edge; the tree must scroll to keep the selected
+// row on-screen (it had no viewport — the overflow was just clipped). With the selection at the
+// end and far more rows than fit, a top row scrolls off and a near-selection row stays visible.
+func TestEgressView_ScrollsToKeepSelectionVisible(t *testing.T) {
+	s := tcell.NewSimulationScreen("")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSize(120, 16) // far fewer visible rows than we create
+	var groups []model.EgressGroup
+	for i := 0; i < 40; i++ {
+		groups = append(groups, eg(fmt.Sprintf("zz%02d", i), model.Low, uint64(i+1)))
+	}
+	m := NewEgress().withGroups(groups)
+	rows := m.visibleRows()
+	m.Selected = len(rows) - 1 // select the very last row
+	egressView(m, s)
+	s.Show()
+
+	top := rows[0].group.App               // should scroll off (only appears if its row renders)
+	nearSel := rows[len(rows)-2].group.App // near the selection, NOT the selected row (so not in the detail strip)
+	if simContains(s, top) {
+		t.Fatalf("top row %q must scroll off when the selection is at the bottom (no viewport)", top)
+	}
+	if !simContains(s, nearSel) {
+		t.Fatalf("a row near the selection %q must stay visible", nearSel)
+	}
+}
 
 // The encryption annotation: a TLS port draws the sealed box (2 cols), a cleartext port the open
 // box, and an unknown port nothing (0 cols) — a port-only heuristic.
