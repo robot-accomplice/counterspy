@@ -12,8 +12,9 @@ A macOS command-line tool that triages your Mac for spyware-like activity, ranks
 it finds with plain-language recommendations, and — with your approval — **reversibly**
 quarantines suspicious items. It never deletes.
 
-> **Status:** active. The scanner, the interactive **TUI**, and the opt-in **feedback loop**
-> ship today; the **Exfiltration monitor** (`counterspy console`, Tab to switch) lands in v0.4.0. See the
+> **Status:** active. The scanner, the interactive **TUI**, the opt-in **feedback loop**, and the
+> **Exfiltration monitor + inspector** (`counterspy console`, Tab to switch — with a btm-style
+> per-app zoom dashboard and honest per-flow inspection) all ship today. See the
 > [known limitation](docs/threat-model.md#known-limitation--false-positive-volume-read-before-shipping)
 > on false-positive volume before treating output as verdicts — it recommends, you decide.
 
@@ -72,8 +73,8 @@ sudo ./counterspy console --json      # one-shot, machine-readable Exfiltration 
 ```
 
 The **TUI** is a master-detail triage view (tcell): `j/k` navigate, `q` quarantine (with a
-confirm + reversibility prompt), `u` restore this session, `m`/`s`/`/` toggle Monitor/sort/
-filter, `?` help, `Q` quit. It needs a real terminal; piped, it tells you to use `scan`.
+confirm + reversibility prompt), `u` restore this session, `s`/`/` sort/filter, `?` help,
+`Q` quit. It needs a real terminal; piped, it tells you to use `scan`.
 
 Run under `sudo` for full visibility — without it, the TCC (privacy-grant) signal is
 unavailable and the report says so (it never silently reads as "clean").
@@ -160,25 +161,103 @@ from the network — no remote config, no fetched allowlists, no update checks. 
 anti-spyware tool must never be remotely steerable, so this is enforced in code
 (`TestEgressOnly`), not just promised.
 
-## Exfiltration monitor (v0.4.0)
+## Exfiltration monitor & inspector (v0.5.0)
 
-The Exfiltration monitor (`counterspy console`, Tab) answers the complementary question to the scanner — not *"is this
-spyware?"* but *"this app is trusted; what is it sending, where, and how much?"* It's a live,
-per-application "egress top" built by polling `nettop` + `lsof` under sudo (no entitlements,
-no packet capture, no payloads read):
+The Exfiltration monitor (`counterspy console`, then Tab) answers the complementary question to the
+scanner — not *"is this spyware?"* but *"this app is trusted; what is it sending, where, and how
+much?"* It's a live, per-application "egress top" built by polling `nettop` + `lsof` (no
+entitlements, no packet capture for the tree; observe-only):
 
 - **Per-app rollup** — every PID, port, and protocol of an app collapses into one row you can
-  expand; outbound rate, destinations, and a cadence (one-off / bursty / steady / periodic).
-- **Trust + provenance lens** — each row carries its code-sign trust and process ancestry, so a
-  notarized app talking to its vendor reads as *expected* while an unsigned background daemon
+  expand; outbound rate, a trend sparkline, destinations, and a cadence (one-off / bursty / steady
+  / periodic). A per-destination encryption glyph (`▣` TLS · `□` cleartext · blank = unknown) is
+  inferred from the port.
+- **Trust + provenance lens** — each row carries its code-sign trust glyph and process ancestry, so
+  a notarized app talking to its vendor reads as *expected* while an unsigned background daemon
   uploading to a raw IP reads as *elevated*.
-- **Inferred exfil risk** — capability × egress: an app that holds Screen Recording or Input
-  Monitoring **and** is uploading gets flagged with the candidate data categories it *could* be
-  leaking. Inference, never confirmed content — CounterSpy reads no payloads.
+- **Inferred exfil risk** — capability × egress: an app holding Screen Recording or Input Monitoring
+  **and** uploading is flagged with the candidate data categories it *could* be leaking. Inference,
+  never confirmed content — the tree reads no payloads.
 
-Piped or with `--json`, it prints a one-shot report instead of the live view. Real destination
-*names* (SNI/DNS) are a roadmapped enrichment (v0.4.1); v1 shows `IP:port`.
+```
+  CounterSpy · Egress                                                 6 app(s) · sampling
+  ────────────────────────────────────────────────────────────────────────────────────────
+         APP / PROCESS   TRUST    OUT↑      TREND ↑    DESTINATIONS             CONCERN
+  ────────────────────────────────────────────────────────────────────────────────────────
+  +      claude          ◆        1.1 MB/s  ▃▆▇▃▅█▅▄█▅ ▣ 2607:6bc0::10:443      minimal
+  +      backuptool      ○        308 KB/s  █▆▅█▄█▆▅█▄ ▣ 185.70.42.39:443       elevated
+  +      Notion Calenda… ◆        63 KB/s   ▄▆▇▄▄▆█▅▃▆ ▣ 2606:50c0::1:443       minimal
+  +      legacy-sync     ◇        40 KB/s   ▆▂▆▂▆▂█▃█▃ □ 192.0.2.9:80           notable
+  +      adb                      800 B/s   ▁██▁█▄▁█▄▄ 127.0.0.1:5037           low
+  +      firefox         ◆        0 B/s     █▄▁▄▄▁▁▄▄▁ ▣ 140.82.113.25:443      minimal
 
+
+
+  ────────────────────────────────────────────────────────────────────────────────────────
+  DETAIL — claude · 1 instance(s) · 1 conn(s)
+  notarized · foreground app · cadence: steady
+  ────────────────────────────────────────────────────────────────────────────────────────
+  TREND ↑ out  quiet ▁▂▃▄▅▆▇█ loud
+  ────────────────────────────────────────────────────────────────────────────────────────
+  ⇥ switch · j/k move · ↵/→ expand · ← collapse · z zoom · i inspect · t trend · s sort ·…
+```
+
+**Zoom (`z`) — a btm-style dashboard for one app.** Blow up any row into a per-PID throughput graph
+(one line per PID, the selected line emphasized), a selectable table with each PID's rate and
+%-of-group share, its destinations, and group metadata. `g` moves focus between the PIDs and
+destinations boxes — the arrow keys and the graph grouping follow the focused box — and `i` inspects
+the selection.
+
+```
+┌─ claude · egress · 3 pid(s) · by pid · out ──────────────────┐┌─ PIDs ───────────────────────────────┐
+│1.3 …         ⢠⠓⡄                ⢠⠓⡄                ⢠⠳⡀       ││   PID     OUT↑    IN↓  %GRP  ▣       │
+│             ⢠⠃ ⠈⢆              ⡰⠁ ⠈⢆              ⡰⠁ ⠑⡄      ││▸■  1802  1.3 MB  117 KB  ▇▇▇  93%  ▣ │
+│            ⡰⠁   ⠈⢆            ⡜    ⠈⢆            ⡜    ⠈⢆     ││ ■  1990   78 KB   2 KB        5%  ▣  │
+│          ⢀⠎      ⠈⠢⡀        ⢀⠎      ⠈⠢⡀        ⢀⠎      ⠈⢆    ││ ■  2044   20 KB    0 B        1%  ▣  │
+│         ⢀⠎         ⠘⡄      ⡠⠃         ⠘⡄      ⡠⠃         ⠱⡀  ││                                      │
+│        ⡠⠃           ⠈⢆    ⡰⠁           ⠘⡄    ⡰⠁           ⠘⡄ ││                                      │
+│       ⡰⠁              ⢣  ⡰⠁             ⠈⢆ ⢀⠜              ⠈⢆││                                      │
+│      ⢜⡀            ⢀⣀  ⠣⠊         ⣀       ⠣⠃    ⣀            ││                                      │
+│0     ⠥⠬⠭⠭⠶⠶⢦⣤⣤⣤⣒⣒⣉⣉⣁⣀⣉⣉⣒⡲⠦⠤⠤⠤⠶⠶⠮⠭⠭⠤⣉⣉⣑⣒⣢⣤⣤⣤⣒⣒⣊⣉⣉⠤⠭⠭⠵⠶⠶⠤⠤⠤⠴⢖⣒⣉││                                      │
+│      ◄ older                                  ↑1.4 MB ↓117 KB││                                      │
+└──────────────────────────────────────────────────────────────┘└──────────────────────────────────────┘
+┌─ destinations ───────────────────────────────────────────────┐┌─ this group ─────────────────────────┐
+│ 2607:6bc0::10:443        ↑1.3 MB  93%                        ││ notarized · foreground app · cadenc… │
+│ 140.82.113.26:443        ↑ 78 KB   5%                        ││ can access  screen · keystrokes      │
+│ 17.253.7.7:443           ↑ 20 KB   1%                        ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+│                                                              ││                                      │
+└──────────────────────────────────────────────────────────────┘└─ i inspect · ↑/↓ pid · t out/in · g…─┘
+```
+
+**Inspect (`i`) — honest per-flow coverage.** Capture and inspect one flow (native `/dev/bpf`, needs
+sudo). It never overstates what it can see: an encrypted flow is reported as exactly that — size and
+destination, no payload — and plaintext is shown masked until you press `v` to view.
+
+```
+  CounterSpy · Inspect
+  ────────────────────────────────────────────────────────────────────────────────────────
+  claude · pid 1802 · → TCP 2607:6bc0::10:443 ◆
+  ────────────────────────────────────────────────────────────────────────────────────────
+  ENCRYPTED · not decrypted (metadata only)
+  ↑ 9 KB sent   ↓ 354 B received
+  ────────────────────────────────────────────────────────────────────────────────────────
+  ▣ Encrypted (TLS): the payload is ciphertext. CounterSpy can measure this flow — how
+  much left and where it went, shown above — but it cannot read the contents, so there is
+  nothing to view.
+  ────────────────────────────────────────────────────────────────────────────────────────
+  esc/i back · Q quit
+```
+
+Piped or with `--json`, the monitor prints a one-shot report instead of the live view. Real
+destination *names* (SNI/DNS) are a roadmapped enrichment; today it shows `IP:port`.
 ## Testing
 
 Deterministic, mock-driven, and CI-safe: the exec edges (`nettop`, `lsof`, `ps`, `codesign`,
