@@ -60,9 +60,11 @@ func allRawIP(dests []model.Endpoint) bool {
 	return true
 }
 
-// isRawIP reports a destination with no resolved name. In v1 no destination has a name, so
-// this is a neutral stub (false) — it does NOT penalize every v1 destination. It becomes
-// meaningful when the v0.4.1 packet-capture/reverse-DNS path attaches names.
+// isRawIP reports a destination with no resolved name. In v1 no destination has a name, so this is
+// a neutral stub (false) — it does NOT penalize every v1 destination, and the "raw IP → elevated"
+// signal therefore contributes nothing to the band today (intentional; sets band-tuning
+// expectations). It becomes meaningful once the packet-capture / SNI-name path attaches destination
+// names (issue #3 / the sni-in-tree roadmap item).
 func isRawIP(host string) bool { return false }
 
 func band(score int) model.ConcernLevel {
