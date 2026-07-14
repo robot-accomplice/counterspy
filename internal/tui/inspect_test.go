@@ -219,8 +219,8 @@ func TestDrawInspect_EncryptedExplainsWhyNoContent(t *testing.T) {
 		target: inspectTarget{app: "claude", pid: 1802, trust: "notarized",
 			conn: model.Conn{Endpoint: model.Endpoint{IP: "2607:6bc0::10", Port: 443}, Proto: "tcp"}},
 		view: model.InspectView{
-			Verdict: "ENCRYPTED · not decrypted (metadata only)", Coverage: model.InspectMetadata,
-			SentBytes: 9216,
+			Verdict: "ENCRYPTED · TLS ciphertext (not decryptable)", Coverage: model.InspectMetadata,
+			Encrypted: true, SentBytes: 9216,
 		},
 	}
 	drawInspect(s, insp, false)

@@ -20,11 +20,13 @@ const (
 // memory for the view only (§6, ephemeral); the view masks obvious secrets with Redact unless
 // the user reveals, so a shoulder-surfer/screenshot doesn't leak them.
 type InspectView struct {
-	SNI      string
-	Verdict  string // the honest one-line coverage verdict
-	Coverage InspectCoverage
-	// Sent/Received are the readable payloads each direction (sanitized, already through Clean),
-	// populated only for a plaintext flow — encrypted content is never exposed as text.
+	SNI       string
+	Verdict   string // the honest one-line coverage verdict
+	Coverage  InspectCoverage
+	Encrypted bool // the flow is TLS (ciphertext) vs cleartext — set by the engine's evidence + port
+	// Sent/Received are what each direction shows: readable text for a plaintext direction, or a
+	// hexdump for a cleartext-but-binary one. Empty for a TLS-ciphertext direction (nothing readable)
+	// and for an idle direction. Already sanitized (through Clean); the view masks secrets until reveal.
 	Sent     string
 	Received string
 	// SentBytes/RecvBytes are the byte volumes each direction, shown for ANY coverage so an

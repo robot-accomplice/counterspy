@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -49,31 +50,75 @@ func (liveInspector) Inspect(conn model.Conn) model.InspectView {
 // mapping is pinned by TestToInspectView_CoverageMapping so adding a tier forces a decision here.
 func toInspectView(r inspect.Result) model.InspectView {
 	v := model.InspectView{
-		SNI: r.SNI, Verdict: r.Verdict,
+		SNI: r.SNI, Verdict: r.Verdict, Encrypted: r.Encrypted,
 		SentBytes: len(r.Outbound), RecvBytes: len(r.Inbound), // volumes shown for any coverage
+		Sent:     renderFlowBytes(r.Outbound, r.OutboundPlaintext, r.Encrypted),
+		Received: renderFlowBytes(r.Inbound, r.InboundPlaintext, r.Encrypted),
 	}
 	if r.Err != nil {
 		v.Err = r.Err.Error()
 	}
 	switch r.Coverage {
-	case inspect.CoverageNone:
-		v.Coverage = model.InspectNone
 	case inspect.CoverageMetadata:
-		v.Coverage = model.InspectMetadata // encrypted — volumes only, no readable content exposed
+		v.Coverage = model.InspectMetadata
 	case inspect.CoveragePlaintext:
 		v.Coverage = model.InspectPlaintext
-		// Show each direction's bytes as text ONLY if THAT direction is plaintext — an encrypted
-		// direction is never rendered even when the other direction is readable (§6).
-		if r.OutboundPlaintext {
-			v.Sent = sanitizeMultiline(string(r.Outbound))
-		}
-		if r.InboundPlaintext {
-			v.Received = sanitizeMultiline(string(r.Inbound))
-		}
 	default:
-		v.Coverage = model.InspectNone // unknown/newer tier — honest, never an overclaim
+		v.Coverage = model.InspectNone
 	}
 	return v
+}
+
+// renderFlowBytes turns one direction's captured bytes into what the pane shows: readable TEXT when
+// the direction is plaintext (HTTP headers, protocol text — secrets still masked in the view); a
+// HEXDUMP when it's cleartext-but-binary (so the actual payload is inspectable, and its ASCII gutter
+// surfaces any embedded text); or nothing when the flow is TLS (the bytes are ciphertext noise, and
+// the verdict already says so). The wire bytes are never hidden just for being non-text (§6).
+func renderFlowBytes(b []byte, plaintext, encrypted bool) string {
+	switch {
+	case len(b) == 0:
+		return ""
+	case plaintext:
+		return sanitizeMultiline(string(b))
+	case encrypted:
+		return "" // TLS ciphertext — random bytes; surfacing them adds noise, not information
+	default:
+		return hexDump(b)
+	}
+}
+
+// hexDump renders bytes as a canonical offset / hex / ASCII dump (xxd-style), 16 bytes per line.
+func hexDump(b []byte) string {
+	const perLine = 16
+	var sb strings.Builder
+	for off := 0; off < len(b); off += perLine {
+		end := off + perLine
+		if end > len(b) {
+			end = len(b)
+		}
+		line := b[off:end]
+		fmt.Fprintf(&sb, "%04x  ", off)
+		for i := 0; i < perLine; i++ {
+			if i < len(line) {
+				fmt.Fprintf(&sb, "%02x ", line[i])
+			} else {
+				sb.WriteString("   ")
+			}
+			if i == 7 {
+				sb.WriteByte(' ')
+			}
+		}
+		sb.WriteString(" |")
+		for _, c := range line {
+			if c >= 0x20 && c < 0x7f {
+				sb.WriteByte(c)
+			} else {
+				sb.WriteByte('.')
+			}
+		}
+		sb.WriteString("|\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // sanitizeMultiline strips control/escape chars from each line (so a crafted payload can't inject

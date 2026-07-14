@@ -127,9 +127,11 @@ func noContentReason(v model.InspectView) string {
 	switch {
 	case v.Err != "":
 		return "" // the verdict line already states the capture failure
-	case v.Coverage == model.InspectMetadata:
+	case v.Coverage == model.InspectMetadata && v.Encrypted:
 		return string(mark.GlyphEncrypted) + " Encrypted (TLS): the payload is ciphertext. CounterSpy can measure this flow — " +
 			"how much left and where it went, shown above — but it cannot read the contents, so there is nothing to view."
+	case v.Coverage == model.InspectMetadata:
+		return "Captured only non-readable bytes for this flow (nothing to render)."
 	default:
 		return "No application data was captured for this flow."
 	}

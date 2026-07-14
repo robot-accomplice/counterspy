@@ -157,6 +157,14 @@ Rules:
   through the feedback channel or anywhere else — inspection is local-only.
 - **Least privilege:** the BPF filter is scoped to the single selected 4-tuple; we
   do not capture the whole interface.
+- **Show the wire bytes honestly (revised):** the earlier rule "an encrypted/non-text
+  direction is never rendered" over-hid — it branded a cleartext binary payload (e.g. a
+  `:80` download body) as "encrypted" and showed nothing. Corrected: a direction is shown
+  as **text** when readable, as a **hexdump** when cleartext-but-binary (the ASCII gutter
+  still surfaces embedded text like HTTP headers), and **not surfaced** only when the flow
+  is truly TLS (ciphertext noise). "Encrypted (TLS)" now requires positive evidence — an
+  SNI/handshake, a TLS record, or a well-known TLS port — never merely "the bytes aren't
+  printable." Redaction-until-reveal still masks secrets in the readable text.
 
 ## 7. Scope & phasing
 

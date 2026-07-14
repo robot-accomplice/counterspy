@@ -11,34 +11,24 @@ import (
 )
 
 // The coverage mapping is pinned so a future tier added to inspect.Coverage forces a deliberate
-// decision in toInspectView rather than silently defaulting (cp-insC Audit F-3). Readable content
-// is populated ONLY for the plaintext tier; an encrypted/metadata flow exposes byte volumes but
-// never the (cipher)text.
+// decision in toInspectView rather than silently defaulting (cp-insC Audit F-3), and SNI + byte
+// volumes pass through for any tier.
 func TestToInspectView_CoverageMapping(t *testing.T) {
 	cases := []struct {
-		in          inspect.Coverage
-		want        model.InspectCoverage
-		wantContent bool
+		in   inspect.Coverage
+		want model.InspectCoverage
 	}{
-		{inspect.CoverageNone, model.InspectNone, false},
-		{inspect.CoverageMetadata, model.InspectMetadata, false},
-		{inspect.CoveragePlaintext, model.InspectPlaintext, true},
+		{inspect.CoverageNone, model.InspectNone},
+		{inspect.CoverageMetadata, model.InspectMetadata},
+		{inspect.CoveragePlaintext, model.InspectPlaintext},
 	}
 	for _, c := range cases {
-		plain := c.in == inspect.CoveragePlaintext
 		r := inspect.Result{Coverage: c.in, SNI: "api.example.com", Verdict: "v",
-			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n"),
-			OutboundPlaintext: plain, InboundPlaintext: plain}
+			Outbound: []byte("GET / HTTP/1.1\r\n"), Inbound: []byte("HTTP/1.1 200 OK\r\n")}
 		v := toInspectView(r)
 		if v.Coverage != c.want {
 			t.Errorf("coverage %d → %d, want %d", c.in, v.Coverage, c.want)
 		}
-		hasContent := v.Sent != "" || v.Received != ""
-		if hasContent != c.wantContent {
-			t.Errorf("coverage %d: content present=%v, want %v", c.in, hasContent, c.wantContent)
-		}
-		// Byte volumes map from the raw bytes and are reported for ANY coverage, so an encrypted
-		// flow still conveys its shape (one direction may legitimately be 0 — not asserted here).
 		if v.SentBytes != len(r.Outbound) || v.RecvBytes != len(r.Inbound) {
 			t.Errorf("coverage %d: byte volumes must equal len(Outbound)/len(Inbound)", c.in)
 		}
@@ -48,24 +38,50 @@ func TestToInspectView_CoverageMapping(t *testing.T) {
 	}
 }
 
-// §6: when only ONE direction is plaintext, the encrypted direction's bytes must NOT be shown as
-// text — even though flow-wide coverage is Plaintext. (cp-insE-bidir Audit F-1)
-func TestToInspectView_EncryptedDirectionNotShown(t *testing.T) {
+// A TLS-ciphertext direction is NOT surfaced (random noise) — even when the OTHER direction is
+// readable plaintext (§6: never dump ciphertext; the readable side still shows).
+func TestToInspectView_TLSCiphertextNotDumped(t *testing.T) {
 	r := inspect.Result{
-		Coverage: inspect.CoveragePlaintext, // flow-wide OR: inbound is readable
-		Outbound: []byte("\x16\x03\x01ciphertexthandshake"), OutboundPlaintext: false,
+		Coverage: inspect.CoveragePlaintext, Encrypted: true, // a TLS flow (SNI/record/port evidence)
+		Outbound: []byte{0x16, 0x03, 0x01, 0xde, 0xad, 0xbe, 0xef}, OutboundPlaintext: false,
 		Inbound: []byte("HTTP/1.1 200 OK\r\n\r\nreadable body"), InboundPlaintext: true,
 	}
 	v := toInspectView(r)
 	if v.Sent != "" {
-		t.Fatalf("encrypted outbound must NOT be shown as text, got %q", v.Sent)
+		t.Fatalf("TLS ciphertext must not be dumped, got %q", v.Sent)
 	}
 	if v.Received == "" {
-		t.Fatal("the plaintext inbound direction must be shown")
+		t.Fatal("the plaintext inbound direction must still be shown")
 	}
-	// Both volumes still reported so the encrypted direction's activity is visible.
 	if v.SentBytes == 0 || v.RecvBytes == 0 {
 		t.Fatal("byte volumes for both directions must still be reported")
+	}
+}
+
+// A CLEARTEXT binary payload (not TLS) must still be SHOWN — as a hexdump — not hidden. This is the
+// :80 case: the wire bytes are the real payload; the user needs to see them.
+func TestToInspectView_CleartextBinaryShownAsHex(t *testing.T) {
+	body := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0xfe, 0x01} // zip-ish binary, not text, not TLS
+	r := inspect.Result{Coverage: inspect.CoverageMetadata, Encrypted: false,
+		Inbound: body, InboundPlaintext: false}
+	v := toInspectView(r)
+	if v.Received == "" {
+		t.Fatal("a cleartext binary payload must be shown as a hexdump, not hidden")
+	}
+	if !strings.Contains(v.Received, "50 4b 03 04") {
+		t.Fatalf("expected a hexdump of the bytes, got %q", v.Received)
+	}
+	if v.Encrypted {
+		t.Fatal("a non-TLS flow must not be marked Encrypted")
+	}
+}
+
+// The hexdump surfaces embedded text in its ASCII gutter (so HTTP headers are readable even when
+// the direction is classified binary).
+func TestHexDump_ASCIIGutterSurfacesText(t *testing.T) {
+	got := hexDump([]byte("Host: hi\x00\x01")) // ≤16 bytes → one line
+	if !strings.Contains(got, "|Host: hi..|") {
+		t.Fatalf("hexdump gutter must show embedded text (non-printable as '.'), got:\n%s", got)
 	}
 }
 
