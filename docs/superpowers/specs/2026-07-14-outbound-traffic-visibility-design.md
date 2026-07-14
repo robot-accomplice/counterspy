@@ -24,6 +24,11 @@ today (`TestEgressOnly`, "never remotely steerable"). Phase 3's proxy adds **act
 DLP tool. That is an intended redefinition, sequenced last so the passive-visibility foundation ships
 first.
 
+**Standing constraint:** no new command-line option/flag may be added without the maintainer's
+explicit approval. Prefer automatic behavior on existing commands and existing TUI keybindings. Phase
+1 introduces **no** new CLI options; any control surface a later phase needs (e.g. `--decrypt`,
+`--proxy`) must be proposed and approved before implementation.
+
 ## The three phases
 
 | Phase | Capability | New substrate | Observe-only? |
