@@ -10,6 +10,8 @@ import (
 type fakeActor struct {
 	quarantined []string
 	restored    int
+	acked       []string
+	unacked     []string
 }
 
 func (f *fakeActor) Quarantine(a model.Assessment) (string, error) {
@@ -18,13 +20,22 @@ func (f *fakeActor) Quarantine(a model.Assessment) (string, error) {
 }
 func (f *fakeActor) Restore(string) error               { f.restored++; return nil }
 func (f *fakeActor) Label(model.Assessment, bool) error { return nil }
+func (f *fakeActor) Ack(a model.Assessment) error {
+	f.acked = append(f.acked, a.Subject.Key())
+	return nil
+}
+func (f *fakeActor) Unack(a model.Assessment) error {
+	f.unacked = append(f.unacked, a.Subject.Key())
+	return nil
+}
 
-// errActor lets each test configure exactly what Quarantine/Restore/Label return.
+// errActor lets each test configure exactly what Quarantine/Restore/Label/Ack return.
 type errActor struct {
 	quarantineManifest string
 	quarantineErr      error
 	restoreErr         error
 	labelErr           error
+	ackErr             error
 }
 
 func (e *errActor) Quarantine(model.Assessment) (string, error) {
@@ -32,6 +43,8 @@ func (e *errActor) Quarantine(model.Assessment) (string, error) {
 }
 func (e *errActor) Restore(string) error               { return e.restoreErr }
 func (e *errActor) Label(model.Assessment, bool) error { return e.labelErr }
+func (e *errActor) Ack(model.Assessment) error         { return e.ackErr }
+func (e *errActor) Unack(model.Assessment) error       { return e.ackErr }
 
 func applyOne(m Model, op string, a model.Assessment, actor Actor, lm *string) Model {
 	return applyFindingsCmd(m, Cmd{Op: op, A: a}, actor, lm)
@@ -128,5 +141,34 @@ func TestWithDone_ClonesNotAliases(t *testing.T) {
 	}
 	if !b["x"] || !b["y"] {
 		t.Fatal("result should contain both old and new keys")
+	}
+}
+
+// #4: applying ack marks the finding reviewed (map + actor) and unack clears it; an actor error
+// surfaces as a toast and leaves the map unchanged (Rule 13 — the decision isn't silently "recorded").
+func TestApplyFindingsCmd_AckFlow(t *testing.T) {
+	a := mk("x", model.RecMonitor, 3)
+	key := a.Subject.Key()
+
+	fa := &fakeActor{}
+	var lm string
+	m := New([]model.Assessment{a}, nil)
+	m = applyOne(m, "ack", a, fa, &lm)
+	if !m.Acked[key] || len(fa.acked) != 1 {
+		t.Fatalf("ack should set the map and call actor.Ack: acked=%v calls=%v", m.Acked, fa.acked)
+	}
+	m = applyOne(m, "unack", a, fa, &lm)
+	if m.Acked[key] || len(fa.unacked) != 1 {
+		t.Fatalf("unack should clear the map and call actor.Unack: acked=%v calls=%v", m.Acked, fa.unacked)
+	}
+
+	ea := &errActor{ackErr: errors.New("disk full")}
+	m2 := New([]model.Assessment{a}, nil)
+	m2 = applyOne(m2, "ack", a, ea, &lm)
+	if m2.Acked[key] {
+		t.Fatal("a failed ack must NOT mark the finding reviewed")
+	}
+	if m2.Toast == "" {
+		t.Fatal("a failed ack must surface a toast, not fail silently")
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"counterspy/internal/ack"
 	"counterspy/internal/act"
 	"counterspy/internal/collect"
 	"counterspy/internal/egress"
@@ -484,9 +485,11 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	cfgPath, storePath := feedbackPaths()
 	cfg := feedback.LoadConfig(cfgPath)
 	store := feedback.NewStore(storePath)
+	acks := ack.NewStore(ackPath())
+	_ = acks.Load() // missing/unreadable ack file → empty store; triage still opens (Rule 13)
 	actor := &cliActor{
 		root: filepath.Join(home, "CounterSpyQuarantine", ts), ts: ts,
-		readOnly: from != "", store: store, detail: cfg.Detail,
+		readOnly: from != "", store: store, detail: cfg.Detail, acks: acks,
 	}
 	// Pre-populate each finding's planned actions (pure) so the TUI can preview them in
 	// the confirm modal without importing act (keeps internal/tui → model only).
@@ -495,6 +498,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	}
 	m := tui.New(assessments, gaps)
 	m.Liveness = livenessFor(assessments)
+	m.Acked, m.AckChanged = acksFor(acks, assessments)
 	m.ReadOnly = from != "" // snapshots are triage-only; act only on a live scan (untrusted paths)
 
 	// Exfiltration sampler + a ~3Hz ticker. RunConsole samples LAZILY (only while Exfiltration is
@@ -570,6 +574,7 @@ type cliActor struct {
 	readOnly bool
 	store    *feedback.Store
 	detail   feedback.Detail
+	acks     *ack.Store
 }
 
 func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
@@ -609,6 +614,22 @@ func (c *cliActor) Label(a model.Assessment, falsePositive bool) error {
 	return c.store.Add(feedback.Capture(a, label, c.detail, feedback.NewNonce()))
 }
 
+// Ack records a LOCAL "reviewed / leave it" decision, fingerprinting the finding's current state so
+// a later change re-flags it. Unack clears it. Both are local-only and never transmitted (#4).
+func (c *cliActor) Ack(a model.Assessment) error {
+	if c.acks == nil {
+		return nil
+	}
+	return c.acks.Ack(a.Subject.Key(), ack.Fingerprint(a), c.ts)
+}
+
+func (c *cliActor) Unack(a model.Assessment) error {
+	if c.acks == nil {
+		return nil
+	}
+	return c.acks.Unack(a.Subject.Key())
+}
+
 // invokingUserHome resolves the HOME of the human who ran the tool, not root's — the tool
 // runs under sudo, so os.UserHomeDir() would point at /var/root. Falls back to os.UserHomeDir.
 func invokingUserHome() string {
@@ -625,6 +646,33 @@ func invokingUserHome() string {
 func feedbackPaths() (configPath, storePath string) {
 	base := filepath.Join(invokingUserHome(), ".config", "counterspy")
 	return filepath.Join(base, "feedback.json"), filepath.Join(base, "feedback-store.json")
+}
+
+// ackPath returns the local ack-store path under the invoking user's home (#4).
+func ackPath() string {
+	return filepath.Join(invokingUserHome(), ".config", "counterspy", "ack.json")
+}
+
+// acksFor loads the ack store and derives the two per-finding display maps the TUI needs: which
+// findings are acked, and which of those have CHANGED since they were reviewed (stored fingerprint
+// no longer matches the finding's current state). A load error degrades to no acks — a triage view
+// must never fail to open because a local note file is unreadable (Rule 13: surfaced via empty maps,
+// the feature simply shows nothing rather than crashing).
+func acksFor(store *ack.Store, assessments []model.Assessment) (acked, changed map[string]bool) {
+	acked, changed = map[string]bool{}, map[string]bool{}
+	if store == nil {
+		return
+	}
+	for _, a := range assessments {
+		key := a.Subject.Key()
+		if rec, ok := store.Get(key); ok {
+			acked[key] = true
+			if rec.Fingerprint != ack.Fingerprint(a) {
+				changed[key] = true
+			}
+		}
+	}
+	return
 }
 
 // submitFeedback pushes pending labels according to the consent level. off → nothing;
