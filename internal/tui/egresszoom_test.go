@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -331,5 +332,21 @@ func TestZoomedMembers_SortedByOutDesc(t *testing.T) {
 	ms := zoomedMembers(zoomGroupFixture())
 	if ms[0].PID != 1802 || ms[1].PID != 1990 {
 		t.Fatalf("members must sort by out-rate desc, got %d,%d", ms[0].PID, ms[1].PID)
+	}
+}
+
+// cp-p1g self-caught: a crafted destination NAME (from an observed DNS packet) must be Clean-stripped
+// before it reaches the zoom panel — no ANSI/control chars into the terminal.
+func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
+	g := model.EgressGroup{Conns: []model.Conn{
+		{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443, Name: "evil\x1b[31m\r\ninject.example"}, OutRate: 10},
+	}}
+	ds := zoomDests(g)
+	if len(ds) != 1 {
+		t.Fatalf("expected 1 dest, got %d", len(ds))
+	}
+	// The label itself carries the raw name (keying/aggregation is fine); the DRAW path must Clean it.
+	if got := model.Clean(ds[0].label); strings.ContainsAny(got, "\x1b\r\n") {
+		t.Fatalf("model.Clean must strip control chars from the label: %q", got)
 	}
 }

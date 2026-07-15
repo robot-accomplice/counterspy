@@ -407,7 +407,7 @@
       "id": "mod-report",
       "type": "module",
       "name": "internal/report",
-      "summary": "Presentation only: executive summary + ranked actionable findings (Monitor tier counted, not dumped) and a JSON form.",
+      "summary": "Presentation only: executive summary + ranked actionable findings (Monitor tier counted, not dumped) and a JSON form. RenderJSON emits a Snapshot {tool_version, gaps, assessments} so a --from load recovers collector gaps.",
       "responsibilities": [
         "Render([]Assessment) string",
         "RenderJSON([]Assessment)"
@@ -451,7 +451,8 @@
       "responsibilities": [
         "Quarantine (refuse allowlisted/protected paths)",
         "Write manifest (undo + RCA trail)",
-        "Restore without clobbering"
+        "Restore without clobbering",
+        "Per-item undo (RestoreItem) — reverse one manifest item, trim it from the manifest"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -461,7 +462,8 @@
       "runtime": "in-process + exec (launchctl)",
       "interfaces": [
         "Quarantine",
-        "Restore"
+        "Restore",
+        "RestoreItem"
       ],
       "dependencies": [
         "mod-model",
@@ -498,7 +500,8 @@
       "responsibilities": [
         "Render Findings triage (findings + evidence) and the Exfiltration monitor (tree, zoom, trend)",
         "Navigate/filter/sort; quarantine with confirm; restore; inspect a flow (i); zoom an app (z)",
-        "Stay a thin face — imports only internal/model + internal/mark"
+        "Stay a thin face — imports only internal/model + internal/mark",
+        "Render resolved destination names (name-or-IP) in the tree/zoom/inspect, Clean'd before draw"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -651,7 +654,8 @@
       "responsibilities": [
         "Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence",
         "Group by app; score concern; infer exfil risk + candidate categories",
-        "Feed the live TUI (via Sampler) and the non-TTY report"
+        "Feed the live TUI (via Sampler) and the non-TTY report",
+        "Annotate destination Endpoint.Name from a passive-DNS Resolver each Sample; activate the corroborated raw-IP concern nudge"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -698,6 +702,53 @@
       ]
     },
     {
+      "id": "mod-netname",
+      "type": "module",
+      "name": "internal/netname",
+      "summary": "Passive DNS name resolution: a long-lived port-53 capture parses observed DNS RESPONSES into a bounded, race-safe IP->hostname cache, so the egress monitor can show the name an app actually resolved instead of a bare IP. Observe-only — issues no queries; a spoofable name is a display + light-touch-concern hint, never a security decision.",
+      "responsibilities": [
+        "ParseDNSResponse — tolerant DNS answer parser (A/AAAA attributed to the queried name, CNAME-safe, bounded compression-pointer following)",
+        "Cache — bounded LRU-by-write IP->name map, mutex-guarded (observer writes, sampler reads)",
+        "Observer — drain a packet source, extract UDP/53 payloads, feed the cache; clean start/stop"
+      ],
+      "owner": "Project maintainers",
+      "sourcePaths": [
+        "internal/netname/dns.go",
+        "internal/netname/cache.go",
+        "internal/netname/observer.go"
+      ],
+      "runtime": "in-process (a background capture goroutine while the console is open)",
+      "interfaces": [
+        "ParseDNSResponse",
+        "Cache",
+        "NewObserver"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-inspect"
+      ],
+      "dataHandled": [
+        "dns-observations"
+      ],
+      "security": [
+        "Observe-only: issues no DNS queries; cannot be steered",
+        "An injected DNS response can poison a name, ACCEPTED — names are display + light-touch-concern only, never a security decision, and a DNS injector is already on-path"
+      ],
+      "observability": [
+        "in-memory name cache (ephemeral, per session)"
+      ],
+      "relatedFlows": [
+        "scan-pipeline"
+      ],
+      "relatedDecisions": [],
+      "knownRisks": [
+        "risk-bpf-capture"
+      ],
+      "verification": [
+        "go test ./internal/netname/ (incl. -race)"
+      ]
+    },
+    {
       "id": "mod-inspect",
       "type": "module",
       "name": "internal/inspect",
@@ -718,7 +769,9 @@
       "runtime": "in-process (native /dev/bpf; requires root for live capture)",
       "interfaces": [
         "Inspect(PacketSource, Flow, maxPackets) Result",
-        "OpenLiveCapture(iface, remote, maxWait)"
+        "OpenLiveCapture(iface, remote, maxWait)",
+        "OpenPortCapture",
+        "DecodeCleartext"
       ],
       "dependencies": [
         "mod-model",

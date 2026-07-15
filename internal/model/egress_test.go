@@ -24,3 +24,15 @@ func TestEgressGroupCarriesConnsAndExfil(t *testing.T) {
 		t.Fatalf("EgressGroup fields wrong: %+v", g)
 	}
 }
+
+// #3: Endpoint carries the resolved hostname alongside the IP; "" means unresolved (show the IP).
+func TestEndpoint_NameField(t *testing.T) {
+	e := Endpoint{IP: "93.184.216.34", Port: 443, Name: "example.com"}
+	if e.Name != "example.com" {
+		t.Fatalf("Name not carried: %+v", e)
+	}
+	var zero Endpoint
+	if zero.Name != "" {
+		t.Fatalf("zero Endpoint must have an empty Name, got %q", zero.Name)
+	}
+}

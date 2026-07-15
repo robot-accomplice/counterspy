@@ -15,7 +15,7 @@ type labelActor struct {
 }
 
 func (l *labelActor) Quarantine(a model.Assessment) (string, error) { return "", nil }
-func (l *labelActor) Restore(string) error                          { return nil }
+func (l *labelActor) RestoreItem(string, model.Assessment) error    { return nil }
 func (l *labelActor) Ack(model.Assessment) error                    { return nil }
 func (l *labelActor) Unack(model.Assessment) error                  { return nil }
 func (l *labelActor) Label(a model.Assessment, fp bool) error {

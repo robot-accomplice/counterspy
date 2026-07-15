@@ -187,3 +187,50 @@ func TestRestore_SkipsActionWithoutDestination(t *testing.T) {
 		t.Fatalf("well-formed item must still be restored: %v / %q", err, got)
 	}
 }
+
+// #8 per-item undo: RestoreItem reverses only the named item and drops it from the manifest, leaving
+// other quarantined items intact and recoverable.
+func TestRestoreItem_RestoresOneAndTrimsManifest(t *testing.T) {
+	dir := t.TempDir()
+	root, _ := filepath.EvalSymlinks(dir)
+
+	// Two quarantined artifacts, each moved into the quarantine root.
+	mkItem := func(name string) (model.ManifestItem, string) {
+		from := filepath.Join(root, name)    // original location (under tempdir, safe)
+		to := filepath.Join(root, "q", name) // quarantine location
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		item := model.ManifestItem{
+			Subject: model.Subject{Path: from, Label: name},
+			Actions: []model.Action{{Kind: model.ActionMove, From: from, To: to}},
+		}
+		return item, from
+	}
+	itemA, fromA := mkItem("alpha")
+	itemB, fromB := mkItem("beta")
+	mpath := filepath.Join(root, "manifest.json")
+	writeManifest(t, mpath, model.Manifest{Items: []model.ManifestItem{itemA, itemB}})
+
+	if err := RestoreItem(mpath, itemA.Subject.Key()); err != nil {
+		t.Fatalf("RestoreItem(alpha): %v", err)
+	}
+	if _, err := os.Stat(fromA); err != nil {
+		t.Fatalf("alpha should be back at its original path: %v", err)
+	}
+	if _, err := os.Stat(fromB); err == nil {
+		t.Fatal("beta must NOT be restored by a per-item undo of alpha")
+	}
+	// Manifest now holds only beta.
+	m := readManifest(t, mpath)
+	if len(m.Items) != 1 || m.Items[0].Subject.Key() != itemB.Subject.Key() {
+		t.Fatalf("manifest should retain only beta after restoring alpha, got %+v", m.Items)
+	}
+	// Restoring an unknown key is a clear error, not a silent no-op.
+	if err := RestoreItem(mpath, "path:/nope"); err == nil {
+		t.Fatal("restoring an item absent from the manifest must error")
+	}
+}

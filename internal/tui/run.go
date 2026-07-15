@@ -10,7 +10,9 @@ import (
 // TUI never imports internal/ack (the model-only decoupling invariant).
 type Actor interface {
 	Quarantine(a model.Assessment) (string, error)
-	Restore(manifest string) error
+	// RestoreItem reverses ONE quarantined finding (per-item undo, #8). Whole-session restore lives
+	// in the `counterspy restore <manifest>` CLI command, not the interactive UI.
+	RestoreItem(manifest string, a model.Assessment) error
 	Label(a model.Assessment, falsePositive bool) error
 	Ack(a model.Assessment) error
 	Unack(a model.Assessment) error

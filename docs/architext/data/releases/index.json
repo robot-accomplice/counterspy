@@ -1,5 +1,5 @@
 {
-  "currentReleaseId": "v0-5-3-liveness-hardening",
+  "currentReleaseId": "v0-6-0-egress-names",
   "releases": [
     {
       "id": "v0-3-0-feedback",
@@ -84,6 +84,27 @@
         "stretch": 0
       },
       "file": "v0-5-3-liveness-hardening.json"
+    },
+    {
+      "id": "v0-6-0-egress-names",
+      "version": "0.6.0",
+      "name": "Passive destination names + cleartext decode",
+      "status": "complete",
+      "posture": "on-track",
+      "targetWindow": "tag on main, post-v0.5.3",
+      "lastUpdated": "2026-07-14T00:00:00.000Z",
+      "summary": "Phase 1 of the outbound-visibility program plus two backlog items, all merged to develop and reviewed via the swarm. Headline: passive DNS name resolution — a port-53 capture resolves egress IPs to the hostnames apps actually looked up, shown in the tree/zoom/inspect (honest about DoH/pre-existing-connection gaps), with a light-touch corroborated raw-IP concern nudge and cleartext HTTP decode (dechunk + gzip/deflate) in the inspector. Also: per-item quarantine undo + collector gaps carried in --from snapshots (#8), and an install.sh PREFIX hardening (#14). No new CLI flags.",
+      "counts": {
+        "features": 2,
+        "bugFixes": 0,
+        "workstreams": 2,
+        "blockers": 0,
+        "complete": 3,
+        "inProgress": 0,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-6-0-egress-names.json"
     },
     {
       "id": "v0-4-0-egress",

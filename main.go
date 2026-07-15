@@ -23,9 +23,11 @@ import (
 	"counterspy/internal/collect"
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
+	"counterspy/internal/inspect"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
+	"counterspy/internal/netname"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
 	"counterspy/internal/tui"
@@ -114,10 +116,9 @@ func runScan(flags []string, stdout io.Writer) int {
 	assessments := filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
 
 	if asJSON {
-		for _, g := range gaps { // gaps to stderr — keep --json clean
-			fmt.Fprintln(os.Stderr, "note:", g)
-		}
-		b, err := report.RenderJSON(assessments)
+		// Gaps ride inside the snapshot now (not stderr) so a `--from` load can surface the same
+		// "signal unavailable" notes a live scan shows, instead of reading as a clean bill (#8).
+		b, err := report.RenderJSON(assessments, gaps)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "render:", err)
 			return 1
@@ -421,12 +422,13 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	var assessments []model.Assessment
 	var gaps []string
 	if from != "" {
-		as, err := loadSnapshot(from)
+		as, g, err := loadSnapshot(from)
 		if err != nil {
 			fmt.Fprintln(stdout, "console: cannot read snapshot:", err)
 			return 1
 		}
 		assessments = as
+		gaps = g // a snapshot's collector gaps now surface in --from, same as a live scan (#8)
 	} else {
 		// Show the progress spinner while collecting (before the alt-screen opens) so the
 		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
@@ -508,6 +510,9 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
 	const interval = 0.3
 	mon := newEgressMonitor(interval)
+	// Passive DNS name resolution (#3): wire it into the live monitor BEFORE the sample loop runs
+	// (SetResolver is set-once, read by Sample). Flagless + best-effort; returns a stop func.
+	defer startNameResolver(mon)()
 	tick := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop) // ends the ticker → closes tick → ends RunConsole's sample goroutine (also on panic)
@@ -539,32 +544,43 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	return 0
 }
 
-// loadSnapshot decodes a `scan --json` snapshot ([]model.Assessment) from a file or stdin ("-").
+// loadSnapshot decodes a `scan --json` snapshot from a file or stdin ("-"), returning the
+// assessments AND any collector gaps recorded at scan time so --from can surface them (#8).
 // maxSnapshotBytes caps an untrusted --from snapshot so a hostile file can't OOM the
-// "safe to open" read-only workflow (ABORT-TUI Attacker #1).
+// "safe to open" read-only workflow (ABORT-TUI Attacker #1). A pre-#8 snapshot was a bare
+// []Assessment; that shape is still accepted (gaps unknown → empty) so old snapshots keep loading.
 const maxSnapshotBytes = 16 << 20 // 16 MiB
 
-func loadSnapshot(path string) ([]model.Assessment, error) {
+func loadSnapshot(path string) ([]model.Assessment, []string, error) {
 	var rc io.Reader
 	if path == "-" {
 		rc = os.Stdin
 	} else {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer f.Close()
 		rc = f
 	}
 	b, err := io.ReadAll(io.LimitReader(rc, maxSnapshotBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(b) > maxSnapshotBytes {
-		return nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
+		return nil, nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
 	}
+	// Current wrapped form: {tool_version, gaps, assessments}.
+	var snap report.Snapshot
+	if err := json.Unmarshal(b, &snap); err == nil && snap.Assessments != nil {
+		return snap.Assessments, snap.Gaps, nil
+	}
+	// Back-compat: a bare []Assessment from a pre-#8 snapshot (gaps unknown).
 	var as []model.Assessment
-	return as, json.Unmarshal(b, &as)
+	if err := json.Unmarshal(b, &as); err != nil {
+		return nil, nil, err
+	}
+	return as, nil, nil
 }
 
 // cliActor adapts internal/act to the tui.Actor interface, capturing the run root+ts and
@@ -599,7 +615,9 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 	return mp, err
 }
 
-func (c *cliActor) Restore(manifest string) error { return act.Restore(manifest) }
+func (c *cliActor) RestoreItem(manifest string, a model.Assessment) error {
+	return act.RestoreItem(manifest, a.Subject.Key())
+}
 
 // Label records a TP/FP judgement to the local store (no network — submission is a
 // separate, consent-gated step). A read-only snapshot may still be labeled.
@@ -758,6 +776,37 @@ func runFeedback(args []string, stdout io.Writer) int {
 // newEgressMonitor builds the egress sampler. It's a package var so tests can inject a fake
 // sampler and exercise the report/JSON path WITHOUT shelling out to nettop/lsof (CI-safe).
 var newEgressMonitor = func(interval float64) tui.Sampler { return egress.New(interval) }
+
+// newDNSCapture is the injectable seam for the passive DNS capture (mirrors newScreen/newEgressMonitor)
+// so the name-resolver wiring is testable without root/pcap (Audit cp-p1h F-2).
+var newDNSCapture = func(iface string, port int) (inspect.PacketSource, error) {
+	return inspect.OpenPortCapture(iface, port)
+}
+
+// startNameResolver wires passive DNS name resolution into a live egress Monitor and returns a stop
+// func (call it deferred). Best-effort + flagless: a non-Monitor sampler (the test fake) or a failed
+// capture (no sudo / the non-darwin stub) leaves it a no-op — destinations then show their IPs, never
+// a failure. SetResolver runs BEFORE the caller starts sampling (the set-once ordering, cp-p1e).
+func startNameResolver(mon tui.Sampler) func() {
+	realMon, ok := mon.(*egress.Monitor)
+	if !ok {
+		return func() {}
+	}
+	src, err := newDNSCapture(dnsInterface(), 53)
+	if err != nil {
+		return func() {}
+	}
+	cache := netname.NewCache(dnsCacheSize)
+	realMon.SetResolver(cache) // before any Sample() reads m.resolve
+	obs := netname.NewObserver(cache, src)
+	go func() {
+		// A mid-session read failure degrades destinations to IPs. Surfacing the terminating error for
+		// RCA (Rule 14) needs a TUI-safe channel we don't have while the alt-screen is up — deferred to
+		// the --non-interactive logging mode, which writes to a file/stdout (T-17).
+		_ = obs.Run()
+	}()
+	return func() { _ = obs.Close() }
+}
 
 // newScreen opens the terminal screen. A package var so tests can inject a
 // tcell.SimulationScreen and drive the TUI event loops without a real terminal (CI-safe).

@@ -1,0 +1,129 @@
+{
+  "id": "v0-6-0-egress-names",
+  "version": "0.6.0",
+  "name": "Passive destination names + cleartext decode",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Phase 1 of the outbound-visibility program plus two backlog items, all merged to develop and reviewed via the swarm. Headline: passive DNS name resolution — a port-53 capture resolves egress IPs to the hostnames apps actually looked up, shown in the tree/zoom/inspect (honest about DoH/pre-existing-connection gaps), with a light-touch corroborated raw-IP concern nudge and cleartext HTTP decode (dechunk + gzip/deflate) in the inspector. Also: per-item quarantine undo + collector gaps carried in --from snapshots (#8), and an install.sh PREFIX hardening (#14). No new CLI flags.",
+  "targetWindow": "tag on main, post-v0.5.3",
+  "lastUpdated": "2026-07-14T00:00:00.000Z",
+  "updateSource": "swarm build of #3 Phase 1 + backlog #8/#14",
+  "scope": {
+    "required": [
+      {
+        "id": "egress-names",
+        "title": "Passive DNS destination names + cleartext decode (#3 Phase 1)",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "internal/netname observer/cache/parser; generalized port-scoped /dev/bpf capture (OpenPortCapture, T-16); Endpoint.Name annotated pre-scoring; names in tree/zoom/inspect; light-touch corroborated raw-IP concern; DecodeCleartext dechunk+decompress + sensitive-header masking. egress->netname->inspect, cycle-free; decoupling + egress-only invariants held.",
+        "owner": "Project maintainers",
+        "workstreamId": "phase1",
+        "dependsOn": [],
+        "evidence": [
+          "PR #45 merged to develop",
+          "go test ./... -race; coverage 88.8%",
+          "GOOS=linux build",
+          "architext validate",
+          "8 swarm checkpoints reviewed"
+        ]
+      },
+      {
+        "id": "feedback-ux",
+        "title": "Per-item undo + collector gaps in --from snapshots (#8)",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "scan --json emits a wrapped Snapshot {tool_version,gaps,assessments} so --from surfaces collector gaps (old bare arrays still load); u restores the selected finding via act.RestoreItem (whole-session restore stays in the CLI).",
+        "owner": "Project maintainers",
+        "workstreamId": "backlog",
+        "dependsOn": [],
+        "evidence": [
+          "PR #43 merged"
+        ]
+      },
+      {
+        "id": "install-prefix",
+        "title": "install.sh PREFIX hardening (#14)",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "install.sh creates a custom PREFIX when absent; the curl|sh universal-binary path was already shipped.",
+        "owner": "Project maintainers",
+        "workstreamId": "backlog",
+        "dependsOn": [],
+        "evidence": [
+          "PR #44 merged"
+        ]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "observer-error-surfacing",
+        "title": "Surface passive-DNS observer errors for RCA (T-17)",
+        "kind": "chore",
+        "status": "deferred",
+        "summary": "A mid-session capture failure degrades destinations to IPs with no log line; can't stderr mid-alt-screen. Deferred to the --non-interactive logging mode, which has a file/stdout channel (Rule 16: no TUI-safe channel exists yet).",
+        "owner": "Project maintainers"
+      }
+    ],
+    "outOfScope": []
+  },
+  "workstreams": [
+    {
+      "id": "phase1",
+      "name": "Outbound visibility Phase 1",
+      "owner": "Project maintainers",
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "Passive DNS names + cleartext decode, swarm-built across 8 fan-out-reviewed checkpoints.",
+      "progress": 100,
+      "itemIds": [
+        "egress-names"
+      ],
+      "evidence": [
+        "go test ./... -race",
+        "architext validate"
+      ]
+    },
+    {
+      "id": "backlog",
+      "name": "Open-issue backlog",
+      "owner": "Project maintainers",
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "#8 and #14-hardening merged before the cut.",
+      "progress": 100,
+      "itemIds": [
+        "feedback-ux",
+        "install-prefix"
+      ],
+      "evidence": [
+        "PRs #43/#44 merged"
+      ]
+    }
+  ],
+  "blockers": [],
+  "milestones": [
+    {
+      "id": "cut-060",
+      "label": "v0.6.0 cut (develop→main→tag)",
+      "status": "in-progress",
+      "targetWindow": "main",
+      "order": 1,
+      "itemIds": [
+        "egress-names",
+        "feedback-ux",
+        "install-prefix"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "gate-main",
+      "label": "go test ./... -race + architext validate + goreleaser",
+      "kind": "test",
+      "status": "in-progress"
+    }
+  ]
+}

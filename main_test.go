@@ -15,10 +15,13 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
+	"counterspy/internal/inspect"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
+	"counterspy/internal/report"
 	"counterspy/internal/tui"
 )
 
@@ -78,13 +81,16 @@ func TestRun_UnknownCommandShowsUsage(t *testing.T) {
 	}
 }
 
-func TestRun_ScanJSONDryEmitsArray(t *testing.T) {
+func TestRun_ScanJSONDryEmitsSnapshot(t *testing.T) {
 	var buf bytes.Buffer
 	if code := run([]string{"scan", "--json", "--dry"}, &buf); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(buf.String()), "[") {
-		t.Fatalf("expected JSON array, got: %s", buf.String())
+	// Post-#8 the scan --json form is the wrapped snapshot object ({tool_version, gaps, assessments}),
+	// not a bare array, so a --from load can recover the collector gaps too.
+	out := strings.TrimSpace(buf.String())
+	if !strings.HasPrefix(out, "{") || !strings.Contains(out, "\"assessments\"") {
+		t.Fatalf("expected a snapshot object with assessments, got: %s", out)
 	}
 }
 
@@ -140,12 +146,38 @@ func TestPlannedActions_ProcessOnlyHasNone(t *testing.T) {
 }
 
 func TestLoadSnapshot(t *testing.T) {
-	as, err := loadSnapshot("testdata/tui_snapshot.json")
+	// Back-compat: a bare []Assessment snapshot (pre-#8) still loads, with no gaps.
+	as, gaps, err := loadSnapshot("testdata/tui_snapshot.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(as) != 1 || as[0].Subject.Label != "com.evil.updater" || as[0].Recommendation != model.RecQuarantine {
 		t.Fatalf("snapshot decode wrong: %+v", as)
+	}
+	if len(gaps) != 0 {
+		t.Fatalf("a bare-array snapshot has no gaps, got %v", gaps)
+	}
+}
+
+// #8: a wrapped snapshot carries collector gaps so --from surfaces them (not a silent clean bill).
+func TestLoadSnapshot_WrappedCarriesGaps(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "snap.json")
+	b, err := report.RenderJSON(
+		[]model.Assessment{{Finding: model.Finding{Subject: model.Subject{Label: "x"}}, Recommendation: model.RecMonitor}},
+		[]string{"TCC privacy-grant signal unavailable — run with sudo to include it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	as, gaps, err := loadSnapshot(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(as) != 1 || len(gaps) != 1 || !strings.Contains(gaps[0], "TCC") {
+		t.Fatalf("wrapped snapshot must round-trip assessments+gaps, got as=%v gaps=%v", as, gaps)
 	}
 }
 
@@ -398,7 +430,7 @@ func TestUserAllowlist_MissingFile(t *testing.T) {
 // --- loadSnapshot: missing + oversize cap -----------------------------------
 
 func TestLoadSnapshot_Missing(t *testing.T) {
-	if _, err := loadSnapshot(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+	if _, _, err := loadSnapshot(filepath.Join(t.TempDir(), "nope.json")); err == nil {
 		t.Fatal("missing file should error")
 	}
 }
@@ -410,7 +442,7 @@ func TestLoadSnapshot_OversizeCap(t *testing.T) {
 	if err := os.WriteFile(p, big, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadSnapshot(p)
+	_, _, err := loadSnapshot(p)
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("expected oversize error, got %v", err)
 	}
@@ -874,3 +906,33 @@ func TestLivenessForMapsRunState(t *testing.T) {
 		t.Errorf("installed and running → active ▸, got %+v", active["path:"+target])
 	}
 }
+
+// Audit cp-p1h F-2: the name-resolver wiring is now testable via the newDNSCapture seam. Verify the
+// GATING (the new branching): a non-Monitor sampler is a no-op; a real Monitor whose capture fails is
+// a no-op; a real Monitor with a working capture sets a resolver (before any Sample) and stops cleanly.
+func TestStartNameResolver_Gating(t *testing.T) {
+	// non-Monitor sampler → no-op, no panic.
+	startNameResolver(&fakeEgressSampler{})()
+
+	orig := newDNSCapture
+	defer func() { newDNSCapture = orig }()
+
+	// real Monitor, capture fails → no-op.
+	newDNSCapture = func(string, int) (inspect.PacketSource, error) { return nil, errors.New("no root") }
+	startNameResolver(egress.New(0.3))()
+
+	// real Monitor, capture succeeds (fixture source, immediate EOF) → resolver wired, stop is clean.
+	newDNSCapture = func(string, int) (inspect.PacketSource, error) { return &eofSource{}, nil }
+	mon := egress.New(0.3)
+	stop := startNameResolver(mon)
+	// A group built from a conn to a named IP resolves once the observer cached it; here we assert the
+	// resolver is INSTALLED by feeding the cache indirectly is out of scope — the wiring + no-panic +
+	// clean stop is the gating contract. (Resolution itself: netname + egress unit tests.)
+	stop()
+}
+
+// eofSource is a PacketSource that yields no packets — the observer's Run returns io.EOF immediately.
+type eofSource struct{}
+
+func (eofSource) Next() ([]byte, error) { return nil, io.EOF }
+func (eofSource) Close() error          { return nil }

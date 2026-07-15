@@ -34,7 +34,19 @@ type Monitor struct {
 	exePaths  func() map[int]string // pid -> full executable path (spaces intact)
 	trustOf   func(path string) string
 	capsOf    func(path string) []string
+	resolve   func(ip string) (name string, ok bool) // passive-DNS name lookup; nil = names unavailable (#3)
 }
+
+// Resolver maps a destination IP to the hostname most recently observed resolving to it (passive
+// DNS). Defined here, at the consumer, so the monitor stays testable with a fake and never imports
+// the capture machinery; internal/netname.Cache satisfies it structurally (T-15).
+type Resolver interface {
+	Lookup(ip string) (name string, ok bool)
+}
+
+// SetResolver wires a name resolver into the monitor. Called once at console start with the live
+// netname cache; left unset in tests / when capture is unavailable (destinations then show IPs).
+func (m *Monitor) SetResolver(r Resolver) { m.resolve = r.Lookup }
 
 func New(interval float64) *Monitor {
 	return &Monitor{
@@ -255,10 +267,38 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			groups[i].Members[j].Spark = m.sparkPID[groups[i].Members[j].PID]
 			groups[i].Members[j].InSpark = m.sparkInPID[groups[i].Members[j].PID]
 		}
+		// Resolve destination names BEFORE scoring, so a nameless (raw-IP) destination can feed the
+		// light-touch concern signal (#3). No resolver → names stay "" and the signal is inert.
+		m.resolveNames(&groups[i])
 		groups[i].Concern = Concern(groups[i])
 		groups[i].ExfilRisk, groups[i].Candidate = Exfil(groups[i])
 	}
 	return groups
+}
+
+// resolveNames annotates every Endpoint (destinations + per-connection) of a group with the hostname
+// the app resolved for its IP, if one was passively observed. A missing name stays "" (show the IP);
+// never fabricated.
+func (m *Monitor) resolveNames(g *model.EgressGroup) {
+	if m.resolve == nil {
+		return
+	}
+	name := func(e *model.Endpoint) {
+		if n, ok := m.resolve(e.IP); ok {
+			e.Name = n
+		}
+	}
+	for i := range g.Destinations {
+		name(&g.Destinations[i])
+	}
+	for i := range g.Conns {
+		name(&g.Conns[i].Endpoint)
+	}
+	for mi := range g.Members {
+		for ci := range g.Members[mi].Conns {
+			name(&g.Members[mi].Conns[ci].Endpoint)
+		}
+	}
 }
 
 func binaryPath(p *collect.Proc) string {
