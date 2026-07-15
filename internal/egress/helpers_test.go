@@ -183,9 +183,15 @@ func TestAllRawIP(t *testing.T) {
 	if got := allRawIP(nil); !got {
 		t.Fatalf("allRawIP(empty) = %v, want true (vacuously)", got)
 	}
-	dests := []model.Endpoint{{IP: "1.2.3.4"}, {IP: "5.6.7.8"}}
-	if got := allRawIP(dests); got {
-		t.Fatalf("allRawIP(non-empty) = %v, want false (isRawIP stub)", got)
+	// #3: all destinations nameless → raw-IP (true).
+	nameless := []model.Endpoint{{IP: "1.2.3.4"}, {IP: "5.6.7.8"}}
+	if got := allRawIP(nameless); !got {
+		t.Fatalf("allRawIP(all nameless) = %v, want true", got)
+	}
+	// Any destination with a passively-resolved name → not all-raw (false).
+	mixed := []model.Endpoint{{IP: "1.2.3.4"}, {IP: "5.6.7.8", Name: "api.example.com"}}
+	if got := allRawIP(mixed); got {
+		t.Fatalf("allRawIP(one named) = %v, want false", got)
 	}
 }
 
