@@ -71,3 +71,67 @@ func TestCA_PEMRoundTrip(t *testing.T) {
 		t.Fatalf("a reloaded CA must mint leaves that still chain: %v", err)
 	}
 }
+
+// Audit cp-p2a F-3/F-4: LoadCA rejects garbage and a mismatched key clearly, at load time.
+func TestLoadCA_RejectsBadInput(t *testing.T) {
+	if _, err := LoadCA(nil, nil); err == nil {
+		t.Fatal("nil PEM must error")
+	}
+	if _, err := LoadCA([]byte("not pem"), []byte("not pem")); err == nil {
+		t.Fatal("garbage PEM must error")
+	}
+	ca1, _ := NewCA()
+	ca2, _ := NewCA()
+	cert1, _, _ := ca1.PEM()
+	_, key2, _ := ca2.PEM()
+	if _, err := LoadCA(cert1, key2); err == nil {
+		t.Fatal("a key that doesn't match the cert must be rejected at load, not at handshake")
+	}
+}
+
+// Antagonist cp-p2a F-1/F-3: hostile/edge SNI — empty refused; IPv6 zone stripped so the IP SAN is set.
+func TestLeafFor_HostNormalization(t *testing.T) {
+	ca, _ := NewCA()
+	if _, err := ca.LeafFor("   "); err == nil {
+		t.Fatal("an empty/whitespace host must be refused, not minted")
+	}
+	lf, err := ca.LeafFor("fe80::1%en0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lf.Leaf.IPAddresses) != 1 || len(lf.Leaf.DNSNames) != 0 {
+		t.Fatalf("a zoned IPv6 host must mint an IP SAN, not a DNS SAN: ip=%v dns=%v", lf.Leaf.IPAddresses, lf.Leaf.DNSNames)
+	}
+	// plain IPv6 too
+	if lf6, _ := ca.LeafFor("2001:db8::1"); len(lf6.Leaf.IPAddresses) != 1 {
+		t.Fatal("plain IPv6 host must mint an IP SAN")
+	}
+}
+
+// Audit cp-p2a F-1: the leaf cache is bounded — a flood of distinct SNIs evicts oldest, no unbounded growth.
+func TestLeafFor_CacheIsBounded(t *testing.T) {
+	ca, _ := NewCA()
+	ca.cap = 4
+	hosts := []string{"a.com", "b.com", "c.com", "d.com", "e.com", "f.com"}
+	for _, h := range hosts {
+		if _, err := ca.LeafFor(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ca.mu.Lock()
+	n := len(ca.leaves)
+	ca.mu.Unlock()
+	if n > 4 {
+		t.Fatalf("cache must be bounded to cap=4, holds %d", n)
+	}
+	if _, ok := ca.leaves["a.com"]; ok {
+		t.Fatal("the oldest host should have been evicted")
+	}
+}
+
+func TestCertPEM(t *testing.T) {
+	ca, _ := NewCA()
+	if len(ca.CertPEM()) == 0 {
+		t.Fatal("CertPEM must return the CA cert")
+	}
+}
