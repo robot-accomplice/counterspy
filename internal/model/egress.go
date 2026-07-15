@@ -4,6 +4,7 @@ package model
 type Endpoint struct {
 	IP   string
 	Port int
+	Name string // hostname the app resolved for this IP (passive DNS); "" = unresolved (#3)
 }
 
 // Conn is one established outbound connection — a constituent of an EgressGroup, revealed
