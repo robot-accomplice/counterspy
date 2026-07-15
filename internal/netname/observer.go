@@ -2,6 +2,7 @@ package netname
 
 import (
 	"encoding/binary"
+	"io"
 
 	"counterspy/internal/inspect"
 )
@@ -20,14 +21,22 @@ func NewObserver(cache *Cache, src inspect.PacketSource) *Observer {
 }
 
 // Run drains the source, feeding every DNS RESPONSE (src port 53) into the cache, until the source
-// ends or is closed. Intended to run in its own goroutine. A malformed or non-DNS packet is skipped;
-// a source error (EOF, closed, or read failure) ends the loop. TCP DNS is not parsed (rare for a
-// client; would need the 2-byte length prefix + reassembly) — those names are simply missed.
-func (o *Observer) Run() {
+// ends or is closed. Intended to run in its own goroutine. A malformed or non-DNS packet is skipped.
+// It RETURNS the error that stopped it (io.EOF on a clean end/close, else a real read failure) so the
+// caller can log a genuine failure instead of the DNS cache silently going stale (Rule 14 / Audit
+// cp-p1c F-3). TCP DNS is not parsed (rare for a client; needs the 2-byte length prefix + reassembly)
+// — those names are simply missed.
+func (o *Observer) Run() error {
 	for {
 		pkt, err := o.src.Next()
 		if err != nil {
-			return
+			return err
+		}
+		if len(pkt) == 0 {
+			// A source that yields no bytes AND no error violates the PacketSource contract; stop
+			// rather than spin the goroutine at 100% CPU (Antagonist cp-p1c F-1). Real sources never
+			// do this — bpfCapture.Next returns a packet or an error.
+			return io.EOF
 		}
 		payload, srcPort, _, ok := udpPayload(pkt)
 		if !ok || srcPort != 53 { // only a server→client response (src 53) carries the answers we cache
@@ -43,7 +52,12 @@ func (o *Observer) Run() {
 	}
 }
 
-// Close stops the capture; Run returns once the source's Next reports the error.
+// Close closes the underlying source. Run then returns once its in-flight/next src.Next() reports the
+// resulting error. NOTE (Audit cp-p1c F-1): for the live /dev/bpf source, Close runs on a different
+// goroutine than Run's read, so it races the read on the fd; the non-blocking device makes the racing
+// read return a benign error (which cleanly ends Run) rather than corrupt anything. Hardening
+// bpfCapture with an atomic "closed" flag so Close→Run always ends via a clean io.EOF is tracked as
+// T-15b/T-16 and done in the darwin-capture checkpoint.
 func (o *Observer) Close() error { return o.src.Close() }
 
 // udpPayload strips the IPv4/IPv6 + UDP headers from an IP-layer packet (link header already removed

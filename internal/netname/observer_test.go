@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"testing"
+	"time"
 )
 
 // fakeSource replays a fixed list of IP-layer packets then returns io.EOF, standing in for the live
@@ -115,3 +116,29 @@ func TestUDPPayload(t *testing.T) {
 }
 
 const protoTCP4 = 6
+
+// Antagonist cp-p1c F-1: a source that yields (nil, nil) forever must NOT spin the goroutine — Run
+// returns instead. Audit cp-p1c F-3: Run surfaces the terminating error.
+func TestObserver_NilPacketDoesNotSpin(t *testing.T) {
+	spin := &nilSource{}
+	o := NewObserver(NewCache(4), spin)
+	done := make(chan error, 1)
+	go func() { done <- o.Run() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run should return a non-nil (io.EOF) reason for stopping")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run spun on a (nil,nil) source instead of returning")
+	}
+	if spin.calls > 3 {
+		t.Fatalf("Run must stop after the first empty read, not loop (%d calls)", spin.calls)
+	}
+}
+
+// nilSource always returns (nil, nil) — the contract-violating source the guard defends against.
+type nilSource struct{ calls int }
+
+func (n *nilSource) Next() ([]byte, error) { n.calls++; return nil, nil }
+func (n *nilSource) Close() error          { return nil }
