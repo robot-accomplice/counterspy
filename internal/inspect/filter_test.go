@@ -1,6 +1,7 @@
 package inspect
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"testing"
 
@@ -118,3 +119,78 @@ func TestBuildFlowFilter_AssemblesBothFamilies(t *testing.T) {
 }
 
 func local6() netip.AddrPort { return netip.MustParseAddrPort("[fe80::1]:51000") }
+
+func ipv4UDP(src, dst netip.AddrPort, payload []byte) []byte {
+	udp := make([]byte, 8)
+	binary.BigEndian.PutUint16(udp[0:], src.Port())
+	binary.BigEndian.PutUint16(udp[2:], dst.Port())
+	binary.BigEndian.PutUint16(udp[4:], uint16(8+len(payload)))
+	udp = append(udp, payload...)
+	ip := make([]byte, 20)
+	ip[0] = 0x45
+	binary.BigEndian.PutUint16(ip[2:], uint16(20+len(udp)))
+	ip[9] = protoUDP
+	s4, d4 := src.Addr().As4(), dst.Addr().As4()
+	copy(ip[12:16], s4[:])
+	copy(ip[16:20], d4[:])
+	return append(ip, udp...)
+}
+
+func ipv6UDP(src, dst netip.AddrPort, payload []byte) []byte {
+	udp := make([]byte, 8)
+	binary.BigEndian.PutUint16(udp[0:], src.Port())
+	binary.BigEndian.PutUint16(udp[2:], dst.Port())
+	udp = append(udp, payload...)
+	ip := make([]byte, 40)
+	ip[0] = 0x60
+	ip[6] = protoUDP
+	binary.BigEndian.PutUint16(ip[4:], uint16(len(udp)))
+	s16, d16 := src.Addr().As16(), dst.Addr().As16()
+	copy(ip[8:24], s16[:])
+	copy(ip[24:40], d16[:])
+	return append(ip, udp...)
+}
+
+// The port filter is the highest-risk hand-assembled BPF in the tree; this traces every branch:
+// UDP/TCP × v4/v6 × src-port/dst-port ACCEPT, and QUIC/ICMP/wrong-offset REJECT.
+func TestBuildPortFilter(t *testing.T) {
+	dns := func() netip.AddrPort { return netip.MustParseAddrPort("1.2.3.4:53") }
+	cli := netip.MustParseAddrPort("10.0.0.9:51000")
+	quic := netip.MustParseAddrPort("93.184.216.34:443")
+	insns := portFilterInsns(0, 53)
+
+	// ACCEPT: DNS response (src 53), DNS query (dst 53), over UDP and TCP, v4 and v6.
+	for _, pkt := range [][]byte{
+		ipv4UDP(dns(), cli, []byte("resp")),    // response: src port 53
+		ipv4UDP(cli, dns(), []byte("query")),   // query: dst port 53
+		ipv4TCP(dns(), cli, []byte("tcp-dns")), // TCP DNS
+		ipv6UDP(netip.MustParseAddrPort("[2001:db8::1]:53"), netip.MustParseAddrPort("[2001:db8::2]:51000"), nil),
+	} {
+		if !accepts(t, insns, pkt) {
+			t.Fatalf("port-53 packet must be accepted: % x", pkt[:12])
+		}
+	}
+	// REJECT: QUIC (udp/443 both sides), plain HTTPS (tcp/443), ICMP, and a v6 non-53.
+	for _, pkt := range [][]byte{
+		ipv4UDP(quic, netip.MustParseAddrPort("10.0.0.9:44300"), nil), // QUIC-shaped, no 53
+		ipv4TCP(quic, netip.MustParseAddrPort("10.0.0.9:44300"), nil), // HTTPS
+		withProto(ipv4UDP(dns(), cli, nil), 1),                        // ICMP proto, even with port 53 bytes
+		ipv6UDP(netip.MustParseAddrPort("[2001:db8::1]:443"), netip.MustParseAddrPort("[2001:db8::2]:44300"), nil),
+	} {
+		if accepts(t, insns, pkt) {
+			t.Fatalf("non-53 packet must be rejected: % x", pkt[:12])
+		}
+	}
+	// Ethernet offset: with L=14 an eth-framed DNS packet accepts; with the wrong L=0 it does not.
+	eth := append(make([]byte, 14), ipv4UDP(dns(), cli, nil)...)
+	if !accepts(t, portFilterInsns(14, 53), eth) {
+		t.Fatal("ethernet-framed DNS must accept with linkHdrLen=14")
+	}
+	if accepts(t, portFilterInsns(0, 53), eth) {
+		t.Fatal("wrong link offset must not accept")
+	}
+	// The assembled form must be valid.
+	if _, err := buildPortFilter(14, 53); err != nil {
+		t.Fatalf("buildPortFilter assemble: %v", err)
+	}
+}

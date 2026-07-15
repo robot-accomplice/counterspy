@@ -10,6 +10,57 @@ import (
 // (0) drops it in-kernel before it is ever copied to userspace.
 const retAccept = 0xffffffff
 
+const protoUDP = 17
+
+// buildPortFilter assembles a classic-BPF program keeping only UDP or TCP packets whose src OR dst
+// port equals `port`, across IPv4 and IPv6. It scopes the passive DNS capture to port 53 so the
+// kernel doesn't copy the whole interface — especially high-volume QUIC on UDP/443 — into userspace.
+// Unlike buildFlowFilter it can't specialize on address family at build time (the observer sees both
+// families on one interface), so it dispatches on the IP version nibble at runtime.
+//
+// This is a VOLUME cut, not a correctness gate: the observer re-checks the port and parses DNS in
+// userspace, so an over-strict filter merely misses some names and an over-loose one merely wastes a
+// little CPU — neither can produce a wrong name. IPv6 extension headers are not walked (rare for DNS);
+// such packets fall through to REJECT (their names are simply missed).
+func buildPortFilter(linkHdrLen, port int) ([]bpf.RawInstruction, error) {
+	return bpf.Assemble(portFilterInsns(uint32(linkHdrLen), uint32(port)))
+}
+
+// portFilterInsns is the unassembled program (split out so the VM tests can run it directly). Indices
+// in the comments are load-bearing for the jump skips: REJECT is idx 23 (and the early idx 4/15),
+// ACCEPT is idx 24. Verified branch-by-branch by TestBuildPortFilter.
+func portFilterInsns(L, p uint32) []bpf.Instruction {
+	return []bpf.Instruction{
+		bpf.LoadAbsolute{Off: L, Size: 1},                        // 0: version/IHL byte
+		bpf.ALUOpConstant{Op: bpf.ALUOpAnd, Val: 0xf0},           // 1: isolate version nibble
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x40, SkipTrue: 2},  // 2: IPv4 -> v4 block(5)
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x60, SkipTrue: 12}, // 3: IPv6 -> v6 block(16)
+		bpf.RetConstant{Val: 0},                                  // 4: neither family -> REJECT
+		// --- IPv4 block ---
+		bpf.LoadAbsolute{Off: L + 9, Size: 1},                           // 5: protocol
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: protoUDP, SkipTrue: 1},     // 6: UDP -> frag check(8)
+		bpf.JumpIf{Cond: bpf.JumpNotEqual, Val: protoTCP, SkipTrue: 15}, // 7: not TCP -> REJECT(23)
+		bpf.LoadAbsolute{Off: L + 6, Size: 2},                           // 8: flags+fragment offset
+		bpf.JumpIf{Cond: bpf.JumpBitsSet, Val: 0x1fff, SkipTrue: 13},    // 9: non-first fragment -> REJECT(23)
+		bpf.LoadMemShift{Off: L},                                        // 10: X = IHL*4 (IPv4 header length)
+		bpf.LoadIndirect{Off: L, Size: 2},                               // 11: src port (at X+L)
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: p, SkipTrue: 11},           // 12: src==port -> ACCEPT(24)
+		bpf.LoadIndirect{Off: L + 2, Size: 2},                           // 13: dst port
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: p, SkipTrue: 9},            // 14: dst==port -> ACCEPT(24)
+		bpf.RetConstant{Val: 0},                                         // 15: v4, port miss -> REJECT
+		// --- IPv6 block (no extension-header walking; fixed 40-byte header) ---
+		bpf.LoadAbsolute{Off: L + 6, Size: 1},                          // 16: next header
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: protoUDP, SkipTrue: 1},    // 17: UDP -> ports(19)
+		bpf.JumpIf{Cond: bpf.JumpNotEqual, Val: protoTCP, SkipTrue: 4}, // 18: not TCP -> REJECT(23)
+		bpf.LoadAbsolute{Off: L + 40, Size: 2},                         // 19: src port
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: p, SkipTrue: 3},           // 20: src==port -> ACCEPT(24)
+		bpf.LoadAbsolute{Off: L + 42, Size: 2},                         // 21: dst port
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: p, SkipTrue: 1},           // 22: dst==port -> ACCEPT(24)
+		bpf.RetConstant{Val: 0},                                        // 23: REJECT
+		bpf.RetConstant{Val: retAccept},                                // 24: ACCEPT
+	}
+}
+
 // buildFlowFilter assembles a classic-BPF program that keeps only TCP packets to/from the flow's
 // remote host, so the kernel never copies the rest of the interface's traffic into our process
 // (spec §6 least-privilege). The program is family-specific — we know the remote's address family
