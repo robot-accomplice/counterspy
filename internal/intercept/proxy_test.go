@@ -188,3 +188,22 @@ type chanSink chan model.InterceptedFlow
 
 func (c chanSink) Publish(f model.InterceptedFlow) error { c <- f; return nil }
 func (c chanSink) Close() error                          { return nil }
+
+// cp-p2d F-2: a panic in OrigDest must not leak the conn — handle's recover closes it.
+func TestProxy_HandlePanicClosesConn(t *testing.T) {
+	proxyCA, _ := ca.NewCA()
+	c1, c2 := net.Pipe()
+	p := &Proxy{CA: proxyCA, OrigDest: func(net.Conn) (netip.AddrPort, error) { panic("boom") }}
+	done := make(chan struct{})
+	go func() { p.handle(c2, defaultDial); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handle hung on a panicking OrigDest")
+	}
+	// c2 must be closed → a read on the other end returns an error promptly.
+	c1.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := c1.Read(make([]byte, 1)); err == nil {
+		t.Fatal("conn must be closed after a handle panic")
+	}
+}

@@ -1,34 +1,44 @@
 package publish
 
 import (
-	"bufio"
 	"encoding/json"
 	"net"
 	"sync"
+	"time"
 
 	"counterspy/internal/model"
 )
 
+// socketWriteTimeout bounds a single write to a reader so a stalled-but-connected console can't hang
+// the serve goroutine forever (Audit cp-p2d F-1). A slow reader gets torn down, not tolerated.
+const socketWriteTimeout = 10 * time.Second
+
+// reader is one connected console: a bounded buffered channel + its conn (tracked so Close can
+// force-close it, unblocking a stalled write).
+type reader struct {
+	ch   chan model.InterceptedFlow
+	conn net.Conn
+}
+
 // socketSink serves published flows to connected console readers over a unix socket as JSONL. A slow
-// or absent reader NEVER blocks the proxy: each reader has a bounded buffered channel and a full
-// buffer drops the flow (counted) rather than stalling — the live view is best-effort by design.
+// or absent reader NEVER blocks the proxy: each reader has a bounded channel and a full buffer drops
+// the flow (counted) rather than stalling — the live view is best-effort by design.
 type socketSink struct {
-	ln       net.Listener
-	mu       sync.Mutex
-	readers  map[chan model.InterceptedFlow]struct{}
-	closed   bool
-	dropped  int
-	bufPerRd int
+	ln      net.Listener
+	mu      sync.Mutex
+	readers map[*reader]struct{}
+	closed  bool
+	dropped int
 }
 
 // NewSocketSink listens on a unix socket at path (removing a stale one first) and serves readers.
 func NewSocketSink(path string) (Sink, error) {
-	_ = removeSocket(path)
+	_ = removeIfSocket(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, err
 	}
-	s := &socketSink{ln: ln, readers: map[chan model.InterceptedFlow]struct{}{}, bufPerRd: 256}
+	s := &socketSink{ln: ln, readers: map[*reader]struct{}{}}
 	go s.acceptLoop()
 	return s, nil
 }
@@ -39,30 +49,31 @@ func (s *socketSink) acceptLoop() {
 		if err != nil {
 			return // listener closed
 		}
-		ch := make(chan model.InterceptedFlow, s.bufPerRd)
+		r := &reader{ch: make(chan model.InterceptedFlow, 256), conn: conn}
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
 			conn.Close()
 			return
 		}
-		s.readers[ch] = struct{}{}
+		s.readers[r] = struct{}{}
 		s.mu.Unlock()
-		go s.serve(conn, ch)
+		go s.serve(r)
 	}
 }
 
-func (s *socketSink) serve(conn net.Conn, ch chan model.InterceptedFlow) {
+func (s *socketSink) serve(r *reader) {
 	defer func() {
 		s.mu.Lock()
-		delete(s.readers, ch)
+		delete(s.readers, r)
 		s.mu.Unlock()
-		conn.Close()
+		r.conn.Close()
 	}()
-	enc := json.NewEncoder(conn)
-	for fl := range ch {
+	enc := json.NewEncoder(r.conn)
+	for fl := range r.ch {
+		r.conn.SetWriteDeadline(time.Now().Add(socketWriteTimeout))
 		if err := enc.Encode(fl); err != nil {
-			return // reader went away
+			return // reader went away or stalled past the deadline
 		}
 	}
 }
@@ -70,9 +81,9 @@ func (s *socketSink) serve(conn net.Conn, ch chan model.InterceptedFlow) {
 func (s *socketSink) Publish(fl model.InterceptedFlow) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for ch := range s.readers {
+	for r := range s.readers {
 		select {
-		case ch <- fl:
+		case r.ch <- fl:
 		default:
 			s.dropped++ // reader too slow — drop, don't block the proxy
 		}
@@ -80,39 +91,41 @@ func (s *socketSink) Publish(fl model.InterceptedFlow) error {
 	return nil
 }
 
+// Dropped is how many flows were dropped for slow readers — surfaced so the drop isn't silent (Rule
+// 14 / Audit cp-p2d F-4); the daemon/console can report it.
+func (s *socketSink) Dropped() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropped
+}
+
 func (s *socketSink) Close() error {
 	s.mu.Lock()
-	s.closed = true
-	for ch := range s.readers {
-		close(ch)
-		delete(s.readers, ch)
+	if s.closed {
+		s.mu.Unlock()
+		return nil
 	}
+	s.closed = true
+	for r := range s.readers {
+		close(r.ch)
+		r.conn.Close() // force-close so a serve() stalled in a write unblocks (F-1)
+		delete(s.readers, r)
+	}
+	path := s.ln.Addr().String()
 	s.mu.Unlock()
 	err := s.ln.Close()
-	removeSocket(s.ln.Addr().String())
+	removeIfSocket(path)
 	return err
 }
 
-func removeSocket(path string) error {
-	if path == "" {
-		return nil
-	}
-	return removeIfSocket(path)
-}
-
 // ReadSocket connects to a socketSink at path and calls fn for each flow until the connection ends.
+// Bounded + resilient: each JSONL line is size-capped and a malformed line is skipped, so a giant or
+// garbage record can't OOM or abort the reader (untrusted-input hardening, Audit cp-p2d F-5).
 func ReadSocket(path string, fn func(model.InterceptedFlow)) error {
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	dec := json.NewDecoder(bufio.NewReader(conn))
-	for {
-		var fl model.InterceptedFlow
-		if err := dec.Decode(&fl); err != nil {
-			return err // EOF when the proxy stops
-		}
-		fn(sanitizeFlow(fl))
-	}
+	return scanFlows(conn, fn)
 }

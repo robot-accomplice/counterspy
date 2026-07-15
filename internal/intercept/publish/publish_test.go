@@ -128,3 +128,37 @@ func shortSock(t *testing.T) string {
 	t.Cleanup(func() { os.RemoveAll(d) })
 	return filepath.Join(d, "s.sock")
 }
+
+// cp-p2d F-5: a flow read from an untrusted source has its text length-capped.
+func TestSanitizeFlow_CapsAndCoerces(t *testing.T) {
+	big := make([]byte, maxFieldLen+5000)
+	fl := sanitizeFlow(model.InterceptedFlow{Status: "weird", SentText: string(big)})
+	if fl.Status != model.FlowError {
+		t.Fatalf("unknown status must coerce to error, got %q", fl.Status)
+	}
+	if len(fl.SentText) > maxFieldLen {
+		t.Fatalf("SentText must be capped to %d, got %d", maxFieldLen, len(fl.SentText))
+	}
+}
+
+// cp-p2d F-4: dropped flows are counted + surfaced (not silent).
+func TestSocketSink_DroppedIsSurfaced(t *testing.T) {
+	sock := shortSock(t)
+	s, err := NewSocketSink(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	go ReadSocket(sock, func(model.InterceptedFlow) { time.Sleep(time.Hour) })
+	time.Sleep(50 * time.Millisecond)
+	for i := 0; i < 5000; i++ {
+		s.Publish(model.InterceptedFlow{Status: model.FlowDecrypted})
+	}
+	if ss, ok := s.(interface{ Dropped() int }); ok {
+		if ss.Dropped() == 0 {
+			t.Fatal("a flooded slow reader must record drops (Rule 14 visibility)")
+		}
+	} else {
+		t.Fatal("socket sink should expose Dropped()")
+	}
+}

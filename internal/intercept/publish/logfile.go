@@ -1,8 +1,8 @@
 package publish
 
 import (
-	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,6 +53,9 @@ func (l *logSink) Publish(fl model.InterceptedFlow) error {
 	b = append(b, '\n')
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.f == nil {
+		return errLogClosed // a prior rotate() reopen failed — fail loud, don't write a closed fd
+	}
 	if l.maxSize > 0 && l.size+int64(len(b)) > l.maxSize {
 		if err := l.rotate(); err != nil {
 			return err
@@ -63,10 +66,14 @@ func (l *logSink) Publish(fl model.InterceptedFlow) error {
 	return err
 }
 
+var errLogClosed = errors.New("intercept log sink is closed (reopen failed)")
+
 // rotate closes the active file, shifts path.(keep-1)→path.keep … path→path.1 (dropping the oldest),
-// and reopens a fresh path. Caller holds l.mu.
+// and reopens a fresh path. Caller holds l.mu. On a reopen failure l.f is set nil so a subsequent
+// Publish fails loudly (errLogClosed) rather than silently writing to a closed descriptor (F-3).
 func (l *logSink) rotate() error {
 	l.f.Close()
+	l.f = nil
 	os.Remove(fmt.Sprintf("%s.%d", l.path, l.keep))
 	for i := l.keep - 1; i >= 1; i-- {
 		os.Rename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
@@ -111,13 +118,5 @@ func ReadLog(path string, fn func(model.InterceptedFlow)) error {
 		return err
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		var fl model.InterceptedFlow
-		if json.Unmarshal(sc.Bytes(), &fl) == nil {
-			fn(sanitizeFlow(fl))
-		}
-	}
-	return sc.Err()
+	return scanFlows(f, fn)
 }

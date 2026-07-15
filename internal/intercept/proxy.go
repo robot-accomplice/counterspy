@@ -43,15 +43,20 @@ func (p *Proxy) Serve(l net.Listener) error {
 }
 
 // handle intercepts one connection and publishes its flow. Panic-recovered so a single malformed flow
-// can never kill the whole proxy (which is holding the user's traffic redirected).
+// can never kill the whole proxy (which is holding the user's traffic redirected) — and the recover
+// ALWAYS closes the conn, so a panic can't leak the fd holding a redirected connection (cp-p2d F-2).
 func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			conn.Close()
+		}
+	}()
 	dest, err := p.OrigDest(conn)
 	if err != nil {
 		conn.Close() // can't recover the destination → can't relay; drop cleanly
 		return
 	}
-	flow := intercept(conn, dest, p.CA, dial) // intercept owns closing conn
+	flow := intercept(conn, dest, p.CA, dial) // intercept owns closing conn on the normal path
 	if p.Sink != nil {
 		p.Sink.Publish(flow)
 	}
@@ -146,8 +151,14 @@ func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) mo
 // idle deadline reaps a stalled flow (F-1).
 func relay(client, upstream net.Conn, sent, recv *capBuf) {
 	done := make(chan struct{}, 2)
-	go func() { copyIdle(upstream, client, sent); done <- struct{}{} }()
-	go func() { copyIdle(client, upstream, recv); done <- struct{}{} }()
+	// Each copy recovers its own panic and always signals done — a panic in copyIdle/capBuf while
+	// processing attacker-controlled bytes must not crash the whole proxy or deadlock relay (cp-p2d F-3).
+	cp := func(dst, src net.Conn, cap *capBuf) {
+		defer func() { _ = recover(); done <- struct{}{} }()
+		copyIdle(dst, src, cap)
+	}
+	go cp(upstream, client, sent)
+	go cp(client, upstream, recv)
 	<-done
 	client.Close()
 	upstream.Close()
