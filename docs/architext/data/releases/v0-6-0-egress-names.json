@@ -107,7 +107,7 @@
     {
       "id": "cut-060",
       "label": "v0.6.0 cut (develop→main→tag)",
-      "status": "in-progress",
+      "status": "complete",
       "targetWindow": "main",
       "order": 1,
       "itemIds": [
@@ -121,9 +121,9 @@
   "evidence": [
     {
       "id": "gate-main",
-      "label": "go test ./... -race + architext validate + goreleaser",
+      "label": "go test -race + architext validate + goreleaser (v0.6.0 tagged, release published)",
       "kind": "test",
-      "status": "in-progress"
+      "status": "complete"
     }
   ]
 }
