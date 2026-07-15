@@ -13,8 +13,8 @@
       "title": "Phase 1 — Passive reveal: destination names + cleartext extraction",
       "kind": "feature",
       "section": "v0.6.0",
-      "status": "planned",
-      "summary": "First phase of the outbound-visibility program (see docs/superpowers/specs/2026-07-14-outbound-traffic-visibility-design.md). Passive DNS-response capture (port 53) builds an IP->hostname cache so the egress tree/zoom/inspect show the name an app actually resolved instead of a bare cloud IP; and the on-demand inspector gains maximal cleartext extraction (structured HTTP request/response, headers, path, body preview) beyond today's text-or-hexdump. No decryption. Reuses a filter-parameterized /dev/bpf capture shared with the per-flow inspector. Names also feed a light-touch, corroboration-gated raw-IP concern signal (the existing allRawIP bump switched on). Foundation for Phases 2-3."
+      "status": "in-progress",
+      "summary": "IN PROGRESS on feat/egress-names (all reviewed): first phase of the outbound-visibility program (see docs/superpowers/specs/2026-07-14-outbound-traffic-visibility-design.md). Passive DNS-response capture (port 53) builds an IP->hostname cache so the egress tree/zoom/inspect show the name an app actually resolved instead of a bare cloud IP; and the on-demand inspector gains maximal cleartext extraction (structured HTTP request/response, headers, path, body preview) beyond today's text-or-hexdump. No decryption. Reuses a filter-parameterized /dev/bpf capture shared with the per-flow inspector. Names also feed a light-touch, corroboration-gated raw-IP concern signal (the existing allRawIP bump switched on). Foundation for Phases 2-3."
     },
     {
       "id": "roadmap-egress-keylog-decrypt",

@@ -163,6 +163,11 @@ capture for the tree; observe-only):
   outbound rate, a trend sparkline, destinations, and a cadence (one-off / bursty / steady /
   periodic). A per-destination encryption glyph (`▣` TLS · `□` cleartext · blank = unknown) is
   inferred from the port.
+- **Destination names** — a passive DNS observer (port-53 capture, needs sudo) resolves each IP to
+  the hostname the app actually looked up, so the tree/zoom/inspect show `analytics.example.com`
+  instead of a bare cloud IP. Honest about gaps: a connection opened before the console started, or a
+  system using encrypted DNS (DoH/DoT), shows its **IP** — never a fabricated name. A destination
+  with no name is a mild, *corroborated* concern nudge (only alongside another signal, never alone).
 - **Trust + provenance lens** — each row carries its code-sign trust glyph and process ancestry, so
   a notarized app talking to its vendor reads as *expected* while an unsigned background daemon
   uploading to a raw IP reads as *elevated*.
@@ -175,8 +180,8 @@ capture for the tree; observe-only):
   keys and the graph grouping follow the focused box, and `i` inspects the selection.
 - **Inspect (`i`)** — capture and inspect one flow (native `/dev/bpf`, needs sudo) with an **honest
   coverage verdict**: an encrypted flow is reported as metadata-only (size + destination, no
-  payload), and plaintext is shown masked until you press `v`. Real destination *names* (SNI/DNS)
-  are a roadmapped enrichment; today it shows `IP:port`.
+  payload), and plaintext is shown masked until you press `v`. Cleartext HTTP is decoded —
+  dechunked and gzip/deflate-decompressed — so a compressed body reads as text, not a hexdump.
 
 ## Safety guarantees
 

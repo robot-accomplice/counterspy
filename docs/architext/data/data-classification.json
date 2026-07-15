@@ -41,6 +41,12 @@
       "name": "Local triage decisions",
       "sensitivity": "low",
       "handling": "A user's local 'reviewed / leave it' acks: subject key + a fingerprint of the finding's state + timestamp. Local-only — never transmitted; affects the Findings display (flag/recede) only. Stored under ~/.config/counterspy/ack.json."
+    },
+    {
+      "id": "dns-observations",
+      "name": "Passive DNS observations",
+      "sensitivity": "low",
+      "handling": "IP->hostname pairs parsed from DNS responses seen on the wire, held in an ephemeral in-memory cache for the console session only. Never persisted, never transmitted; used to label egress destinations and as a light-touch concern hint."
     }
   ]
 }
