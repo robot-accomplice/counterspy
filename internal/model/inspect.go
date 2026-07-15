@@ -51,6 +51,11 @@ var (
 	// header line (line-anchored, case-insensitive) and mask only its value, preserving the trailing
 	// CR so lines don't merge. Covers the named set plus any *-token/*-secret/*-key header.
 	reHeaderSecret = regexp.MustCompile(`(?im)^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|[a-z0-9-]*(?:token|secret|apikey|api-key)):[ \t]*[^\r\n]*`)
+	// Common credential FIELDS in a decoded body (form or JSON): password/token/api_key/secret/…
+	// followed by = or : and a value. Pattern-exact on well-known field NAMES (like the headers), not
+	// fuzzy high-entropy detection — that stays feature #4 (T-18). Decrypted bodies now flow through
+	// Redact via the intercept proxy, so masking the obvious body credentials matters (cp-p2c F-3).
+	reBodySecret = regexp.MustCompile(`(?i)("?\b(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|client[_-]?secret|authorization)"?\s*[:=]\s*)("[^"]*"|[^&\s"]+)`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under
@@ -65,6 +70,7 @@ func Redact(s string) string {
 	s = rePEM.ReplaceAllString(s, redactMark)     // complete BEGIN…END blocks first
 	s = rePEMOpen.ReplaceAllString(s, redactMark) // then any dangling BEGIN…EOF (partial capture)
 	s = reHeaderSecret.ReplaceAllString(s, "$1: "+redactMark)
+	s = reBodySecret.ReplaceAllString(s, "$1"+redactMark)
 	s = reBearer.ReplaceAllString(s, "Bearer "+redactMark)
 	s = reAWSKey.ReplaceAllString(s, redactMark)
 	return s

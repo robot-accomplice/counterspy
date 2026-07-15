@@ -6,7 +6,6 @@ package intercept
 
 import (
 	"crypto/tls"
-	"io"
 	"net"
 	"net/netip"
 	"time"
@@ -21,12 +20,21 @@ import (
 // full regardless — this only bounds what we KEEP).
 const maxCapture = 8 << 10
 
+// Timeouts reap a stalled flow so a hung client/upstream can't leak goroutines + fds forever
+// (Audit/Antagonist cp-p2c F-1): a bound on the TLS handshake, on dialing the upstream, and an idle
+// deadline reset on each relay read so a connection with no traffic for idleTimeout is torn down.
+const (
+	handshakeTimeout = 10 * time.Second
+	dialTimeout      = 10 * time.Second
+	idleTimeout      = 5 * time.Minute
+)
+
 // dialFunc dials the real upstream. Injected so tests can point it at a loopback server and trust a
 // test CA; production verifies the upstream cert against the system roots.
 type dialFunc func(network, addr string, cfg *tls.Config) (net.Conn, error)
 
 func defaultDial(network, addr string, cfg *tls.Config) (net.Conn, error) {
-	return tls.Dial(network, addr, cfg)
+	return tls.DialWithDialer(&net.Dialer{Timeout: dialTimeout}, network, addr, cfg)
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -39,23 +47,37 @@ func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) mo
 	flow := model.InterceptedFlow{At: nowRFC3339(), DestIP: dest.Addr().String()}
 
 	var sni string
+	var sawClientHello bool
+	var mintErr error
 	server := tls.Server(client, &tls.Config{
 		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			sawClientHello = true
 			sni = chi.ServerName
 			host := chi.ServerName
 			if host == "" {
 				host = dest.Addr().String()
 			}
-			return c.LeafFor(host)
+			leaf, err := c.LeafFor(host)
+			mintErr = err
+			return leaf, err
 		},
 	})
+	client.SetDeadline(time.Now().Add(handshakeTimeout))
 	if err := server.Handshake(); err != nil {
-		// The client wouldn't accept our leaf — cert pinning. We don't (and can't) decrypt it; report
-		// honestly and close. A future bypass list keeps such hosts out of the redirect entirely.
-		flow.Status = model.FlowPinned
+		// Classify honestly (cp-p2c F-2): OUR leaf mint failed → error; no ClientHello at all (non-TLS
+		// bytes on the port) → opaque; we presented a valid leaf and the client refused it → pinned.
+		switch {
+		case mintErr != nil:
+			flow.Status = model.FlowError
+		case !sawClientHello:
+			flow.Status = model.FlowOpaque
+		default:
+			flow.Status = model.FlowPinned
+		}
 		client.Close()
 		return flow
 	}
+	client.SetDeadline(time.Time{}) // clear the handshake deadline; relay uses per-read idle deadlines
 	host := sni
 	if host == "" {
 		host = dest.Addr().String()
@@ -79,15 +101,36 @@ func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) mo
 }
 
 // relay copies both directions concurrently, tee-capturing each into a bounded buffer, then closes
-// both ends. Bytes pass through io.MultiWriter unmodified — the capture is a copy, not a filter.
+// both ends. Bytes are forwarded to the real peer UNMODIFIED; the capture is a copy, not a filter. An
+// idle deadline reaps a stalled flow (F-1).
 func relay(client, upstream net.Conn, sent, recv *capBuf) {
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(io.MultiWriter(upstream, sent), client); done <- struct{}{} }()
-	go func() { io.Copy(io.MultiWriter(client, recv), upstream); done <- struct{}{} }()
+	go func() { copyIdle(upstream, client, sent); done <- struct{}{} }()
+	go func() { copyIdle(client, upstream, recv); done <- struct{}{} }()
 	<-done
 	client.Close()
 	upstream.Close()
 	<-done
+}
+
+// copyIdle forwards src→dst, tee-capturing into cap, resetting src's read deadline each iteration so a
+// connection idle for idleTimeout is torn down (no unbounded goroutine/fd leak). The real dst is
+// written first and its bytes are never altered; a dst write error ends the copy.
+func copyIdle(dst net.Conn, src net.Conn, cap *capBuf) {
+	buf := make([]byte, 32*1024)
+	for {
+		src.SetReadDeadline(time.Now().Add(idleTimeout))
+		n, err := src.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return
+			}
+			cap.Write(buf[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // capBuf keeps up to max bytes for decode/display while counting the true total. It always reports a

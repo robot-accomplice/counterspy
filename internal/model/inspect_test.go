@@ -62,3 +62,24 @@ func TestRedact_MasksSensitiveHeaders(t *testing.T) {
 		t.Fatalf("Host must survive:\n%s", out)
 	}
 }
+
+// cp-p2c F-3: common credential FIELDS in a decoded body are masked (form + JSON), pattern-exact on
+// known names — decrypted bodies flow through Redact via the intercept proxy.
+func TestRedact_MasksBodyCredentialFields(t *testing.T) {
+	for _, in := range []string{
+		"username=alice&password=hunter2&remember=1",
+		`{"user":"alice","api_key":"sk-live-ABCDEF","ok":true}`,
+		`{"access_token": "ya29.SECRET", "expires": 3600}`,
+	} {
+		out := Redact(in)
+		for _, leak := range []string{"hunter2", "sk-live-ABCDEF", "ya29.SECRET"} {
+			if contains(out, leak) {
+				t.Fatalf("body secret %q leaked: %s", leak, out)
+			}
+		}
+	}
+	// a non-credential field is untouched
+	if out := Redact("username=alice&remember=1"); !contains(out, "alice") {
+		t.Fatalf("non-secret field must survive: %s", out)
+	}
+}

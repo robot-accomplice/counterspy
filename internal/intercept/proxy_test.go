@@ -132,3 +132,17 @@ func TestIntercept_PinnedClientReportedNotBroken(t *testing.T) {
 		t.Fatalf("a rejected handshake must be reported as pinned, got %q", flow.Status)
 	}
 }
+
+// cp-p2c F-2: non-TLS bytes to the proxy port → opaque (no ClientHello), NOT mislabeled pinned.
+func TestIntercept_NonTLSIsOpaqueNotPinned(t *testing.T) {
+	dest, _ := upstreamServer(t, "unused")
+	proxyCA, _ := ca.NewCA()
+	c1, c2 := net.Pipe()
+	flowCh := make(chan model.InterceptedFlow, 1)
+	go func() { flowCh <- intercept(c2, dest, proxyCA, defaultDial) }()
+	// speak plain HTTP (not TLS) then close — no ClientHello ever arrives.
+	go func() { c1.Write([]byte("GET / HTTP/1.1\r\n\r\n")); c1.Close() }()
+	if flow := <-flowCh; flow.Status != model.FlowOpaque {
+		t.Fatalf("non-TLS input must be opaque, got %q", flow.Status)
+	}
+}
