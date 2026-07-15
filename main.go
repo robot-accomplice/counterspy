@@ -23,9 +23,11 @@ import (
 	"counterspy/internal/collect"
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
+	"counterspy/internal/inspect"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
+	"counterspy/internal/netname"
 	"counterspy/internal/report"
 	"counterspy/internal/score"
 	"counterspy/internal/tui"
@@ -508,6 +510,20 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
 	const interval = 0.3
 	mon := newEgressMonitor(interval)
+	// Passive DNS name resolution (#3): start a long-lived port-53 capture feeding a name cache and
+	// hand it to the monitor BEFORE the sample loop runs (SetResolver is set-once, read by Sample).
+	// Flagless + best-effort — no capture (no sudo / non-darwin, where OpenPortCapture stubs an error)
+	// simply leaves destinations as their IPs, never a failure. The type-assert scopes this to the real
+	// monitor: a fake sampler (tests) or a non-Monitor sampler is left untouched.
+	if realMon, ok := mon.(*egress.Monitor); ok {
+		if src, err := inspect.OpenPortCapture(dnsInterface(), 53); err == nil {
+			cache := netname.NewCache(dnsCacheSize)
+			realMon.SetResolver(cache)
+			obs := netname.NewObserver(cache, src)
+			go func() { _ = obs.Run() }() // stops on obs.Close(); a real read error degrades to IPs (visible)
+			defer obs.Close()
+		}
+	}
 	tick := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop) // ends the ticker → closes tick → ends RunConsole's sample goroutine (also on panic)
