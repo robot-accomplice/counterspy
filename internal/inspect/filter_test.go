@@ -194,3 +194,49 @@ func TestBuildPortFilter(t *testing.T) {
 		t.Fatalf("buildPortFilter assemble: %v", err)
 	}
 }
+
+// Audit cp-p1b F-1: exercise the branches the base test skipped and that are most likely to regress
+// silently — IPv4 with options (IHL>5, drives LoadMemShift), a non-first fragment (the 0x1fff drop),
+// and an IPv6 packet with an extension header (the documented fixed-40-byte REJECT fallthrough).
+func TestBuildPortFilter_VariableHeaderAndFragments(t *testing.T) {
+	insns := portFilterInsns(0, 53)
+	dns := netip.MustParseAddrPort("1.2.3.4:53")
+	cli := netip.MustParseAddrPort("10.0.0.9:51000")
+
+	// IPv4 with 4 bytes of options → IHL=6 (24-byte header). Port 53 sits at X=24, which only the
+	// LoadMemShift-computed offset finds; a hardcoded 20-offset would read the wrong bytes.
+	opt := make([]byte, 24)
+	opt[0] = 0x46 // version 4, IHL 6
+	opt[9] = protoUDP
+	s4, d4 := dns.Addr().As4(), cli.Addr().As4()
+	copy(opt[12:16], s4[:])
+	copy(opt[16:20], d4[:])
+	udp := make([]byte, 8)
+	binary.BigEndian.PutUint16(udp[0:], 53) // src port
+	binary.BigEndian.PutUint16(udp[2:], cli.Port())
+	if !accepts(t, insns, append(opt, udp...)) {
+		t.Fatal("IPv4 with options (IHL>5) + port 53 must be accepted (LoadMemShift offset)")
+	}
+
+	// A non-first fragment (fragment offset != 0) carrying port-53 bytes must be dropped — it has no
+	// usable transport header, so the userspace parser could never use it anyway.
+	frag := ipv4UDP(dns, cli, nil)
+	binary.BigEndian.PutUint16(frag[6:], 100) // fragment offset = 100 (non-first)
+	if accepts(t, insns, frag) {
+		t.Fatal("non-first fragment must be dropped by the 0x1fff test")
+	}
+	// The corresponding FIRST fragment (offset 0, MF set) must still pass (it has the UDP header).
+	first := ipv4UDP(dns, cli, nil)
+	binary.BigEndian.PutUint16(first[6:], 0x2000) // MF flag, offset 0
+	if !accepts(t, insns, first) {
+		t.Fatal("first fragment (MF set, offset 0) must still be accepted")
+	}
+
+	// IPv6 with a Hop-by-Hop extension header (next-header=0) before the real transport → REJECT
+	// (we deliberately don't walk ext headers; the name is simply missed, never misattributed).
+	v6 := ipv6UDP(netip.MustParseAddrPort("[2001:db8::1]:53"), netip.MustParseAddrPort("[2001:db8::2]:51000"), nil)
+	v6[6] = 0 // next header = Hop-by-Hop options, not UDP
+	if accepts(t, insns, v6) {
+		t.Fatal("IPv6 with an extension header must fall through to REJECT (documented gap)")
+	}
+}
