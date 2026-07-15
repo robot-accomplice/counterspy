@@ -26,8 +26,16 @@ const (
 )
 
 // ParseDNSResponse extracts (queried name → answer IP) records from a DNS message. ok is false for a
-// query (QR=0), a message too short to hold a header, or one with no question. It never returns an
-// error: an answer RR it can't parse is skipped, and it returns whatever valid records it gathered.
+// query (QR=0), a message too short to hold a header, or one that doesn't have exactly one question.
+// It never returns an error: an answer RR it can't parse is skipped, and it returns whatever valid
+// records it gathered.
+//
+// Trust model (Audit cp-p1a F-1): this is PASSIVE observation of whatever DNS crosses the wire — it
+// issues no queries, so it cannot correlate a response to a request (there is no request of ours to
+// match). A party able to inject DNS responses onto the host's own network could therefore poison the
+// name shown for an IP. That is accepted: the name is a display hint and a light-touch, corroborated
+// concern nudge only — never a security decision — and anyone forging the victim's DNS is already
+// on-path. Names are honest hints, not attestations.
 func ParseDNSResponse(msg []byte) ([]Record, bool) {
 	if len(msg) < 12 {
 		return nil, false
@@ -38,25 +46,19 @@ func ParseDNSResponse(msg []byte) ([]Record, bool) {
 	}
 	qd := int(binary.BigEndian.Uint16(msg[4:6]))
 	an := int(binary.BigEndian.Uint16(msg[6:8]))
-	if qd == 0 {
+	// Require exactly one question. We attribute every answer to THE queried name; with two questions
+	// we couldn't know which answer belongs to which, so we refuse rather than mislabel an IP (Audit
+	// cp-p1a F-3). Multi-question DNS is unused in practice, so this costs nothing real.
+	if qd != 1 {
 		return nil, false
 	}
 
 	off := 12
-	// The queried name is the first question's name; it is what every answer IP is attributed to.
 	queried, next, ok := parseName(msg, off)
 	if !ok {
 		return nil, false
 	}
-	off = next + 4 // skip QTYPE(2) + QCLASS(2) of question 1
-	// Skip any remaining questions (rare, but keep the offset honest).
-	for i := 1; i < qd; i++ {
-		_, next, ok = parseName(msg, off)
-		if !ok {
-			return nil, true // header + at least the queried name were valid; return what we have
-		}
-		off = next + 4
-	}
+	off = next + 4 // skip QTYPE(2) + QCLASS(2)
 
 	var out []Record
 	for i := 0; i < an; i++ {

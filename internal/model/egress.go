@@ -4,7 +4,7 @@ package model
 type Endpoint struct {
 	IP   string
 	Port int
-	Name string // hostname the app resolved for this IP (passive DNS); "" = unresolved (#3)
+	Name string `json:"Name,omitempty"` // hostname the app resolved for this IP (passive DNS); "" = unresolved, omitted from JSON so the egress snapshot contract is unchanged for unresolved endpoints (#3, Audit cp-p1a F-2)
 }
 
 // Conn is one established outbound connection — a constituent of an EgressGroup, revealed
