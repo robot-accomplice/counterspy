@@ -59,3 +59,51 @@ func TestDecodeCleartext_NonHTTPFallsBack(t *testing.T) {
 		t.Fatal("empty input must not decode")
 	}
 }
+
+// Audit cp-p1f F-1/F-2: a body mislabeled with a Content-Encoding it doesn't actually have must NOT
+// vanish — the raw bytes must still be shown (a decoder that drained the reader would lose them).
+func TestDecodeCleartext_MislabeledEncodingKeepsBody(t *testing.T) {
+	for _, enc := range []string{"gzip", "deflate"} {
+		raw := "HTTP/1.1 200 OK\r\nContent-Encoding: " + enc + "\r\nContent-Length: 5\r\n\r\nhello"
+		got, ok := DecodeCleartext([]byte(raw))
+		if !ok {
+			t.Fatalf("%s: response must still parse", enc)
+		}
+		if !strings.Contains(got, "hello") {
+			t.Fatalf("%s: a mislabeled encoding must NOT swallow the plaintext body: %q", enc, got)
+		}
+	}
+}
+
+// F-1 bound: a gzip bomb must not blow up memory — the DECOMPRESSED body is capped at maxBodyPreview.
+func TestDecodeCleartext_GzipBombBounded(t *testing.T) {
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	w.Write(bytes.Repeat([]byte("A"), 1<<20)) // 1 MiB → ~1 KiB gzipped
+	w.Close()
+	raw := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n", gz.Len())
+	got, ok := DecodeCleartext(append([]byte(raw), gz.Bytes()...))
+	if !ok {
+		t.Fatal("must parse")
+	}
+	// The BODY portion is capped at maxBodyPreview; total render adds only the start line + headers.
+	if len(got) > maxBodyPreview+256 {
+		t.Fatalf("gzip bomb output not bounded: %d bytes", len(got))
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Fatalf("a bomb-sized body should be marked truncated")
+	}
+}
+
+// F-3: a successfully decoded body annotates its Content-Encoding so it doesn't read as still-compressed.
+func TestDecodeCleartext_AnnotatesDecodedEncoding(t *testing.T) {
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	w.Write([]byte("plain text"))
+	w.Close()
+	raw := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n", gz.Len())
+	got, _ := DecodeCleartext(append([]byte(raw), gz.Bytes()...))
+	if !strings.Contains(got, "(decoded)") {
+		t.Fatalf("decoded body should annotate Content-Encoding: %q", got)
+	}
+}
