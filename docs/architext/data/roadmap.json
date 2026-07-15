@@ -18,19 +18,27 @@
     },
     {
       "id": "roadmap-egress-keylog-decrypt",
-      "title": "Phase 2 — TLS key-log decryption (SSLKEYLOGFILE)",
+      "title": "TLS key-log decryption (SSLKEYLOGFILE) — optional add-on",
       "kind": "feature",
       "section": "future",
       "status": "planned",
-      "summary": "Capture the TLS session secrets that apps export via SSLKEYLOGFILE (browsers, curl, Go/OpenSSL/NSS tools) and decrypt those flows from the Phase-1 pcap. No trust anchor, no MITM, no traffic modification. Coverage is bounded to apps launched with the key-log env set, and honest about the rest (still shown 'encrypted'). Layers a key-log reader + record decryptor onto the Phase-1 capture substrate."
+      "summary": "Optional, non-invasive complement to the proxy: decrypt flows from apps launched with SSLKEYLOGFILE (browsers/curl/Go tooling) using keys they already export. Demoted from a phase to an add-on because it only reaches apps you launch with the env var — blind to Safari/native apps/already-running daemons — so the transparent proxy (now Phase 2) is the real broad-visibility path. Lower priority; layer onto the proxy's capture if wanted."
     },
     {
       "id": "roadmap-egress-payload-inspection",
-      "title": "Phase 3 — Transparent proxy: decrypt, redact, block",
+      "title": "Phase 2 — Transparent TLS-intercepting decrypt mirror",
+      "kind": "feature",
+      "section": "v0.7.0",
+      "status": "planned",
+      "summary": "Pulled forward from Phase 3 (approved in brainstorming, see docs/superpowers/specs/2026-07-15-phase2-tls-interception-design.md): a consented, transparent, READ-ONLY intercepting proxy (local root CA + pf rdr redirect of TCP:443, original dest via /dev/pf DIOCNATLOOK, crypto/tls terminate+re-dial+relay). Decrypts already-running apps' HTTPS broadly — the 'visibility into all encrypted traffic' goal — and surfaces the plaintext via DecodeCleartext+Redact. Runs as `counterspy intercept` (background daemon, publishes decrypted flows over a live socket and/or a rotating/expiring log chosen at launch); `counterspy console` is a separate viewer. Honest coverage: pinned apps bypassed-not-broken, QUIC/opaque labeled. No traffic modification this cycle."
+    },
+    {
+      "id": "roadmap-egress-active-controls",
+      "title": "Phase 3 — Active egress controls: redact + block",
       "kind": "feature",
       "section": "future",
       "status": "planned",
-      "summary": "Final phase: a local transparent intercepting proxy using a user-installed, reversible root CA -> broad TLS decryption of already-running apps' outbound HTTPS, PLUS active control: redact sensitive fields from outbound payloads and/or block transmissions outright. This is a deliberate, user-driven capability on the user's own hardware, gated behind explicit per-run consent; it is the one phase that crosses CounterSpy's observe-only network invariant (adds active egress control / DLP). Engineering rails: auditable + reversible CA install as features, never corrupt traffic, fail-mode chosen explicitly. Sequenced last so the passive-visibility foundation ships first."
+      "summary": "On top of the proven Phase-2 decrypt proxy: strip sensitive fields from outbound payloads and/or block transmissions by rule. This is the phase that crosses the observe-only network invariant into active control (DLP). Sequenced after the read-only decrypt mirror has a track record so a bug can't silently mangle a user's request before interception is trustworthy."
     },
     {
       "id": "roadmap-signed-notarized-binaries",
