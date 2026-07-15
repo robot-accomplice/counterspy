@@ -13,8 +13,49 @@ import (
 
 	"counterspy/internal/inspect"
 	"counterspy/internal/intercept/ca"
+	"counterspy/internal/intercept/publish"
 	"counterspy/internal/model"
 )
+
+// Proxy is the running interception service: it accepts redirected connections, recovers each one's
+// pre-redirect destination, intercepts (decrypt → relay → capture), and publishes the flow. OrigDest
+// and Dial are seams so the accept loop is testable without pf/root.
+type Proxy struct {
+	CA       *ca.CA
+	OrigDest func(net.Conn) (netip.AddrPort, error)
+	Dial     dialFunc // nil → defaultDial (verified upstream)
+	Sink     publish.Sink
+}
+
+// Serve accepts on l until it errors (listener closed), handling each connection in its own goroutine.
+func (p *Proxy) Serve(l net.Listener) error {
+	dial := p.Dial
+	if dial == nil {
+		dial = defaultDial
+	}
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return err
+		}
+		go p.handle(conn, dial)
+	}
+}
+
+// handle intercepts one connection and publishes its flow. Panic-recovered so a single malformed flow
+// can never kill the whole proxy (which is holding the user's traffic redirected).
+func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
+	defer func() { _ = recover() }()
+	dest, err := p.OrigDest(conn)
+	if err != nil {
+		conn.Close() // can't recover the destination → can't relay; drop cleanly
+		return
+	}
+	flow := intercept(conn, dest, p.CA, dial) // intercept owns closing conn
+	if p.Sink != nil {
+		p.Sink.Publish(flow)
+	}
+}
 
 // maxCapture bounds how many bytes per direction we hold for decode/display (the wire is relayed in
 // full regardless — this only bounds what we KEEP).

@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"counterspy/internal/intercept/ca"
 	"counterspy/internal/model"
@@ -146,3 +147,44 @@ func TestIntercept_NonTLSIsOpaqueNotPinned(t *testing.T) {
 		t.Fatalf("non-TLS input must be opaque, got %q", flow.Status)
 	}
 }
+
+// Proxy.Serve wires accept → origDest → intercept → publish end-to-end (injected origDest/dial/sink,
+// no pf/root).
+func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
+	dest, upCA := upstreamServer(t, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+	proxyCA, _ := ca.NewCA()
+	pxLn, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer pxLn.Close()
+
+	got := make(chan model.InterceptedFlow, 1)
+	p := &Proxy{
+		CA:       proxyCA,
+		OrigDest: func(net.Conn) (netip.AddrPort, error) { return dest, nil },
+		Dial: func(n, a string, cfg *tls.Config) (net.Conn, error) {
+			cfg.RootCAs = poolFor(upCA)
+			return tls.Dial(n, a, cfg)
+		},
+		Sink: chanSink(got),
+	}
+	go p.Serve(pxLn)
+
+	cc, err := tls.Dial("tcp", pxLn.Addr().String(), &tls.Config{RootCAs: poolFor(proxyCA), ServerName: "example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+	io.ReadAll(cc)
+	select {
+	case f := <-got:
+		if f.Status != model.FlowDecrypted || f.DestName != "example.com" {
+			t.Fatalf("served flow wrong: %+v", f)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not publish the flow")
+	}
+}
+
+type chanSink chan model.InterceptedFlow
+
+func (c chanSink) Publish(f model.InterceptedFlow) error { c <- f; return nil }
+func (c chanSink) Close() error                          { return nil }
