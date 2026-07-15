@@ -510,20 +510,9 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
 	const interval = 0.3
 	mon := newEgressMonitor(interval)
-	// Passive DNS name resolution (#3): start a long-lived port-53 capture feeding a name cache and
-	// hand it to the monitor BEFORE the sample loop runs (SetResolver is set-once, read by Sample).
-	// Flagless + best-effort — no capture (no sudo / non-darwin, where OpenPortCapture stubs an error)
-	// simply leaves destinations as their IPs, never a failure. The type-assert scopes this to the real
-	// monitor: a fake sampler (tests) or a non-Monitor sampler is left untouched.
-	if realMon, ok := mon.(*egress.Monitor); ok {
-		if src, err := inspect.OpenPortCapture(dnsInterface(), 53); err == nil {
-			cache := netname.NewCache(dnsCacheSize)
-			realMon.SetResolver(cache)
-			obs := netname.NewObserver(cache, src)
-			go func() { _ = obs.Run() }() // stops on obs.Close(); a real read error degrades to IPs (visible)
-			defer obs.Close()
-		}
-	}
+	// Passive DNS name resolution (#3): wire it into the live monitor BEFORE the sample loop runs
+	// (SetResolver is set-once, read by Sample). Flagless + best-effort; returns a stop func.
+	defer startNameResolver(mon)()
 	tick := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop) // ends the ticker → closes tick → ends RunConsole's sample goroutine (also on panic)
@@ -787,6 +776,37 @@ func runFeedback(args []string, stdout io.Writer) int {
 // newEgressMonitor builds the egress sampler. It's a package var so tests can inject a fake
 // sampler and exercise the report/JSON path WITHOUT shelling out to nettop/lsof (CI-safe).
 var newEgressMonitor = func(interval float64) tui.Sampler { return egress.New(interval) }
+
+// newDNSCapture is the injectable seam for the passive DNS capture (mirrors newScreen/newEgressMonitor)
+// so the name-resolver wiring is testable without root/pcap (Audit cp-p1h F-2).
+var newDNSCapture = func(iface string, port int) (inspect.PacketSource, error) {
+	return inspect.OpenPortCapture(iface, port)
+}
+
+// startNameResolver wires passive DNS name resolution into a live egress Monitor and returns a stop
+// func (call it deferred). Best-effort + flagless: a non-Monitor sampler (the test fake) or a failed
+// capture (no sudo / the non-darwin stub) leaves it a no-op — destinations then show their IPs, never
+// a failure. SetResolver runs BEFORE the caller starts sampling (the set-once ordering, cp-p1e).
+func startNameResolver(mon tui.Sampler) func() {
+	realMon, ok := mon.(*egress.Monitor)
+	if !ok {
+		return func() {}
+	}
+	src, err := newDNSCapture(dnsInterface(), 53)
+	if err != nil {
+		return func() {}
+	}
+	cache := netname.NewCache(dnsCacheSize)
+	realMon.SetResolver(cache) // before any Sample() reads m.resolve
+	obs := netname.NewObserver(cache, src)
+	go func() {
+		// A mid-session read failure degrades destinations to IPs. Surfacing the terminating error for
+		// RCA (Rule 14) needs a TUI-safe channel we don't have while the alt-screen is up — deferred to
+		// the --non-interactive logging mode, which writes to a file/stdout (T-17).
+		_ = obs.Run()
+	}()
+	return func() { _ = obs.Close() }
+}
 
 // newScreen opens the terminal screen. A package var so tests can inject a
 // tcell.SimulationScreen and drive the TUI event loops without a real terminal (CI-safe).
