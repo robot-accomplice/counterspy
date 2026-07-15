@@ -39,6 +39,14 @@
       "section": "imminent",
       "status": "planned",
       "summary": "Add Apple Developer ID codesigning + notarytool notarization to the GoReleaser release pipeline so prebuilt binaries run without any Gatekeeper friction. The v0.4.x release tooling ships UNSIGNED first (curl|sh and Homebrew avoid the quarantine flag; a browser-downloaded tar.gz needs xattr -d com.apple.quarantine); the intent is to wire signing imminently once a Developer ID cert + notarization secrets are in CI. Important for a security tool that runs under sudo — users rightly distrust an unsigned binary. The pipeline is structured so signing is a drop-in step."
+    },
+    {
+      "id": "roadmap-non-interactive-mode",
+      "title": "Non-interactive / headless mode with rotating log output",
+      "kind": "feature",
+      "section": "future",
+      "status": "planned",
+      "summary": "A maintainer-approved --non-interactive flag that runs CounterSpy's monitoring WITHOUT the interactive TUI, directing output to either the console (stdout) or a file with log rollover, a size limit, and expiration/retention. Default mode stays interactive (today's `console`). Rationale: many capabilities — the egress monitor, per-flow inspection, destination names, and the planned decryption/proxy phases — are currently gated behind the interactive console TUI; a headless mode is the mechanism to surface them for background/service execution and durable logging. Generalizes the existing one-shot `console --json`/`--once` non-TTY path into a CONTINUOUS logging run, and will likely require lifting some capabilities out of the TUI-gated code path so they can run headlessly. Per the standing 'no new CLI flags without explicit approval' rule, --non-interactive is maintainer-named and pre-approved for its future phase (not for the current Phase-1 traffic work)."
     }
   ]
 }
