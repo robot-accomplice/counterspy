@@ -3,15 +3,34 @@
 package ca
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 )
 
+// systemKeychain is where a root daemon's trusted roots live; passing it explicitly avoids relying on
+// an ambient "default keychain" that is undefined for a headless process (Audit cp-p2b F-3).
+const systemKeychain = "/Library/Keychains/System.keychain"
+
+// securityTimeout bounds the `security` call so a GUI authorization prompt (e.g. under MDM/TCC policy)
+// can't hang the background daemon forever (Audit cp-p2b F-4).
+const securityTimeout = 20 * time.Second
+
 // runSecurity is the seam over the macOS `security` CLI, so trust install/uninstall is unit-testable
-// (a fake captures the args) without touching the real keychain. Default = exec.
+// (a fake captures the args) without touching the real keychain. The default captures the tool's
+// diagnostic output into the error so a failure is actionable — and so the self-heal path can tell a
+// "cert not found" removal from a real failure (Audit cp-p2b F-2). Fail loud (Rule 13).
 var runSecurity = func(args ...string) error {
-	return exec.Command("security", args...).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), securityTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "security", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("security %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // writeTempCert writes certPEM to a private temp file and returns its path + a cleanup func.
@@ -42,7 +61,9 @@ func InstallTrust(certPEM []byte) error {
 		return err
 	}
 	defer cleanup()
-	if err := runSecurity("add-trusted-cert", "-d", "-r", "trustRoot", path); err != nil {
+	// -p ssl restricts trust to TLS ONLY — a local intercept CA must not become a trusted code-signing
+	// / S-MIME / IPsec anchor (Audit cp-p2b F-1). -k targets the System keychain explicitly (F-3).
+	if err := runSecurity("add-trusted-cert", "-d", "-r", "trustRoot", "-p", "ssl", "-k", systemKeychain, path); err != nil {
 		return fmt.Errorf("install CA trust: %w", err)
 	}
 	return nil

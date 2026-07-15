@@ -23,8 +23,9 @@ func TestTrust_InstallUninstallArgs(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 security calls, got %d", len(got))
 	}
-	if got[0][0] != "add-trusted-cert" || !contains(got[0], "trustRoot") || !contains(got[0], "-d") {
-		t.Fatalf("install args wrong: %v", got[0])
+	if got[0][0] != "add-trusted-cert" || !contains(got[0], "trustRoot") || !contains(got[0], "-d") ||
+		!contains(got[0], "ssl") || !contains(got[0], systemKeychain) {
+		t.Fatalf("install args wrong (need -d -r trustRoot -p ssl -k System): %v", got[0])
 	}
 	if got[1][0] != "remove-trusted-cert" {
 		t.Fatalf("uninstall args wrong: %v", got[1])
