@@ -58,14 +58,18 @@ any decryption.
   flow's plaintext: full HTTP request/response structure (method, host, path, headers, body preview)
   and other common cleartext protocols — replacing the current flat text-or-hexdump with a structured
   view (raw hexdump remains available as fallback).
+- **Light-touch raw-IP concern.** Switch on the existing (currently inert) `allRawIP` bump so a
+  destination with **no resolved name** nudges the app's Exfiltration concern — but only when
+  **corroborated** by another signal (unsigned / background / sustained volume), never on its own and
+  never for a trusted app. There is nothing inherently threatening about contacting an IP, so this is
+  a gentle, gated increment reusing the existing scoring path, not a new one.
 
 **Out (deferred, with reasons):**
 - **Always-on full-traffic capture** → the continuous tap stays **port-53-only** (DNS is low-volume);
-  deep content decode runs **on-demand per inspected flow**. Full-traffic capture is deferred to Phase
-  3's proxy, which terminates all traffic anyway — building it earlier adds an always-on full pcap for
-  little gain before decryption exists.
-- **Raw-IP concern scoring** → names are **display-only** in Phase 1. Activating the (currently inert)
-  `allRawIP` concern bump is deferred; the maintainer deprioritized false-positive work for now.
+  deep content decode runs **on-demand per inspected flow** (`i`). A later, maintainer-named
+  **`--capture-all`** mode may start the console in always-on full-capture (live decoded content for
+  every flow); it is deferred (a size/perf cost that overlaps the Phase-3 proxy) and, per the standing
+  CLI-flag rule, is pre-approved *for that future phase*, not now. Phase 1 adds no flag.
 - **Any decryption** → Phases 2–3.
 - **SNI-as-name-source** → the existing `ClientHelloSNI` parser can later complement DNS for
   hardcoded-IP TLS; DNS alone is the Phase-1 source (broadest coverage, the name the app *chose*).
@@ -77,7 +81,9 @@ console launch (sudo) ─► DNS observer (goroutine, /dev/bpf, BPF filter: udp/
                           parse DNS responses → IP→name cache  ─┐
                                                                  ▼
   nettop+lsof sampler ─► build EgressGroup ─► Resolver.Lookup(ip) ─► Endpoint{IP,Port,Name}
-   (existing, ~3 Hz)                                                      ▼  (display only)
+   (existing, ~3 Hz)          │                                          ▼
+                              └─► concern.go allRawIP() = "no dest has a Name"
+                                    → gentle, corroboration-gated bump (existing path)
   Inspect (i) on a flow ─► existing per-flow /dev/bpf capture ─► cleartext decoder
                              (HTTP/proto structured content) ──► richer Inspect view
                           tree / zoom render  name (ip) ◄─────────────────┘
@@ -104,6 +110,10 @@ console launch (sudo) ─► DNS observer (goroutine, /dev/bpf, BPF filter: udp/
   binary→hexdump / empty). Keeps the existing secret-masking: sensitive headers (Authorization,
   Cookie, Set-Cookie, tokens) stay masked until the user presses `v`.
 - **`internal/egress/monitor.go`** — accept a `netname.Resolver`; annotate each built `Endpoint.Name`.
+- **`internal/egress/concern.go`** — make `isRawIP`/`allRawIP` real: an endpoint is "raw IP" when it
+  has no `Name`. The existing `allRawIP` bump is already corroboration-gated (it only adds to a score
+  that other signals must also raise to reach a concern band), so switching it on is the light-touch
+  behavior — no new scoring path, no bump for a trusted/quiet app.
 - **`internal/tui`** — tree/zoom render `name (ip)`; the Inspect view renders the decoded structure.
   Decoupling invariant preserved (tui imports only `model` + `mark`; names/content arrive as data).
 
@@ -135,8 +145,10 @@ console launch (sudo) ─► DNS observer (goroutine, /dev/bpf, BPF filter: udp/
    the tree within a sample tick or two; an app dialing a hardcoded IP shows the bare IP.
 2. Inspecting a cleartext HTTP flow shows a structured request/response (method/host/path/headers/body),
    with sensitive headers masked until `v`.
-3. Without sudo, the views degrade to IPs + a stated gap; nothing crashes, no name is fabricated.
-4. `go test ./...` green (incl. `-race` on `netname`), `architext validate` passes.
+3. An **unsigned, background** app uploading to a **nameless** IP gets a small concern nudge; a
+   notarized/quiet app talking to a nameless IP does **not** (corroboration-gated, light touch).
+4. Without sudo, the views degrade to IPs + a stated gap; nothing crashes, no name is fabricated.
+5. `go test ./...` green (incl. `-race` on `netname`), `architext validate` passes.
 
 ## Architext / roadmap updates (on implementation)
 
