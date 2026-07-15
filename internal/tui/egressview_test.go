@@ -663,3 +663,21 @@ func TestEgressView_TinyTerminalNoHeaderClobber(t *testing.T) {
 		}
 	}
 }
+
+// #3: destinations display the resolved name when present, else the bare IP; topDest too.
+func TestEndpointHostAndTopDest_PreferName(t *testing.T) {
+	if got := endpointHost(model.Endpoint{IP: "1.2.3.4"}); got != "1.2.3.4" {
+		t.Fatalf("no name → IP, got %q", got)
+	}
+	if got := endpointHost(model.Endpoint{IP: "1.2.3.4", Name: "api.example.com"}); got != "api.example.com" {
+		t.Fatalf("name present → name, got %q", got)
+	}
+	g := model.EgressGroup{Destinations: []model.Endpoint{{IP: "1.2.3.4", Port: 443, Name: "api.example.com"}}}
+	if got := topDest(g); got != "api.example.com:443" {
+		t.Fatalf("topDest should show name:port, got %q", got)
+	}
+	g2 := model.EgressGroup{Destinations: []model.Endpoint{{IP: "9.9.9.9", Port: 53}}}
+	if got := topDest(g2); got != "9.9.9.9:53" {
+		t.Fatalf("topDest nameless → IP:port, got %q", got)
+	}
+}

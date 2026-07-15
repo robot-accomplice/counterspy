@@ -549,7 +549,7 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		c := row.conn
 		depth = 2
 		marker = '·'
-		dest = fmt.Sprintf("%s %s:%d", strings.ToUpper(c.Proto), c.Endpoint.IP, c.Endpoint.Port)
+		dest = fmt.Sprintf("%s %s:%d", strings.ToUpper(c.Proto), endpointHost(c.Endpoint), c.Endpoint.Port)
 		encPort = c.Endpoint.Port
 		if c.OutRate > 0 {
 			rate = human(c.OutRate) + "/s"
@@ -637,7 +637,16 @@ func topDest(g model.EgressGroup) string {
 	if len(g.Destinations) > 1 {
 		extra = fmt.Sprintf(" +%d", len(g.Destinations)-1)
 	}
-	return fmt.Sprintf("%s:%d%s", d.IP, d.Port, extra)
+	return fmt.Sprintf("%s:%d%s", endpointHost(d), d.Port, extra)
+}
+
+// endpointHost is the display host for a destination: the passively-resolved name if one was
+// observed, else the bare IP (never fabricated) — the visible payoff of the DNS observer (#3).
+func endpointHost(e model.Endpoint) string {
+	if e.Name != "" {
+		return e.Name
+	}
+	return e.IP
 }
 
 func human(n uint64) string {

@@ -43,3 +43,22 @@ func TestRedact_Idempotent(t *testing.T) {
 		t.Fatalf("Redact not idempotent: %q -> %q", once, twice)
 	}
 }
+
+// #3: sensitive HTTP header VALUES (Authorization/Cookie/API-key/*-token) are masked just like a
+// bearer token — inspecting a cleartext HTTP flow must not itself spill session credentials.
+func TestRedact_MasksSensitiveHeaders(t *testing.T) {
+	in := "GET / HTTP/1.1\r\nHost: x\r\nAuthorization: Basic dXNlcjpwYXNz\r\nCookie: session=deadbeef; a=b\r\n" +
+		"X-Auth-Token: t0psecret\r\nContent-Type: application/json\r\n\r\n"
+	out := Redact(in)
+	for _, leak := range []string{"dXNlcjpwYXNz", "session=deadbeef", "t0psecret"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("secret %q leaked through Redact:\n%s", leak, out)
+		}
+	}
+	if !strings.Contains(out, "Content-Type: application/json") {
+		t.Fatalf("a non-sensitive header must NOT be masked:\n%s", out)
+	}
+	if !strings.Contains(out, "Host: x") {
+		t.Fatalf("Host must survive:\n%s", out)
+	}
+}

@@ -46,6 +46,11 @@ var (
 	// A dangling BEGIN (a partial/segmented capture with no END yet) must still be masked to the
 	// end of the buffer, or the key material after the header leaks (cp-insC Audit F-1).
 	rePEMOpen = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*`)
+	// Sensitive HTTP header VALUES: an inspected cleartext HTTP request/response shows its headers,
+	// and Authorization/Cookie/API-key values are credentials just like a bearer token (#3). Match a
+	// header line (line-anchored, case-insensitive) and mask only its value, preserving the trailing
+	// CR so lines don't merge. Covers the named set plus any *-token/*-secret/*-key header.
+	reHeaderSecret = regexp.MustCompile(`(?im)^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|[a-z0-9-]*(?:token|secret|apikey|api-key)):[ \t]*[^\r\n]*`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under
@@ -59,6 +64,7 @@ const redactMark = "[redacted]"
 func Redact(s string) string {
 	s = rePEM.ReplaceAllString(s, redactMark)     // complete BEGIN…END blocks first
 	s = rePEMOpen.ReplaceAllString(s, redactMark) // then any dangling BEGIN…EOF (partial capture)
+	s = reHeaderSecret.ReplaceAllString(s, "$1: "+redactMark)
 	s = reBearer.ReplaceAllString(s, "Bearer "+redactMark)
 	s = reAWSKey.ReplaceAllString(s, redactMark)
 	return s

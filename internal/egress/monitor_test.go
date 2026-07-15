@@ -420,3 +420,28 @@ func TestMonitor_AppSparkPrunesDeadApps(t *testing.T) {
 		t.Fatalf("dead app must be pruned from m.sparkIn, still have %d", len(m.sparkIn))
 	}
 }
+
+// #3: SetResolver makes Sample annotate destination names; without it, names stay empty.
+func TestMonitor_ResolverAnnotatesNames(t *testing.T) {
+	g := model.EgressGroup{
+		App: "x", Conns: []model.Conn{{Endpoint: model.Endpoint{IP: "9.9.9.9", Port: 443}}},
+		Members: []model.EgressInstance{{Conns: []model.Conn{{Endpoint: model.Endpoint{IP: "9.9.9.9", Port: 443}}}}},
+	}
+	g.Destinations = distinctEndpoints(g.Conns)
+
+	var m Monitor
+	m.resolveNames(&g) // no resolver → unchanged
+	if g.Destinations[0].Name != "" {
+		t.Fatalf("no resolver must leave names empty, got %q", g.Destinations[0].Name)
+	}
+	m.SetResolver(fakeResolver{"9.9.9.9": "dns.quad9.net"})
+	m.resolveNames(&g)
+	if g.Destinations[0].Name != "dns.quad9.net" || g.Conns[0].Endpoint.Name != "dns.quad9.net" ||
+		g.Members[0].Conns[0].Endpoint.Name != "dns.quad9.net" {
+		t.Fatalf("resolver must annotate destinations, conns, and member conns: %+v", g)
+	}
+}
+
+type fakeResolver map[string]string
+
+func (f fakeResolver) Lookup(ip string) (string, bool) { n, ok := f[ip]; return n, ok }

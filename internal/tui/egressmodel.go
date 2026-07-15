@@ -107,22 +107,30 @@ func (m EgressModel) zoomGroup() (model.EgressGroup, bool) {
 	return model.EgressGroup{}, false
 }
 
-// destRate is one destination endpoint's aggregated out-rate, for the destinations box.
+// destRate is one destination endpoint's aggregated out-rate, for the destinations box. ep is the
+// stable IP:port key (used for cursor nav + busiestConnTo); label is the display host (resolved name
+// if any, else the IP) so the panel shows names while navigation stays keyed on the IP (#3).
 type destRate struct {
-	ep   string
-	rate uint64
+	ep    string
+	label string
+	rate  uint64
 }
 
 // zoomDests aggregates a group's connections by endpoint and sorts by out-rate desc (loud first),
 // stable by endpoint. Shared by the destinations panel, its cursor navigation, and the by-dest graph.
 func zoomDests(g model.EgressGroup) []destRate {
 	agg := map[string]uint64{}
+	label := map[string]string{}
 	for _, c := range g.Conns {
-		agg[fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)] += c.OutRate
+		ep := fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)
+		agg[ep] += c.OutRate
+		if _, ok := label[ep]; !ok {
+			label[ep] = fmt.Sprintf("%s:%d", endpointHost(c.Endpoint), c.Endpoint.Port)
+		}
 	}
 	ds := make([]destRate, 0, len(agg))
 	for ep, r := range agg {
-		ds = append(ds, destRate{ep, r})
+		ds = append(ds, destRate{ep: ep, label: label[ep], rate: r})
 	}
 	sort.SliceStable(ds, func(i, j int) bool {
 		if ds[i].rate != ds[j].rate {

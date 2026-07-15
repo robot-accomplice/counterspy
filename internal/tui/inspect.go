@@ -44,7 +44,7 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 		glyph = " " + string(tg)
 	}
 	header := fmt.Sprintf("%s · pid %d · → %s %s:%d%s",
-		t.app, t.pid, strings.ToUpper(t.conn.Proto), t.conn.Endpoint.IP, t.conn.Endpoint.Port, glyph)
+		t.app, t.pid, strings.ToUpper(t.conn.Proto), endpointHost(t.conn.Endpoint), t.conn.Endpoint.Port, glyph)
 	y := 2
 	drawWrapped(s, marginX, &y, def.Foreground(colAccent), header, inner)
 	drawHRule(s, y, w)

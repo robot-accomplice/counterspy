@@ -15,7 +15,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
+	"counterspy/internal/inspect"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
@@ -904,3 +906,33 @@ func TestLivenessForMapsRunState(t *testing.T) {
 		t.Errorf("installed and running → active ▸, got %+v", active["path:"+target])
 	}
 }
+
+// Audit cp-p1h F-2: the name-resolver wiring is now testable via the newDNSCapture seam. Verify the
+// GATING (the new branching): a non-Monitor sampler is a no-op; a real Monitor whose capture fails is
+// a no-op; a real Monitor with a working capture sets a resolver (before any Sample) and stops cleanly.
+func TestStartNameResolver_Gating(t *testing.T) {
+	// non-Monitor sampler → no-op, no panic.
+	startNameResolver(&fakeEgressSampler{})()
+
+	orig := newDNSCapture
+	defer func() { newDNSCapture = orig }()
+
+	// real Monitor, capture fails → no-op.
+	newDNSCapture = func(string, int) (inspect.PacketSource, error) { return nil, errors.New("no root") }
+	startNameResolver(egress.New(0.3))()
+
+	// real Monitor, capture succeeds (fixture source, immediate EOF) → resolver wired, stop is clean.
+	newDNSCapture = func(string, int) (inspect.PacketSource, error) { return &eofSource{}, nil }
+	mon := egress.New(0.3)
+	stop := startNameResolver(mon)
+	// A group built from a conn to a named IP resolves once the observer cached it; here we assert the
+	// resolver is INSTALLED by feeding the cache indirectly is out of scope — the wiring + no-panic +
+	// clean stop is the gating contract. (Resolution itself: netname + egress unit tests.)
+	stop()
+}
+
+// eofSource is a PacketSource that yields no packets — the observer's Run returns io.EOF immediately.
+type eofSource struct{}
+
+func (eofSource) Next() ([]byte, error) { return nil, io.EOF }
+func (eofSource) Close() error          { return nil }

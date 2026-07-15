@@ -17,20 +17,26 @@ func Concern(g model.EgressGroup) model.ConcernLevel {
 // scale rather than mixing a banded level with a raw bonus.
 func concernScore(g model.EgressGroup) int {
 	score := 0
+	untrusted := false
 	switch g.Trust {
 	case "unsigned", "unknown", "revoked":
 		score += 2
+		untrusted = true
 	case "signed":
 		score++
 	}
-	// Raw-IP destination concern: inert in v1 because isRawIP is a neutral stub (no
-	// destination has a resolved name yet). Kept as a seam for the v0.4.1 name/pcap path.
-	if len(g.Destinations) > 0 && allRawIP(g.Destinations) {
+	// A sustained uploader that is a background daemon is the quiet-exfiltrator case.
+	uploading := g.OutRate >= sustainedBytesPerSec && g.Background
+	if uploading {
 		score += 2
 	}
-	// A sustained uploader that is a background daemon is the quiet-exfiltrator case.
-	if g.OutRate >= sustainedBytesPerSec && g.Background {
-		score += 2
+	// Raw-IP destination concern (#3): a group ALL of whose destinations have no resolved name — the
+	// app dialed bare IPs, a mild exfil tell. LIGHT TOUCH + CORROBORATED: it nudges only when the app
+	// is ALREADY suspicious on another axis (untrusted trust, or a sustained background upload), never
+	// on its own and never for a trusted/quiet app. Nothing about contacting an IP is inherently
+	// threatening, so a notarized, idle app talking to an unnamed IP gets no nudge.
+	if (untrusted || uploading) && len(g.Destinations) > 0 && allRawIP(g.Destinations) {
+		score++
 	}
 	return score
 }
@@ -51,21 +57,16 @@ func Exfil(g model.EgressGroup) (model.ConcernLevel, []string) {
 	return band(score), candidates
 }
 
+// allRawIP reports whether EVERY destination is a bare IP with no passively-resolved name. Now that
+// the DNS observer attaches names (#3), this is a real signal (it was a neutral stub in v1).
 func allRawIP(dests []model.Endpoint) bool {
 	for _, d := range dests {
-		if !isRawIP(d.IP) {
+		if d.Name != "" {
 			return false
 		}
 	}
 	return true
 }
-
-// isRawIP reports a destination with no resolved name. In v1 no destination has a name, so this is
-// a neutral stub (false) — it does NOT penalize every v1 destination, and the "raw IP → elevated"
-// signal therefore contributes nothing to the band today (intentional; sets band-tuning
-// expectations). It becomes meaningful once the packet-capture / SNI-name path attaches destination
-// names (issue #3 / the sni-in-tree roadmap item).
-func isRawIP(host string) bool { return false }
 
 func band(score int) model.ConcernLevel {
 	switch {

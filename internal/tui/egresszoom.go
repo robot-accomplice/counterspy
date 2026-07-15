@@ -296,8 +296,11 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []des
 				s.SetContent(x+1, row, '▸', nil, tcell.StyleDefault.Foreground(colSelBar))
 			}
 		}
+		// Clean the label BEFORE layout: a destination name comes from an observed DNS packet
+		// (attacker-influenceable), so a crafted name must not inject ANSI/control chars into the
+		// zoom panel. IP:port labels were inert, but resolved names are not (#3).
 		drawText(s, tx, row, st,
-			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(d.ep, 24), human(d.rate), share), iw-(tx-ix)))
+			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(model.Clean(d.label), 24), human(d.rate), share), iw-(tx-ix)))
 	}
 }
 

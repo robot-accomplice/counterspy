@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
+	"fmt"
 	"strings"
 	"syscall"
 	"testing"
@@ -134,5 +137,26 @@ func TestNewInspector(t *testing.T) {
 	}
 	if newInspector(false) == nil {
 		t.Error("default must provide a live inspector")
+	}
+}
+
+// #3: renderFlowBytes decodes an HTTP body (here gzipped) into readable text; non-HTTP binary still
+// hexdumps; a TLS-encrypted direction stays blank.
+func TestRenderFlowBytes_DecodesHTTP(t *testing.T) {
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	w.Write([]byte("leaked-contacts-list"))
+	w.Close()
+	resp := append([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n", gz.Len())), gz.Bytes()...)
+	if got := renderFlowBytes(resp, false, false); !strings.Contains(got, "leaked-contacts-list") {
+		t.Fatalf("gzipped HTTP body should be decoded to text: %q", got)
+	}
+	// Non-HTTP binary → hexdump (offset column present).
+	if got := renderFlowBytes([]byte{0x00, 0x01, 0x02, 0xff}, false, false); !strings.Contains(got, "0000") {
+		t.Fatalf("non-HTTP binary should hexdump: %q", got)
+	}
+	// Encrypted → blank.
+	if got := renderFlowBytes([]byte{0x16, 0x03, 0x01}, false, true); got != "" {
+		t.Fatalf("encrypted direction must render blank, got %q", got)
 	}
 }

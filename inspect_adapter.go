@@ -75,16 +75,27 @@ func toInspectView(r inspect.Result) model.InspectView {
 // surfaces any embedded text); or nothing when the flow is TLS (the bytes are ciphertext noise, and
 // the verdict already says so). The wire bytes are never hidden just for being non-text (§6).
 func renderFlowBytes(b []byte, plaintext, encrypted bool) string {
-	switch {
-	case len(b) == 0:
+	if len(b) == 0 {
 		return ""
-	case plaintext:
-		return sanitizeMultiline(string(b))
-	case encrypted:
-		return "" // TLS ciphertext — random bytes; surfacing them adds noise, not information
-	default:
-		return hexDump(b)
 	}
+	// A direction whose OWN bytes are readable is shown even inside a TLS flow — the per-direction
+	// plaintext flag beats the flow-level encrypted flag (a TLS connection can carry a cleartext
+	// direction in the capture window). Decode HTTP structure + body first, else the raw text.
+	if plaintext {
+		if decoded, ok := inspect.DecodeCleartext(b); ok {
+			return sanitizeMultiline(decoded)
+		}
+		return sanitizeMultiline(string(b))
+	}
+	if encrypted {
+		return "" // TLS ciphertext — random bytes; surfacing them adds noise, not information
+	}
+	// Cleartext-but-binary: a gzipped/chunked HTTP body isn't "plaintext" but IS decodable into
+	// readable text (#3, the reveal-more goal); only a genuine non-HTTP binary payload hexdumps.
+	if decoded, ok := inspect.DecodeCleartext(b); ok {
+		return sanitizeMultiline(decoded)
+	}
+	return hexDump(b)
 }
 
 // hexDump renders bytes as a canonical offset / hex / ASCII dump (xxd-style), 16 bytes per line.
@@ -191,4 +202,13 @@ func newInspector(noInspect bool) tui.Inspector {
 		return nil
 	}
 	return liveInspector{}
+}
+
+// dnsCacheSize bounds the passive-DNS name cache (distinct IPs); ~4k covers a busy session cheaply.
+const dnsCacheSize = 4096
+
+// dnsInterface picks the interface the passive DNS observer captures on: the default-route interface
+// (probed toward a public resolver), falling back to en0 — the same resolution the flow inspector uses.
+func dnsInterface() string {
+	return outboundInterface(netip.MustParseAddrPort("8.8.8.8:53"))
 }

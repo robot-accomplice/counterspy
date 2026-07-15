@@ -1,6 +1,6 @@
 project: counterspy
 substrate: orchestrator+subagents   # single orchestrator session spawns ephemeral reviewer subagents
-integration_branch: swarm/counterspy/work   # the single writer's branch; RCA "already-fixed" check looks here
+integration_branch: feat/egress-names   # this cycle (Phase 1 passive-reveal) single-writer branch, off develop
 
 roles:
   coding:      { model: opus,   enabled: true }   # the orchestrator itself, this session
