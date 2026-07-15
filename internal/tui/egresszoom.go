@@ -297,7 +297,7 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []des
 			}
 		}
 		drawText(s, tx, row, st,
-			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(d.ep, 24), human(d.rate), share), iw-(tx-ix)))
+			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(d.label, 24), human(d.rate), share), iw-(tx-ix)))
 	}
 }
 
