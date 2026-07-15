@@ -1,6 +1,6 @@
 project: counterspy
 substrate: orchestrator+subagents   # single orchestrator session spawns ephemeral reviewer subagents
-integration_branch: feat/egress-names   # this cycle (Phase 1 passive-reveal) single-writer branch, off develop
+integration_branch: feat/tls-intercept   # Phase 2 (TLS-intercept) single-writer branch, off develop
 
 roles:
   coding:      { model: opus,   enabled: true }   # the orchestrator itself, this session
