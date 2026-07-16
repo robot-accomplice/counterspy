@@ -94,7 +94,7 @@ Commands:
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
       --json                 print the Exfiltration report as JSON and exit (no live UI)
       --once                 print the Exfiltration report once and exit (no live UI)
-      --intercept[=sock]     view live decrypted flows from a running intercept daemon
+      --intercept[=path]     view decrypted flows: a live socket, or an intercept --log file
   restore <manifest.json>  Undo a quarantine from its manifest
   intercept                Decrypt outbound TLS through a local proxy (installs a trusted CA + pf
                            redirect; reverts on exit). Requires sudo. View flows via console.

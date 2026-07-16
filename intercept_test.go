@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -393,5 +395,55 @@ func TestIntercept_ChownFailureAbortsBeforeArming(t *testing.T) {
 	}
 	if idx(log, "trust-install") != -1 || idx(log, "redirect-install") != -1 {
 		t.Fatalf("must not arm when the stream socket is unusable: %v", log)
+	}
+}
+
+// --intercept dispatches on what the path IS: a regular file reads the rotating --log (previously
+// unreachable — publish.ReadLog had no production caller), a socket streams live.
+func TestInterceptView_RegularFileReadsLog(t *testing.T) {
+	origLog, origSock := interceptReadLog, interceptReadSocket
+	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
+
+	f := filepath.Join(t.TempDir(), "flows.jsonl")
+	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logRead := false
+	interceptReadLog = func(p string, fn func(model.InterceptedFlow)) error {
+		logRead = true
+		if p != f {
+			t.Fatalf("log path %q != %q", p, f)
+		}
+		fn(model.InterceptedFlow{At: "T", DestName: "logged.example", Status: model.FlowDecrypted, SentText: "GET /x"})
+		return nil
+	}
+	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
+		t.Fatal("a regular file must NOT be dialed as a socket")
+		return nil
+	}
+	var b bytes.Buffer
+	if code := runInterceptView(f, &b); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if !logRead || !strings.Contains(b.String(), "logged.example") {
+		t.Fatalf("log flows must render: read=%v out=%q", logRead, b.String())
+	}
+}
+
+// A nonexistent path stays on the socket path, so the common case reports the dial error.
+func TestInterceptView_MissingPathUsesSocket(t *testing.T) {
+	origLog, origSock := interceptReadLog, interceptReadSocket
+	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
+	interceptReadLog = func(string, func(model.InterceptedFlow)) error {
+		t.Fatal("a missing path must not be read as a log")
+		return nil
+	}
+	dialed := false
+	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
+		dialed = true
+		return errors.New("no such socket")
+	}
+	if code := runInterceptView("/tmp/definitely-not-here.sock", &bytes.Buffer{}); code != 1 || !dialed {
+		t.Fatalf("expected a socket dial error; code=%d dialed=%v", code, dialed)
 	}
 }

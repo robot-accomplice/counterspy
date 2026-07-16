@@ -51,6 +51,7 @@ var (
 	interceptCALoad          = ca.Load
 	interceptNewSocketSink   = publish.NewSocketSink
 	interceptReadSocket      = publish.ReadSocket
+	interceptReadLog         = publish.ReadLog
 	interceptNewLogSink      = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
 	}
@@ -321,12 +322,25 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 	return 0
 }
 
-// runInterceptView is `counterspy console --intercept[=sock]`: connect to the intercept daemon's live
-// socket and print each decrypted flow as it arrives (a plain live tail, not the alt-screen TUI —
-// mirrors how console --json/--once are non-TUI exits). It ends when the socket closes or on Ctrl-C.
+// runInterceptView is `counterspy console --intercept[=path]`: print the intercept daemon's decrypted
+// flows (a plain tail, not the alt-screen TUI — mirrors how console --json/--once are non-TUI exits).
+//
+// It dispatches on what `path` IS, so one flag serves both daemon outputs: a unix SOCKET streams live
+// until it closes or Ctrl-C; a regular FILE reads the rotating --log's existing content once and exits.
+// A missing path is treated as the live socket, so the common case reports the dial error.
 func runInterceptView(path string, stdout io.Writer) int {
 	if path == "" {
 		path = interceptSocketPath
+	}
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSocket == 0 {
+		fmt.Fprintln(stdout, dim("counterspy — intercepted flows from the log "+path))
+		if err := interceptReadLog(path, func(fl model.InterceptedFlow) {
+			fmt.Fprint(stdout, formatFlow(fl))
+		}); err != nil {
+			fmt.Fprintln(stdout, "console: cannot read intercept log:", report.Clean(err.Error()))
+			return 1
+		}
+		return 0
 	}
 	fmt.Fprintln(stdout, dim("counterspy — intercepted flows from "+path+" (Ctrl-C to stop)"))
 	err := interceptReadSocket(path, func(fl model.InterceptedFlow) {

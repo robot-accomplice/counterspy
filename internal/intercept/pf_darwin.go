@@ -54,13 +54,10 @@ import (
 //     the translation section (pf requires translation rules before filter rules).
 //     insertRdrAnchor targets the standard /etc/pf.conf layout; confirm the reload
 //     succeeds on your system (`pfctl -f -` errors loudly if ordering is wrong).
-//  4. WHERE ~/.counterspy LANDS UNDER SUDO. The daemon resolves its CA (and the
-//     default --log path) via os.UserHomeDir(), which depends on whether sudo
-//     preserves HOME on this machine — unverified here, since reading the sudoers
-//     policy needs root. Either result is self-consistent (intercept is always run
-//     under sudo), but confirm which: if it resolves to /var/root/.counterspy the CA
-//     is fine, but a default --log would be unreadable to you without sudo. Check
-//     with: sudo ./counterspy intercept --yes --log  (then note the printed path).
+// VERIFIED (not a smoke-test item): sudo preserves HOME on this machine, so the CA
+// and the default --log live under the invoking user's ~/.counterspy, owned by root
+// (0700 dir, 0600 files) since the daemon runs as root. The CA key being root-only is
+// intended; the log is therefore read with `sudo ./counterspy console --intercept=<log>`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // pfAnchor is the named pf anchor counterspy owns. All our rdr rules live here so teardown is a single
