@@ -189,11 +189,11 @@ The monitor and inspector can *name* destinations and read cleartext, but TLS pa
 `counterspy intercept` goes one step further and shows **what** your own machine is sending inside
 TLS — on your own hardware, with your explicit consent, and fully reversible.
 
-It is a **transparent, read-only decrypt mirror**. When armed it installs a local, single-purpose CA
-as a trusted root and uses a `pf` redirect to route outbound `:443` through a local proxy. The proxy
-terminates each connection's TLS with a per-SNI leaf, **re-dials the real server verified normally**,
-relays every byte **unmodified**, and captures the decrypted plaintext — decoded and secret-masked —
-for viewing. Nothing in the traffic is altered or blocked (that's a later phase); this only *reveals*.
+It is a **read-only decrypt mirror**. When armed it installs a local, single-purpose CA as a trusted
+root and registers as the system **HTTPS proxy**. Apps `CONNECT` through it; the proxy terminates each
+connection's TLS with a per-SNI leaf, **re-dials the real server verified normally**, relays every byte
+**unmodified**, and captures the decrypted plaintext — decoded and secret-masked — for viewing. Nothing
+in the traffic is altered or blocked (that's a later phase); this only *reveals*.
 
 Arm it (consent prompt, then a live socket — the default output):
 
@@ -228,11 +228,20 @@ sudo counterspy intercept --uninstall
   so the view never implies content it doesn't have.
 - **Secrets masked** — bearer tokens, cookies, API keys, PEM blocks, and credential fields are masked
   *before* any flow leaves the proxy.
+- **Cooperative, and honest about it** — apps that honor the system proxy (Safari, Chrome, and anything
+  on CFNetwork/NSURLSession — which is most native software, including telemetry SDKs) are seen. Software
+  that deliberately ignores the proxy is **not** intercepted, and that gap is visible rather than hidden:
+  the Exfiltration monitor still shows those flows via `nettop`, they just won't appear here. Catching
+  evasive software needs a NetworkExtension transparent proxy — a later phase.
 - **Scope** — this phase is decrypt/visibility only; redacting or blocking outbound payloads is Phase 3.
 
-> ⚠️ Arming installs a machine-wide trusted MITM root and redirects all outbound TLS. It's meant for
-> inspecting **your own** traffic on **your own** machine. The `pf`/keychain path is macOS + root and
-> is still pending a hands-on smoke test — treat it as experimental until then.
+> ⚠️ Arming installs a machine-wide trusted MITM root and points your system HTTPS proxy at localhost.
+> It's meant for inspecting **your own** traffic on **your own** machine. macOS + root; treat as
+> experimental.
+
+> **Note:** `curl` does *not* honor the macOS system proxy (it reads `https_proxy`). To test with curl,
+> point it at the proxy explicitly: `curl -x 127.0.0.1:62443 https://example.com/`. A browser needs no
+> such help.
 
 ## Safety guarantees
 

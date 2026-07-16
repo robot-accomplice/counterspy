@@ -1,13 +1,29 @@
-// Package intercept is the transparent, READ-ONLY TLS-intercepting proxy (Phase 2): it terminates a
-// client's TLS with a leaf minted by the local CA, re-dials the real server (verified normally),
-// relays both directions BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext — decoded and
-// secret-masked — into a model.InterceptedFlow for the console. It never modifies traffic.
+// Package intercept is the READ-ONLY TLS-intercepting HTTPS proxy (Phase 2): a client CONNECTs to it
+// (macOS is pointed here by the system secure-web-proxy setting), it terminates the client's TLS with a
+// leaf minted by the local CA, re-dials the real server (verified normally), relays both directions
+// BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext — decoded and secret-masked — into a
+// model.InterceptedFlow for the console. It never modifies traffic.
+//
+// ROUTING HISTORY (why CONNECT, not a transparent pf redirect): Phase 2 originally used a pf `rdr`
+// rule to steal :443 transparently. A root smoke test proved that CANNOT work for this use case — pf
+// translates only INBOUND packets, so a rule as permissive as
+// `rdr pass inet proto tcp from any to any port = 443` logged 27828 Evaluations and 0 Packets against
+// the machine's own outbound curl. Locally-originated traffic never traverses the rdr path (Linux has
+// iptables OUTPUT REDIRECT, FreeBSD has divert-to; macOS pf has neither). So the client now TELLS us
+// the destination via CONNECT, which also removes the DIOCNATLOOK ioctl and gives us the real hostname
+// without inferring it from SNI. Tradeoff: this is COOPERATIVE — apps honoring the system proxy
+// (CFNetwork/NSURLSession) are seen; evasive software bypasses it and must be caught by a
+// NetworkExtension transparent proxy (a later phase).
 package intercept
 
 import (
+	"bufio"
 	"crypto/tls"
+	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -17,14 +33,12 @@ import (
 	"counterspy/internal/model"
 )
 
-// Proxy is the running interception service: it accepts redirected connections, recovers each one's
-// pre-redirect destination, intercepts (decrypt → relay → capture), and publishes the flow. OrigDest
-// and Dial are seams so the accept loop is testable without pf/root.
+// Proxy is the running interception service: it accepts CONNECT tunnels, intercepts (decrypt → relay →
+// capture), and publishes the flow. Dial is a seam so the accept loop is testable without real upstreams.
 type Proxy struct {
-	CA       *ca.CA
-	OrigDest func(net.Conn) (netip.AddrPort, error)
-	Dial     dialFunc // nil → defaultDial (verified upstream)
-	Sink     publish.Sink
+	CA   *ca.CA
+	Dial dialFunc // nil → defaultDial (verified upstream)
+	Sink publish.Sink
 }
 
 // Serve accepts on l until it errors (listener closed), handling each connection in its own goroutine.
@@ -42,24 +56,82 @@ func (p *Proxy) Serve(l net.Listener) error {
 	}
 }
 
-// handle intercepts one connection and publishes its flow. Panic-recovered so a single malformed flow
-// can never kill the whole proxy (which is holding the user's traffic redirected) — and the recover
-// ALWAYS closes the conn, so a panic can't leak the fd holding a redirected connection (cp-p2d F-2).
+// connectTimeout bounds reading the client's CONNECT request line, so a client that opens a socket and
+// says nothing can't pin a goroutine.
+const connectTimeout = 10 * time.Second
+
+// readConnect reads the client's `CONNECT host:port HTTP/1.1` request and returns the target authority.
+// The client naming its own destination is what replaces the pf/DIOCNATLOOK lookup. A non-CONNECT
+// request is an error: we are configured ONLY as the secure-web (https) proxy, so plain-HTTP requests
+// are not ours to serve and must not be silently swallowed.
+func readConnect(conn net.Conn) (string, error) {
+	conn.SetReadDeadline(time.Now().Add(connectTimeout))
+	req, err := http.ReadRequest(bufio.NewReader(conn))
+	if err != nil {
+		return "", fmt.Errorf("read CONNECT: %w", err)
+	}
+	if req.Method != http.MethodConnect {
+		return "", fmt.Errorf("expected CONNECT, got %s", req.Method)
+	}
+	host := req.Host
+	if host == "" {
+		host = req.URL.Host
+	}
+	if host == "" {
+		return "", fmt.Errorf("CONNECT with no target")
+	}
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(host, "443") // authority may omit the port
+	}
+	conn.SetReadDeadline(time.Time{})
+	return host, nil
+}
+
+// connectEstablished is the tunnel-open response; after it the bytes are raw TLS.
+const connectEstablished = "HTTP/1.1 200 Connection Established\r\n\r\n"
+
+// handle intercepts one CONNECT tunnel and publishes its flow. Panic-recovered so a single malformed
+// flow can never kill the whole proxy (which is holding the user's traffic) — and the recover ALWAYS
+// closes the conn, so a panic can't leak the fd (cp-p2d F-2).
+//
+// A connection we cannot resolve publishes a FlowError rather than closing silently: the console must
+// SHOW that something arrived and could not be handled, never imply nothing happened (Rule 13 — the
+// silent-drop the smoke test surfaced when OrigDest could fail with no trace).
 func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	defer func() {
 		if r := recover(); r != nil {
 			conn.Close()
 		}
 	}()
-	dest, err := p.OrigDest(conn)
+	target, err := readConnect(conn)
 	if err != nil {
-		conn.Close() // can't recover the destination → can't relay; drop cleanly
+		p.publish(model.InterceptedFlow{
+			At: nowRFC3339(), Status: model.FlowError,
+			DestName: "(unresolved: " + firstLine(err.Error()) + ")",
+		})
+		conn.Close()
 		return
 	}
-	flow := intercept(conn, dest, p.CA, dial) // intercept owns closing conn on the normal path
-	if p.Sink != nil {
-		p.Sink.Publish(flow)
+	if _, werr := conn.Write([]byte(connectEstablished)); werr != nil {
+		conn.Close()
+		return
 	}
+	flow := intercept(conn, target, p.CA, dial) // intercept owns closing conn on the normal path
+	p.publish(flow)
+}
+
+func (p *Proxy) publish(fl model.InterceptedFlow) {
+	if p.Sink != nil {
+		p.Sink.Publish(fl)
+	}
+}
+
+// firstLine keeps an error to one displayable line (it reaches the console's flow list).
+func firstLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }
 
 // maxCapture bounds how many bytes per direction we hold for decode/display (the wire is relayed in
@@ -85,12 +157,17 @@ func defaultDial(network, addr string, cfg *tls.Config) (net.Conn, error) {
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
-// intercept handles one redirected connection: terminate the client TLS with a CA leaf for its SNI,
-// dial the real dest, relay unmodified, and return the captured Flow. A client that REJECTS our leaf
-// (cert pinning) fails the handshake → FlowPinned (bypassed, not decrypted, connection closed). The
-// relayed bytes are never altered — this is a read-only mirror.
-func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) model.InterceptedFlow {
-	flow := model.InterceptedFlow{At: nowRFC3339(), DestIP: dest.Addr().String()}
+// intercept handles one CONNECT tunnel: terminate the client TLS with a CA leaf, dial the real target,
+// relay unmodified, and return the captured Flow. `target` is the authority the client named in its
+// CONNECT ("example.com:443") — authoritative, unlike an inferred destination. A client that REJECTS
+// our leaf (cert pinning) fails the handshake → FlowPinned (bypassed, not decrypted, connection
+// closed). The relayed bytes are never altered — this is a read-only mirror.
+func intercept(client net.Conn, target string, c *ca.CA, dial dialFunc) model.InterceptedFlow {
+	targetHost, _, err := net.SplitHostPort(target)
+	if err != nil {
+		targetHost = target
+	}
+	flow := model.InterceptedFlow{At: nowRFC3339(), DestName: targetHost}
 
 	var sni string
 	var sawClientHello bool
@@ -101,7 +178,7 @@ func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) mo
 			sni = chi.ServerName
 			host := chi.ServerName
 			if host == "" {
-				host = dest.Addr().String()
+				host = targetHost // fall back to the CONNECT authority (an IP-literal target has no SNI)
 			}
 			leaf, err := c.LeafFor(host)
 			mintErr = err
@@ -124,17 +201,17 @@ func intercept(client net.Conn, dest netip.AddrPort, c *ca.CA, dial dialFunc) mo
 		return flow
 	}
 	client.SetDeadline(time.Time{}) // clear the handshake deadline; relay uses per-read idle deadlines
-	host := sni
-	if host == "" {
-		host = dest.Addr().String()
-	}
-	flow.SNI, flow.DestName = sni, host
-
-	upstream, err := dial("tcp", dest.String(), &tls.Config{ServerName: host})
+	flow.SNI = sni
+	// Verify the upstream against the name the CLIENT asked for (the CONNECT authority), not one the
+	// server or a forged SNI could influence — SNI is recorded for display only.
+	upstream, err := dial("tcp", target, &tls.Config{ServerName: targetHost})
 	if err != nil {
 		flow.Status = model.FlowError
 		server.Close()
 		return flow
+	}
+	if ap, perr := netip.ParseAddrPort(upstream.RemoteAddr().String()); perr == nil {
+		flow.DestIP = ap.Addr().String() // the IP the name actually resolved to
 	}
 	sent, recv := &capBuf{max: maxCapture}, &capBuf{max: maxCapture}
 	relay(server, upstream, sent, recv)

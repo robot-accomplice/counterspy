@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"net"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +33,7 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 	origCALoad := interceptCALoad
 	origTrust := interceptInstallTrust
 	origUntrust := interceptUninstallTrust
-	origRedir := interceptInstallRedirect
+	origRedir := interceptInstallProxy
 	origSock := interceptNewSocketSink
 	origLog := interceptNewLogSink
 	origServe := interceptServe
@@ -46,7 +45,7 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 		interceptCALoad = origCALoad
 		interceptInstallTrust = origTrust
 		interceptUninstallTrust = origUntrust
-		interceptInstallRedirect = origRedir
+		interceptInstallProxy = origRedir
 		interceptNewSocketSink = origSock
 		interceptNewLogSink = origLog
 		interceptServe = origServe
@@ -61,9 +60,9 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 	interceptCALoad = func(string) (*ca.CA, bool, error) { return caObj, true, nil }
 	interceptInstallTrust = func([]byte) error { *log = append(*log, "trust-install"); return nil }
 	interceptUninstallTrust = func([]byte) error { *log = append(*log, "trust-uninstall"); return nil }
-	interceptInstallRedirect = func(int, []netip.Addr) (func() error, error) {
-		*log = append(*log, "redirect-install")
-		return func() error { *log = append(*log, "redirect-teardown"); return nil }, nil
+	interceptInstallProxy = func(int) (func() error, error) {
+		*log = append(*log, "proxy-install")
+		return func() error { *log = append(*log, "proxy-teardown"); return nil }, nil
 	}
 	interceptNewSocketSink = func(path string) (publish.Sink, error) {
 		*log = append(*log, "sink-open:"+path)
@@ -108,7 +107,7 @@ func TestIntercept_ArmThenServeThenReverse(t *testing.T) {
 	if code := runIntercept([]string{"--yes"}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	order := []string{"trust-install", "redirect-install", "serve", "redirect-teardown", "trust-uninstall"}
+	order := []string{"trust-install", "proxy-install", "serve", "proxy-teardown", "trust-uninstall"}
 	last := -1
 	for _, step := range order {
 		i := idx(log, step)
@@ -130,10 +129,10 @@ func TestIntercept_PanicStillDisarms(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("panic path must return 1, got %d", code)
 	}
-	if idx(log, "redirect-teardown") == -1 || idx(log, "trust-uninstall") == -1 {
+	if idx(log, "proxy-teardown") == -1 || idx(log, "trust-uninstall") == -1 {
 		t.Fatalf("teardown must run on panic: %v", log)
 	}
-	if idx(log, "redirect-teardown") > idx(log, "trust-uninstall") {
+	if idx(log, "proxy-teardown") > idx(log, "trust-uninstall") {
 		t.Fatalf("redirect must revert before trust: %v", log)
 	}
 }
@@ -172,7 +171,7 @@ func TestIntercept_UninstallIdempotent(t *testing.T) {
 			t.Fatalf("uninstall run %d: code=%d", i, code)
 		}
 	}
-	if idx(log, "trust-uninstall") == -1 || idx(log, "redirect-teardown") == -1 {
+	if idx(log, "trust-uninstall") == -1 || idx(log, "proxy-teardown") == -1 {
 		t.Fatalf("uninstall must revert both trust and redirect: %v", log)
 	}
 }
@@ -181,8 +180,8 @@ func TestIntercept_UninstallIdempotent(t *testing.T) {
 func TestIntercept_RedirectFailRollsBackTrust(t *testing.T) {
 	var log []string
 	fakeIntercept(t, &log, nil)
-	interceptInstallRedirect = func(int, []netip.Addr) (func() error, error) {
-		log = append(log, "redirect-install-FAIL")
+	interceptInstallProxy = func(int) (func() error, error) {
+		log = append(log, "proxy-install-FAIL")
 		return nil, errors.New("pf: not permitted")
 	}
 	code := runIntercept([]string{"--yes"}, &bytes.Buffer{})
@@ -204,7 +203,7 @@ func TestIntercept_UnknownFlagRejected(t *testing.T) {
 	if code := runIntercept([]string{"--uninstal"}, &bytes.Buffer{}); code != 2 {
 		t.Fatalf("unknown flag must return 2, got %d", code)
 	}
-	if idx(log, "trust-install") != -1 || idx(log, "redirect-teardown") != -1 {
+	if idx(log, "trust-install") != -1 || idx(log, "proxy-teardown") != -1 {
 		t.Fatalf("a typo'd flag must neither arm nor revert: %v", log)
 	}
 }
@@ -417,7 +416,7 @@ func TestIntercept_ChownFailureAbortsBeforeArming(t *testing.T) {
 	if code := runIntercept([]string{"--yes"}, &bytes.Buffer{}); code != 1 {
 		t.Fatalf("chown failure must return 1, got %d", code)
 	}
-	if idx(log, "trust-install") != -1 || idx(log, "redirect-install") != -1 {
+	if idx(log, "trust-install") != -1 || idx(log, "proxy-install") != -1 {
 		t.Fatalf("must not arm when the stream socket is unusable: %v", log)
 	}
 }

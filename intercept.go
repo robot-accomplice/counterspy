@@ -21,9 +21,9 @@ import (
 	"counterspy/internal/report"
 )
 
-// interceptProxyPort is the fixed loopback port the decrypt proxy listens on and the pf rdr targets.
-// It is intentionally NOT a flag (the CLI surface is frozen — no new options without approval); a
-// constant keeps the redirect rule and the listener in lockstep.
+// interceptProxyPort is the fixed loopback port the decrypt proxy listens on and the system
+// secure-web-proxy setting points at. It is intentionally NOT a flag (the CLI surface is frozen — no
+// new options without approval); a constant keeps the proxy setting and the listener in lockstep.
 const interceptProxyPort = 62443
 
 // Rotating-log parameters for --log. Fixed constants (the approved surface is --log[=path] only, no
@@ -41,18 +41,17 @@ const (
 const interceptSocketPath = "/tmp/counterspy-intercept.sock"
 
 // Seams: the side-effectful operations are package vars so intercept_test.go can inject fakes and assert
-// ordering (install trust → install redirect → serve; teardown reverts in reverse) without root/pf.
+// ordering (install trust → register system proxy → serve; teardown reverts in reverse) without root.
 var (
-	interceptInstallTrust    = ca.InstallTrust
-	interceptUninstallTrust  = ca.UninstallTrust
-	interceptInstallRedirect = intercept.InstallRedirect
-	interceptOrigDest        = intercept.OrigDest
-	interceptCALoadOrCreate  = ca.LoadOrCreate
-	interceptCALoad          = ca.Load
-	interceptNewSocketSink   = publish.NewSocketSink
-	interceptReadSocket      = publish.ReadSocket
-	interceptReadLog         = publish.ReadLog
-	interceptNewLogSink      = func(path string) (publish.Sink, error) {
+	interceptInstallTrust   = ca.InstallTrust
+	interceptUninstallTrust = ca.UninstallTrust
+	interceptInstallProxy   = intercept.InstallProxy
+	interceptCALoadOrCreate = ca.LoadOrCreate
+	interceptCALoad         = ca.Load
+	interceptNewSocketSink  = publish.NewSocketSink
+	interceptReadSocket     = publish.ReadSocket
+	interceptReadLog        = publish.ReadLog
+	interceptNewLogSink     = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
 	}
 	interceptListen = func() (net.Listener, error) {
@@ -139,9 +138,10 @@ func unknownInterceptFlag(flags []string) (string, bool) {
 	return "", false
 }
 
-// runIntercept is the `counterspy intercept` daemon: consent → install trust + pf redirect → serve the
-// decrypt proxy, publishing flows to the chosen sink(s) → revert everything reliably on exit. Requires
-// root (pf + System keychain). See internal/intercept for the read-only-mirror contract.
+// runIntercept is the `counterspy intercept` daemon: consent → install trust + register as the system
+// HTTPS proxy → serve the decrypt proxy, publishing flows to the chosen sink(s) → revert everything
+// reliably on exit. Requires root (networksetup + System keychain). See internal/intercept for the
+// read-only-mirror contract and why this is a CONNECT proxy rather than a transparent pf redirect.
 func runIntercept(flags []string, stdout io.Writer) (code int) {
 	if bad, ok := unknownInterceptFlag(flags); ok {
 		fmt.Fprintln(stdout, "intercept: unknown flag:", bad)
@@ -227,7 +227,7 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 			defer mu.Unlock()
 			if redirectTeardown != nil {
 				if err := redirectTeardown(); err != nil {
-					fmt.Fprintln(os.Stderr, "intercept: pf redirect teardown FAILED:", report.Clean(err.Error()))
+					fmt.Fprintln(os.Stderr, "intercept: system proxy teardown FAILED:", report.Clean(err.Error()))
 				}
 			}
 			if trustInstalled {
@@ -273,9 +273,9 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 	trustInstalled = true
 	mu.Unlock()
 
-	td, err := interceptInstallRedirect(interceptProxyPort, nil)
+	td, err := interceptInstallProxy(interceptProxyPort)
 	if err != nil {
-		fmt.Fprintln(stdout, "intercept: cannot install pf redirect:", report.Clean(err.Error()))
+		fmt.Fprintln(stdout, "intercept: cannot register the system proxy:", report.Clean(err.Error()))
 		return 1 // deferred teardown rolls back the trust just installed
 	}
 	mu.Lock()
@@ -287,22 +287,22 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "intercept: cannot listen:", report.Clean(err.Error()))
 		return 1 // deferred teardown reverts trust + redirect
 	}
-	fmt.Fprintln(stdout, dim("  armed — decrypting TLS on :443 → 127.0.0.1 proxy. Ctrl-C to stop and revert."))
-	p := &intercept.Proxy{CA: caObj, OrigDest: interceptOrigDest, Sink: sinks}
+	fmt.Fprintf(stdout, "%s\n", dim(fmt.Sprintf("  armed — system HTTPS proxy → 127.0.0.1:%d, decrypting. Ctrl-C to stop and revert.", interceptProxyPort)))
+	p := &intercept.Proxy{CA: caObj, Sink: sinks}
 	if err := interceptServe(p, l); err != nil {
 		fmt.Fprintln(stdout, "intercept: serve ended:", report.Clean(err.Error()))
 	}
 	return 0
 }
 
-// runInterceptUninstall reverts a prior arming and self-heals after an unclean exit: flush any stale pf
-// redirect, then remove CA trust. It NEVER mints a CA (Audit cp-p2f F-4) — with no CA on disk there is
+// runInterceptUninstall reverts a prior arming and self-heals after an unclean exit: restore the system
+// proxy setting, then remove CA trust. It NEVER mints a CA (Audit cp-p2f F-4) — with no CA on disk there is
 // nothing to untrust. Idempotent: a trust-removal error (e.g. the cert is already gone on a second run)
 // is surfaced but not fatal, so repeated reverts still succeed (Rule 13/14: loud, not crashing).
 func runInterceptUninstall(dir string, stdout io.Writer) int {
-	// Flush any stale pf redirect regardless of CA state (InstallRedirect owns the anchor flush + ruleset
-	// restore). Best-effort — pf may already be clean.
-	if td, err := interceptInstallRedirect(interceptProxyPort, nil); err == nil {
+	// Restore the system proxy regardless of CA state: registering then immediately tearing down puts each
+	// service back to its captured prior setting. Best-effort — it may already be clean.
+	if td, err := interceptInstallProxy(interceptProxyPort); err == nil {
 		td()
 	}
 	caObj, found, err := interceptCALoad(dir)
@@ -311,14 +311,14 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 		return 1
 	}
 	if !found {
-		fmt.Fprintln(stdout, "intercept: no local CA on disk — nothing to untrust (pf redirect flushed).")
+		fmt.Fprintln(stdout, "intercept: no local CA on disk — nothing to untrust (system proxy restored).")
 		return 0
 	}
 	if err := interceptUninstallTrust(caObj.CertPEM()); err != nil {
 		fmt.Fprintln(stdout, "intercept: CA trust removal reported:", report.Clean(err.Error()), dim("(may already be removed)"))
 		return 0
 	}
-	fmt.Fprintln(stdout, "intercept: reverted (pf redirect flushed, CA trust removed).")
+	fmt.Fprintln(stdout, "intercept: reverted (system proxy restored, CA trust removed).")
 	return 0
 }
 
@@ -428,7 +428,7 @@ func renderFlowBody(arrow, raw string) string {
 func confirmConsent(w io.Writer, r io.Reader) bool {
 	fmt.Fprintln(w, "counterspy intercept will:")
 	fmt.Fprintln(w, "  • install a local CA as a trusted root in your System keychain")
-	fmt.Fprintln(w, "  • redirect this machine's outbound TLS (:443) through a local decrypt proxy")
+	fmt.Fprintln(w, "  • set this machine's system HTTPS proxy to a local decrypt proxy")
 	fmt.Fprintln(w, "  • DECRYPT and display your TLS traffic (read-only mirror; nothing is modified)")
 	fmt.Fprintln(w, dim("  Everything is reverted on exit (or `counterspy intercept --uninstall`)."))
 	fmt.Fprint(w, "Proceed? [y/N] ")
