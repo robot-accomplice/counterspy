@@ -46,6 +46,7 @@ var (
 	interceptInstallRedirect = intercept.InstallRedirect
 	interceptOrigDest        = intercept.OrigDest
 	interceptCALoadOrCreate  = ca.LoadOrCreate
+	interceptCALoad          = ca.Load
 	interceptNewSocketSink   = publish.NewSocketSink
 	interceptNewLogSink      = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
@@ -58,12 +59,19 @@ var (
 	interceptServe = func(p *intercept.Proxy, l net.Listener) error { return p.Serve(l) }
 	// interceptStdin is the consent reader (os.Stdin in production).
 	interceptStdin io.Reader = os.Stdin
+	// interceptUserHomeDir is a seam so the home-resolution-failure path is testable.
+	interceptUserHomeDir = os.UserHomeDir
 )
 
-// interceptDir is where the reusable CA (and default log) live — installed-once trust reused across runs.
-func interceptDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".counterspy")
+// interceptDir is where the reusable CA (and default log) live — installed-once trust reused across
+// runs. ok is false when the home directory can't be resolved: we must NOT fall back to a relative
+// ".counterspy" (that would create a different CA per working directory and orphan trusted roots).
+func interceptDir() (string, bool) {
+	home, err := interceptUserHomeDir()
+	if err != nil || home == "" {
+		return "", false
+	}
+	return filepath.Join(home, ".counterspy"), true
 }
 
 // optFlag reports whether an optional-value flag (--name or --name=value) is present, and its value if
@@ -80,24 +88,48 @@ func optFlag(flags []string, name string) (bool, string) {
 	return false, ""
 }
 
+// unknownInterceptFlag returns the first arg that isn't one of the frozen intercept flags. `intercept`
+// arms/reverts a MITM, so a typo (e.g. `--uninstal`) must be REJECTED, not silently ignored and treated
+// as an arming run — this command validates its surface strictly (unlike scan/console).
+func unknownInterceptFlag(flags []string) (string, bool) {
+	for _, f := range flags {
+		switch {
+		case f == "--uninstall", f == "--yes", f == "--stream", f == "--log":
+		case strings.HasPrefix(f, "--stream="), strings.HasPrefix(f, "--log="):
+		default:
+			return f, true
+		}
+	}
+	return "", false
+}
+
 // runIntercept is the `counterspy intercept` daemon: consent → install trust + pf redirect → serve the
 // decrypt proxy, publishing flows to the chosen sink(s) → revert everything reliably on exit. Requires
 // root (pf + System keychain). See internal/intercept for the read-only-mirror contract.
 func runIntercept(flags []string, stdout io.Writer) (code int) {
+	if bad, ok := unknownInterceptFlag(flags); ok {
+		fmt.Fprintln(stdout, "intercept: unknown flag:", bad)
+		return 2
+	}
 	stream, streamPath := optFlag(flags, "--stream")
 	logOn, logPath := optFlag(flags, "--log")
 	uninstall := has(flags, "--uninstall")
 	yes := has(flags, "--yes")
 
-	dir := interceptDir()
-	caObj, err := interceptCALoadOrCreate(dir)
-	if err != nil {
-		fmt.Fprintln(stdout, "intercept: cannot load CA:", report.Clean(err.Error()))
+	dir, ok := interceptDir()
+	if !ok {
+		fmt.Fprintln(stdout, "intercept: cannot determine home directory")
 		return 1
 	}
 
 	if uninstall {
-		return runInterceptUninstall(caObj, stdout)
+		return runInterceptUninstall(dir, stdout)
+	}
+
+	caObj, err := interceptCALoadOrCreate(dir)
+	if err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot load CA:", report.Clean(err.Error()))
+		return 1
 	}
 
 	if !yes && !confirmConsent(stdout, interceptStdin) {
@@ -137,33 +169,36 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "  log:", logPath, dim("(0600, rotating)"))
 	}
 
-	// Arm: install trust FIRST, then the redirect. Teardown reverts in REVERSE (redirect, then trust) so
-	// traffic stops being redirected before the CA loses trust — and runs exactly once whether triggered
-	// by normal return, panic, or an external signal (Rule 13/14: a MITM that armed must always disarm).
-	if err := interceptInstallTrust(caObj.CertPEM()); err != nil {
-		sinks.Close()
-		fmt.Fprintln(stdout, "intercept: cannot install CA trust:", report.Clean(err.Error()))
-		return 1
-	}
-	teardownRedirect, err := interceptInstallRedirect(interceptProxyPort, nil)
-	if err != nil {
-		interceptUninstallTrust(caObj.CertPEM()) // undo the trust we just installed
-		sinks.Close()
-		fmt.Fprintln(stdout, "intercept: cannot install pf redirect:", report.Clean(err.Error()))
-		return 1
-	}
-
-	var once sync.Once
+	// Teardown reverts whatever has been armed SO FAR (guarded state), in REVERSE order (redirect before
+	// trust, so traffic stops being redirected before the CA loses trust), exactly once, and REPORTS any
+	// revert failure — a MITM that armed must always disarm, loudly if it can't (Rule 13/14).
+	var (
+		mu               sync.Mutex
+		trustInstalled   bool
+		redirectTeardown func() error
+		once             sync.Once
+	)
 	teardown := func() {
 		once.Do(func() {
-			if teardownRedirect != nil {
-				teardownRedirect()
+			mu.Lock()
+			defer mu.Unlock()
+			if redirectTeardown != nil {
+				if err := redirectTeardown(); err != nil {
+					fmt.Fprintln(os.Stderr, "intercept: pf redirect teardown FAILED:", report.Clean(err.Error()))
+				}
 			}
-			interceptUninstallTrust(caObj.CertPEM())
+			if trustInstalled {
+				if err := interceptUninstallTrust(caObj.CertPEM()); err != nil {
+					fmt.Fprintln(os.Stderr, "intercept: CA trust removal FAILED (run `counterspy intercept --uninstall`):", report.Clean(err.Error()))
+				}
+			}
 			sinks.Close()
 		})
 	}
-	// External kill (SIGINT/TERM/HUP) bypasses defers — disarm then exit.
+	// Register the signal handler + teardown defers BEFORE arming: a SIGINT/TERM/HUP arriving in the
+	// arming window (which shells out to security/pfctl, up to ~20s) would otherwise hit the default
+	// disposition and kill the process with NO defer running — leaving a trusted MITM root behind
+	// (Audit cp-p2f F-1). Registering first means teardown reverts whatever got installed.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	sigDone := make(chan struct{})
@@ -176,7 +211,6 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		case <-sigDone:
 		}
 	}()
-	// Panic mid-serve must still disarm (LIFO: teardown runs, then the panic is reported).
 	defer func() {
 		if r := recover(); r != nil {
 			teardown()
@@ -186,10 +220,29 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 	}()
 	defer teardown()
 
+	// Arm: trust FIRST, then the redirect. Each success is recorded so the deferred teardown above knows
+	// exactly what to revert if a later step (or a signal) interrupts.
+	if err := interceptInstallTrust(caObj.CertPEM()); err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot install CA trust:", report.Clean(err.Error()))
+		return 1
+	}
+	mu.Lock()
+	trustInstalled = true
+	mu.Unlock()
+
+	td, err := interceptInstallRedirect(interceptProxyPort, nil)
+	if err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot install pf redirect:", report.Clean(err.Error()))
+		return 1 // deferred teardown rolls back the trust just installed
+	}
+	mu.Lock()
+	redirectTeardown = td
+	mu.Unlock()
+
 	l, err := interceptListen()
 	if err != nil {
 		fmt.Fprintln(stdout, "intercept: cannot listen:", report.Clean(err.Error()))
-		return 1
+		return 1 // deferred teardown reverts trust + redirect
 	}
 	fmt.Fprintln(stdout, dim("  armed — decrypting TLS on :443 → 127.0.0.1 proxy. Ctrl-C to stop and revert."))
 	p := &intercept.Proxy{CA: caObj, OrigDest: interceptOrigDest, Sink: sinks}
@@ -199,18 +252,28 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 	return 0
 }
 
-// runInterceptUninstall reverts a prior arming: remove the pf redirect (a fresh install+teardown flushes
-// our anchor and restores pf) and remove CA trust. Idempotent — a not-found removal is not a hard
-// failure (self-heal after an unclean exit), but a real error is surfaced (fail loud).
-func runInterceptUninstall(caObj *ca.CA, stdout io.Writer) int {
-	// Flush any stale pf redirect by installing then immediately tearing it down (InstallRedirect owns the
-	// anchor flush + ruleset restore). Best-effort: pf may already be clean.
+// runInterceptUninstall reverts a prior arming and self-heals after an unclean exit: flush any stale pf
+// redirect, then remove CA trust. It NEVER mints a CA (Audit cp-p2f F-4) — with no CA on disk there is
+// nothing to untrust. Idempotent: a trust-removal error (e.g. the cert is already gone on a second run)
+// is surfaced but not fatal, so repeated reverts still succeed (Rule 13/14: loud, not crashing).
+func runInterceptUninstall(dir string, stdout io.Writer) int {
+	// Flush any stale pf redirect regardless of CA state (InstallRedirect owns the anchor flush + ruleset
+	// restore). Best-effort — pf may already be clean.
 	if td, err := interceptInstallRedirect(interceptProxyPort, nil); err == nil {
 		td()
 	}
-	if err := interceptUninstallTrust(caObj.CertPEM()); err != nil {
-		fmt.Fprintln(stdout, "intercept: cannot remove CA trust:", report.Clean(err.Error()))
+	caObj, found, err := interceptCALoad(dir)
+	if err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot read CA:", report.Clean(err.Error()))
 		return 1
+	}
+	if !found {
+		fmt.Fprintln(stdout, "intercept: no local CA on disk — nothing to untrust (pf redirect flushed).")
+		return 0
+	}
+	if err := interceptUninstallTrust(caObj.CertPEM()); err != nil {
+		fmt.Fprintln(stdout, "intercept: CA trust removal reported:", report.Clean(err.Error()), dim("(may already be removed)"))
+		return 0
 	}
 	fmt.Fprintln(stdout, "intercept: reverted (pf redirect flushed, CA trust removed).")
 	return 0

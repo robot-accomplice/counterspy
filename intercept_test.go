@@ -29,6 +29,7 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 		t.Fatal(err)
 	}
 	origLoad := interceptCALoadOrCreate
+	origCALoad := interceptCALoad
 	origTrust := interceptInstallTrust
 	origUntrust := interceptUninstallTrust
 	origRedir := interceptInstallRedirect
@@ -36,8 +37,10 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 	origLog := interceptNewLogSink
 	origServe := interceptServe
 	origStdin := interceptStdin
+	origHome := interceptUserHomeDir
 	t.Cleanup(func() {
 		interceptCALoadOrCreate = origLoad
+		interceptCALoad = origCALoad
 		interceptInstallTrust = origTrust
 		interceptUninstallTrust = origUntrust
 		interceptInstallRedirect = origRedir
@@ -45,9 +48,12 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 		interceptNewLogSink = origLog
 		interceptServe = origServe
 		interceptStdin = origStdin
+		interceptUserHomeDir = origHome
 	})
 
+	interceptUserHomeDir = func() (string, error) { return t.TempDir(), nil }
 	interceptCALoadOrCreate = func(string) (*ca.CA, error) { return caObj, nil }
+	interceptCALoad = func(string) (*ca.CA, bool, error) { return caObj, true, nil }
 	interceptInstallTrust = func([]byte) error { *log = append(*log, "trust-install"); return nil }
 	interceptUninstallTrust = func([]byte) error { *log = append(*log, "trust-uninstall"); return nil }
 	interceptInstallRedirect = func(int, []netip.Addr) (func() error, error) {
@@ -163,6 +169,78 @@ func TestIntercept_UninstallIdempotent(t *testing.T) {
 	}
 	if idx(log, "trust-uninstall") == -1 || idx(log, "redirect-teardown") == -1 {
 		t.Fatalf("uninstall must revert both trust and redirect: %v", log)
+	}
+}
+
+// A redirect-install failure AFTER trust was installed must roll the trust back (no orphaned root).
+func TestIntercept_RedirectFailRollsBackTrust(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	interceptInstallRedirect = func(int, []netip.Addr) (func() error, error) {
+		log = append(log, "redirect-install-FAIL")
+		return nil, errors.New("pf: not permitted")
+	}
+	code := runIntercept([]string{"--yes"}, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("redirect failure must return 1, got %d", code)
+	}
+	if idx(log, "trust-install") == -1 || idx(log, "trust-uninstall") == -1 {
+		t.Fatalf("trust must be rolled back when redirect install fails: %v", log)
+	}
+	if idx(log, "serve") != -1 {
+		t.Fatalf("must not serve after a redirect failure: %v", log)
+	}
+}
+
+// An unknown flag on this dangerous command must be REJECTED (exit 2), never treated as an arming run.
+func TestIntercept_UnknownFlagRejected(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	if code := runIntercept([]string{"--uninstal"}, &bytes.Buffer{}); code != 2 {
+		t.Fatalf("unknown flag must return 2, got %d", code)
+	}
+	if idx(log, "trust-install") != -1 || idx(log, "redirect-teardown") != -1 {
+		t.Fatalf("a typo'd flag must neither arm nor revert: %v", log)
+	}
+}
+
+// Home-dir resolution failure must fail loud, not fall back to a relative ".counterspy".
+func TestIntercept_HomeDirFailure(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	interceptUserHomeDir = func() (string, error) { return "", errors.New("no home") }
+	if code := runIntercept([]string{"--yes"}, &bytes.Buffer{}); code != 1 {
+		t.Fatalf("home-dir failure must return 1, got %d", code)
+	}
+	if idx(log, "trust-install") != -1 {
+		t.Fatalf("must not arm when home is unresolved: %v", log)
+	}
+}
+
+// --uninstall with no CA on disk must NOT mint one and must exit 0 (nothing to untrust).
+func TestIntercept_UninstallNoCADoesNotMint(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	interceptCALoad = func(string) (*ca.CA, bool, error) { return nil, false, nil }
+	interceptCALoadOrCreate = func(string) (*ca.CA, error) {
+		t.Fatal("--uninstall must never mint a CA")
+		return nil, nil
+	}
+	if code := runIntercept([]string{"--uninstall"}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("uninstall with no CA must return 0, got %d", code)
+	}
+	if idx(log, "trust-uninstall") != -1 {
+		t.Fatalf("no CA → nothing to untrust: %v", log)
+	}
+}
+
+// --uninstall stays idempotent when trust removal reports an error (cert already gone) — exit 0.
+func TestIntercept_UninstallToleratesRemovalError(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	interceptUninstallTrust = func([]byte) error { return errors.New("cert not found") }
+	if code := runIntercept([]string{"--uninstall"}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("uninstall must tolerate a removal error (idempotent), got %d", code)
 	}
 }
 
