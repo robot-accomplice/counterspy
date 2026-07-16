@@ -66,6 +66,8 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "feedback":
 		return runFeedback(args[1:], stdout)
+	case "intercept":
+		return runIntercept(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		fmt.Fprintln(stdout)
@@ -93,6 +95,12 @@ Commands:
       --json                 print the Exfiltration report as JSON and exit (no live UI)
       --once                 print the Exfiltration report once and exit (no live UI)
   restore <manifest.json>  Undo a quarantine from its manifest
+  intercept                Decrypt outbound TLS through a local proxy (installs a trusted CA + pf
+                           redirect; reverts on exit). Requires sudo. View flows via console.
+      --stream[=sock]        publish live flows to a unix socket (the default output)
+      --log[=path]           publish flows to a rotating 0600 JSONL log
+      --uninstall            revert the CA trust + pf redirect and exit
+      --yes                  skip the interactive consent prompt
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)
