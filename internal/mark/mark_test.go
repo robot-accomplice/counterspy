@@ -92,3 +92,33 @@ func TestPortEnc(t *testing.T) {
 		t.Errorf("EncUnknown must render nothing, got %q %v", r, comb)
 	}
 }
+
+// TestGlyphVocabularyIsUnique is the systemic guard for the whole point of this package: it is the
+// SINGLE source of the glyph vocabulary, so no two meanings may share a glyph. A collision is not
+// cosmetic — a reader decodes a glyph by its legend entry, so a duplicate silently tells them the wrong
+// thing. This test exists because the Intercept view first shipped ⊘ for "pinned" while ⊘ already meant
+// "revoked certificate" — two cert-related meanings on one mark, in a view about certificates.
+func TestGlyphVocabularyIsUnique(t *testing.T) {
+	seen := map[rune]string{}
+	for _, r := range Legend() {
+		if prev, dup := seen[r.Glyph]; dup {
+			t.Fatalf("glyph %q means both %q and %q — the vocabulary must be unambiguous", r.Glyph, prev, r.Meaning)
+		}
+		seen[r.Glyph] = r.Meaning
+	}
+}
+
+// Every glyph the intercept axis emits must be IN the legend — an unregistered glyph is undecodable.
+func TestInterceptGlyphsAreInTheLegend(t *testing.T) {
+	want := map[rune]bool{GlyphDecrypted: false, GlyphPinned: false, GlyphOpaque: false, GlyphFlowError: false}
+	for _, r := range Legend() {
+		if _, ok := want[r.Glyph]; ok {
+			want[r.Glyph] = true
+		}
+	}
+	for g, found := range want {
+		if !found {
+			t.Fatalf("intercept glyph %q is not in the legend", g)
+		}
+	}
+}

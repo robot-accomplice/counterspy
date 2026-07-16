@@ -59,6 +59,20 @@ const (
 	GlyphCleartext = '□'
 )
 
+// Intercept visibility (Phase 2) — an APERTURE that closes: how much of a decrypted-proxy flow we could
+// actually read. This is a different question from GlyphEncrypted/GlyphCleartext (which is a
+// port heuristic about whether a flow is TLS at all); this axis reports what interception achieved.
+//
+// Only GlyphDecrypted may read as success — the rest say WHY there is no content, and must never look
+// like we saw something we didn't. Note ⊘ is NOT reused here: it already means "revoked certificate"
+// (GlyphRevoked), and a pinned flow is not a revoked one.
+const (
+	GlyphDecrypted = '◉' // open: TLS terminated, plaintext captured
+	GlyphPinned    = '⦸' // barred: the app rejected our leaf (cert pinning) — bypassed, not decrypted
+	GlyphOpaque    = '◌' // empty: not interceptable (not TLS we could terminate)
+	GlyphFlowError = '⨯' // broken: a capture/relay error; the connection was not tampered with
+)
+
 // EncKind is the encryption classification of a flow.
 type EncKind int
 
@@ -266,6 +280,10 @@ func Legend() []LegendRow {
 		{GlyphVestigial, "liveness", "dormant (disabled or target missing — cannot execute)", "dormant"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
 		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
+		{GlyphDecrypted, "intercept", "decrypted (plaintext captured)", "decrypted"},
+		{GlyphPinned, "intercept", "pinned (app rejected our leaf — bypassed, not decrypted)", "pinned"},
+		{GlyphOpaque, "intercept", "opaque (not interceptable)", "opaque"},
+		{GlyphFlowError, "intercept", "capture/relay error (traffic not tampered with)", "error"},
 	}
 }
 

@@ -129,6 +129,10 @@ from the code, so it always matches what the tool emits:
 | † | liveness | dormant (disabled or target missing — cannot execute) |
 | ↔ | liveness | live network socket |
 | ▣ | encryption | TLS-encrypted flow (□ = cleartext) |
+| ◉ | intercept | decrypted (plaintext captured) |
+| ⦸ | intercept | pinned (app rejected our leaf — bypassed, not decrypted) |
+| ◌ | intercept | opaque (not interceptable) |
+| ⨯ | intercept | capture/relay error (traffic not tampered with) |
 <!-- END LEGEND -->
 
 ---
