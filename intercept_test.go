@@ -291,20 +291,38 @@ func TestUsage_ListsInterceptAndApprovedFlagsOnly(t *testing.T) {
 	}
 }
 
-// The --intercept viewer streams flows from the socket seam and renders a decrypted flow's masked body.
+// liveSock creates a REAL unix socket at a SHORT path — the viewer now Lstats the path to dispatch, and
+// macOS caps sun_path at ~104B so t.TempDir()'s long name can't be used (T-19).
+func liveSock(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "cs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "s.sock")
+	l, err := net.Listen("unix", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close(); os.RemoveAll(dir) })
+	return p
+}
+
+// The --intercept viewer streams flows from a live socket and renders a decrypted flow's masked body.
 func TestInterceptView_RendersDecryptedFlow(t *testing.T) {
 	origRead := interceptReadSocket
 	t.Cleanup(func() { interceptReadSocket = origRead })
+	sock := liveSock(t)
 	interceptReadSocket = func(path string, fn func(model.InterceptedFlow)) error {
-		if path != interceptSocketPath {
-			t.Fatalf("default path expected, got %q", path)
+		if path != sock {
+			t.Fatalf("socket path expected %q, got %q", sock, path)
 		}
 		fn(model.InterceptedFlow{At: "T", DestName: "api.example.com", Status: model.FlowDecrypted,
 			SentText: "GET /v1 HTTP/1.1\nAuthorization: ***", RecvText: "HTTP/1.1 200 OK", SentBytes: 5, RecvBytes: 9})
 		return nil
 	}
 	var b bytes.Buffer
-	if code := runInterceptView("", &b); code != 0 {
+	if code := runInterceptView(sock, &b); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
 	out := b.String()
@@ -327,13 +345,19 @@ func TestInterceptView_NonDecryptedShowsNoContent(t *testing.T) {
 	}
 }
 
-// A socket that never opens surfaces the error and exits non-zero.
+// A LIVE socket whose stream then errors surfaces it and exits non-zero. Must use a real socket: a
+// nonexistent path now short-circuits with a not-found message, which would pass this test for the
+// wrong reason (never reaching the stream at all).
 func TestInterceptView_StreamErrorNonZero(t *testing.T) {
 	origRead := interceptReadSocket
 	t.Cleanup(func() { interceptReadSocket = origRead })
-	interceptReadSocket = func(string, func(model.InterceptedFlow)) error { return errors.New("no such socket") }
-	if code := runInterceptView("/tmp/nope.sock", &bytes.Buffer{}); code != 1 {
-		t.Fatalf("stream error must return 1, got %d", code)
+	reached := false
+	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
+		reached = true
+		return errors.New("stream broke")
+	}
+	if code := runInterceptView(liveSock(t), &bytes.Buffer{}); code != 1 || !reached {
+		t.Fatalf("stream error must return 1 via the stream; code=%d reached=%v", code, reached)
 	}
 }
 
@@ -430,20 +454,42 @@ func TestInterceptView_RegularFileReadsLog(t *testing.T) {
 	}
 }
 
-// A nonexistent path stays on the socket path, so the common case reports the dial error.
-func TestInterceptView_MissingPathUsesSocket(t *testing.T) {
+// A path that is neither socket nor log is reported PLAINLY — never as a bogus "dial unix" against an
+// obvious .jsonl (the confusing error a real run produced) — and a bare --intercept names the default
+// socket so "is the daemon running?" reads correctly.
+func TestInterceptView_MissingPathReportsPlainly(t *testing.T) {
 	origLog, origSock := interceptReadLog, interceptReadSocket
 	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
 	interceptReadLog = func(string, func(model.InterceptedFlow)) error {
 		t.Fatal("a missing path must not be read as a log")
 		return nil
 	}
-	dialed := false
 	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
-		dialed = true
-		return errors.New("no such socket")
+		t.Fatal("a missing path must not be dialed as a socket")
+		return nil
 	}
-	if code := runInterceptView("/tmp/definitely-not-here.sock", &bytes.Buffer{}); code != 1 || !dialed {
-		t.Fatalf("expected a socket dial error; code=%d dialed=%v", code, dialed)
+	var b bytes.Buffer
+	if code := runInterceptView("/tmp/definitely-not-here.jsonl", &b); code != 1 {
+		t.Fatalf("expected 1, got %d", code)
+	}
+	if !strings.Contains(b.String(), "no intercept socket or log at") || strings.Contains(b.String(), "dial unix") {
+		t.Fatalf("expected a plain not-found message, got:\n%s", b.String())
+	}
+	var d bytes.Buffer
+	runInterceptView("", &d)
+	if !strings.Contains(d.String(), interceptSocketPath) {
+		t.Fatalf("bare --intercept must name the default socket:\n%s", d.String())
+	}
+}
+
+// An unexpanded tilde (zsh does not expand ~ after `=`) is called out specifically, rather than left to
+// read as a plain "not found" — the exact trap a real `--intercept=~/…` run hit.
+func TestInterceptView_UnexpandedTildeHint(t *testing.T) {
+	var b bytes.Buffer
+	if code := runInterceptView("~/.counterspy/flows.jsonl", &b); code != 1 {
+		t.Fatalf("expected 1, got %d", code)
+	}
+	if !strings.Contains(b.String(), "did not expand") {
+		t.Fatalf("expected a tilde hint, got:\n%s", b.String())
 	}
 }

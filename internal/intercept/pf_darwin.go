@@ -26,16 +26,25 @@ import (
 // from the repo root against a FRESH build (counterspy is not installed on PATH by
 // default, and `sudo` would not resolve it there anyway; use the ./ path):
 //
-//	go build -o counterspy .            # Phase 2 is not in any older binary
-//	sudo ./counterspy intercept         # consent, install trust + rdr, run the proxy
-//	# in a SECOND shell, as your normal user (the daemon hands it the socket):
+// NOTE: keep every line below free of trailing `# comments` — zsh (the macOS default
+// shell) has interactive_comments OFF, so a pasted `#` arrives as an ARGUMENT, not a
+// comment. Likewise `~` is not expanded after `=`; use "$HOME".
+//
+//	Shell 1 — build fresh (Phase 2 is in no older binary) and arm:
+//	go build -o counterspy .
+//	sudo ./counterspy intercept
+//
+//	Shell 2 — as your NORMAL user (the daemon chowns the socket to you):
 //	./counterspy console --intercept
-//	# in a THIRD shell:
-//	curl https://example.com/           # should appear, decrypted, in the console
-//	# Ctrl-C the daemon → verify teardown restored pf:
-//	sudo pfctl -a counterspy -s nat     # empty
-//	sudo pfctl -sr ; sudo pfctl -sn     # user's rules back, no counterspy ref
-//	sudo pfctl -s info                  # ref count back down
+//
+//	Shell 3 — generate traffic; it should appear decrypted in shell 2:
+//	curl https://example.com/
+//
+//	Then Ctrl-C the daemon and verify teardown restored pf (anchor empty, your
+//	rules back with no counterspy ref, ref count down):
+//	sudo pfctl -a counterspy -s nat
+//	sudo pfctl -sr ; sudo pfctl -sn
+//	sudo pfctl -s info
 //
 // THINGS THE SMOKE TEST MUST RESOLVE (not provable statically):
 //  1. LOCAL-OUTBOUND direction. macOS pf `rdr` translates packets arriving INBOUND

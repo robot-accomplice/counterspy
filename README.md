@@ -195,11 +195,30 @@ terminates each connection's TLS with a per-SNI leaf, **re-dials the real server
 relays every byte **unmodified**, and captures the decrypted plaintext — decoded and secret-masked —
 for viewing. Nothing in the traffic is altered or blocked (that's a later phase); this only *reveals*.
 
+Arm it (consent prompt, then a live socket — the default output):
+
 ```sh
-sudo counterspy intercept                 # consent prompt, then a live socket (the default output)
-sudo counterspy intercept --log           # also persist to a rotating 0600 JSONL log
-counterspy console --intercept            # in another shell: watch the decrypted flows live
-sudo counterspy intercept --uninstall     # revert the CA trust + redirect (also happens on exit)
+sudo counterspy intercept
+```
+
+Watch the decrypted flows, in another shell, as your normal user:
+
+```sh
+counterspy console --intercept
+```
+
+Also persist to a rotating 0600 JSONL log, and read it back (the log is root-owned, so viewing it takes
+`sudo`; `$HOME` rather than `~`, which your shell won't expand after an `=`):
+
+```sh
+sudo counterspy intercept --log
+sudo counterspy console --intercept="$HOME/.counterspy/flows.jsonl"
+```
+
+Revert the CA trust + redirect (this also happens automatically on exit):
+
+```sh
+sudo counterspy intercept --uninstall
 ```
 
 - **Consented, per launch** — a `y/N` prompt spells out exactly what arming does (default No; `--yes`

@@ -327,10 +327,22 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 //
 // It dispatches on what `path` IS, so one flag serves both daemon outputs: a unix SOCKET streams live
 // until it closes or Ctrl-C; a regular FILE reads the rotating --log's existing content once and exits.
-// A missing path is treated as the live socket, so the common case reports the dial error.
+// A path that doesn't exist at all is reported plainly — dialing it as a socket would emit a nonsense
+// "dial unix …/flows.jsonl: connect" for what is obviously a log path.
 func runInterceptView(path string, stdout io.Writer) int {
 	if path == "" {
 		path = interceptSocketPath
+	}
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		fmt.Fprintln(stdout, "console: no intercept socket or log at", report.Clean(path))
+		// The shell does NOT expand a tilde after `=` (only a bare ~/path at word start), so
+		// `--intercept=~/x` arrives here literally — say so rather than let it read as "not found".
+		if strings.HasPrefix(path, "~") {
+			fmt.Fprintln(stdout, dim("  the shell did not expand '~' in --intercept=~/… — use $HOME/… or a full path."))
+		} else {
+			fmt.Fprintln(stdout, dim("  is `sudo counterspy intercept` running?"))
+		}
+		return 1
 	}
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSocket == 0 {
 		fmt.Fprintln(stdout, dim("counterspy — intercepted flows from the log "+path))
