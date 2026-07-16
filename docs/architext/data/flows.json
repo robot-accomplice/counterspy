@@ -284,9 +284,9 @@
     },
     {
       "id": "intercept",
-      "name": "TLS intercept (arm \u2192 redirect \u2192 decrypt \u2192 publish \u2192 console \u2192 disarm)",
-      "status": "partial",
-      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA + pf rdr redirect, terminate each redirected :443 connection with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into an InterceptedFlow, and stream it to the console \u2014 all reverted on exit. The runtime pf/keychain edge is UNVERIFIED pending a root smoke test.",
+      "name": "TLS intercept (arm \u2192 system proxy \u2192 CONNECT \u2192 decrypt \u2192 publish \u2192 console \u2192 disarm)",
+      "status": "implemented",
+      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA, register as the system HTTPS proxy, terminate each CONNECT tunnel with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into an InterceptedFlow, and stream it to the console's Intercepted TUI \u2014 all reverted on exit. Verified end-to-end on macOS 2026-07-16.",
       "trigger": "operator runs `sudo counterspy intercept` and consents",
       "actors": [
         "operator"
@@ -298,7 +298,7 @@
           "to": "counterspy-cli",
           "action": "intercept + consent",
           "kind": "start",
-          "summary": "Run `intercept`; confirm the trusted-CA install + TLS redirect (y/N, default No).",
+          "summary": "Run `intercept`; confirm the trusted-CA install + system-proxy change (y/N, default No).",
           "data": []
         },
         {
@@ -307,25 +307,25 @@
           "to": "mod-intercept",
           "action": "arm",
           "kind": "process",
-          "summary": "Load-or-create the CA; install trust, THEN the pf redirect (teardown registered first so any interrupt still disarms).",
+          "summary": "Load-or-create the CA; install trust, THEN register the system proxy (teardown registered first so any interrupt still disarms).",
           "data": []
         },
         {
           "id": "s3",
           "from": "mod-intercept",
           "to": "macos-tools",
-          "action": "installTrust + rdr",
+          "action": "installTrust + setsecurewebproxy",
           "kind": "persistence",
-          "summary": "Add the CA as a System-keychain trusted root (security) and a pf rdr rule (pfctl) redirecting :443 to the local proxy.",
+          "summary": "Add the CA as a System-keychain trusted root (security) and point each network service's HTTPS proxy at 127.0.0.1 (networksetup), capturing each PRIOR setting.",
           "data": []
         },
         {
           "id": "s4",
           "from": "macos-tools",
           "to": "mod-intercept",
-          "action": "redirected :443",
+          "action": "CONNECT host:443",
           "kind": "process",
-          "summary": "A redirected connection arrives; recover its pre-redirect destination via DIOCNATLOOK on /dev/pf.",
+          "summary": "A proxy-honoring app opens a CONNECT tunnel, NAMING its destination \u2014 authoritative, replacing the disproved pf origdest lookup.",
           "data": []
         },
         {
@@ -334,7 +334,7 @@
           "to": "mod-model",
           "action": "decode + mask",
           "kind": "process",
-          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the verified upstream, relay unmodified, and DecodeCleartext + Redact the captured plaintext into an InterceptedFlow.",
+          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the upstream verified against the CONNECT authority, relay unmodified, and DecodeCleartext + Redact the captured plaintext into an InterceptedFlow.",
           "data": [
             "decrypted-flow"
           ]
@@ -345,7 +345,7 @@
           "to": "counterspy-cli",
           "action": "publish",
           "kind": "persistence",
-          "summary": "Publish the masked flow to the live unix socket and/or the rotating 0600 log.",
+          "summary": "Publish the masked flow to the live unix socket (chowned to the invoking user) and/or the rotating 0600 log.",
           "data": [
             "decrypted-flow"
           ]
@@ -356,7 +356,7 @@
           "to": "counterspy-cli",
           "action": "console --intercept",
           "kind": "process",
-          "summary": "View the live decrypted flows.",
+          "summary": "Open the Intercepted TUI as the ordinary user.",
           "data": []
         },
         {
@@ -366,7 +366,7 @@
           "action": "render flows",
           "kind": "return",
           "returnOf": "s7",
-          "summary": "Print each masked flow (decrypted content only for 'decrypted' status; pinned/opaque/error carry none).",
+          "summary": "Time-ordered master-detail; decrypted content only for 'decrypted' status \u2014 pinned/opaque/error explain why there is none.",
           "data": [
             "decrypted-flow"
           ]
@@ -377,32 +377,33 @@
           "to": "counterspy-cli",
           "action": "Ctrl-C / --uninstall",
           "kind": "stop",
-          "summary": "Teardown reverts the pf redirect then the CA trust (reverse order), exactly once, on exit/panic/signal.",
+          "summary": "Teardown restores each service's prior proxy setting then removes the CA trust (reverse order), exactly once, on exit/panic/signal.",
           "data": []
         }
       ],
       "guarantees": [
-        "Read-only mirror: relayed bytes are never modified; upstream verified against system roots",
+        "Read-only mirror: relayed bytes are never modified; upstream verified against the CONNECT authority",
         "Secrets Redact-masked before any flow is published; only 'decrypted' flows carry plaintext",
-        "Arm is always reversible: trust + redirect reverted on exit, panic, and signal; --uninstall self-heals"
+        "Arm is always reversible: proxy + trust reverted on exit, panic, and signal; --uninstall self-heals"
       ],
       "failureBehavior": [
         "A cert-pinned client that rejects the leaf is shown honestly as 'pinned' (bypassed, not decrypted)",
+        "A connection whose CONNECT cannot be read publishes a FlowError \u2014 never dropped silently",
         "Any arming failure rolls back what was installed and fails loud; a revert failure is reported, never silent"
       ],
       "observability": [
-        "live socket stream (console --intercept)",
+        "Intercepted TUI (console --intercept)",
         "rotating 0600 JSONL log",
         "honest per-flow status (decrypted / pinned / opaque / error)"
       ],
       "verification": [
-        "go test ./internal/intercept/... ./... -race",
-        "root smoke test (pf rdr redirect + keychain trust + clean teardown) \u2014 REQUIRED, unverified in CI"
+        "go test ./internal/intercept/... ./internal/tui/ ./... -race",
+        "root smoke test 2026-07-16: live decrypt of system traffic; proxy + trust restored on exit"
       ],
       "knownGaps": [
-        "The runtime pf redirect + DIOCNATLOOK + keychain trust edges are UNVERIFIED pending a root smoke test",
+        "COOPERATIVE: software ignoring the system proxy is not intercepted (needs a NetworkExtension transparent proxy \u2014 later phase)",
         "Redact/block of outbound payloads deferred to Phase 3 (this phase is decrypt/visibility only)",
-        "IPv6 original-destination recovery not yet supported (fails loud on a v6 flow)"
+        "curl does not honor the macOS system proxy (use `curl -x`); browsers/CFNetwork apps do"
       ]
     }
   ]

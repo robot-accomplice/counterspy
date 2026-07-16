@@ -113,15 +113,16 @@
     {
       "id": "dec-tls-intercept",
       "status": "accepted",
-      "title": "Phase 2 gains visibility by consented, read-only TLS interception \u2014 not by weakening or blocking",
-      "context": "Passive egress observation (Phase 1) can name destinations and inspect cleartext, but TLS payloads stay opaque \u2014 the user cannot see WHAT their own machine sends. The user asked to reveal as much of the encrypted traffic as possible, on their own hardware, explicitly accepting invasiveness.",
-      "decision": "Add an opt-in `intercept` daemon that installs a local reversible CA as a trusted root and pf-redirects outbound :443 through a local proxy which terminates the client TLS with a per-SNI leaf, RE-DIALS the real server verified normally, relays byte-for-byte UNMODIFIED, and captures the decrypted plaintext (already Redact-masked) into an InterceptedFlow for the console. It is a read-only mirror: redact/block is explicitly deferred to Phase 3. Arming requires per-launch consent and is always reverted on exit/panic/signal/--uninstall. The pf/keychain edges are darwin+root, compile-guarded, and marked UNVERIFIED pending a root smoke test; the crypto pump + sinks are stdlib and CI-tested over loopback.",
+      "title": "Phase 2 intercepts TLS via a consented CONNECT proxy (pf rdr disproved by smoke test)",
+      "context": "Passive egress observation (Phase 1) names destinations but TLS payloads stay opaque. Phase 2 was approved with a TRANSPARENT pf rdr redirect of :443. A root smoke test disproved that mechanism: pf translates only INBOUND packets, so a maximally permissive rule (rdr pass inet proto tcp from any to any port = 443) logged 27828 Evaluations and 0 Packets against the machine's own outbound curl. It cannot fail to match an EVALUATED v4 SYN to 443, so locally-originated packets are never evaluated at all. Linux has iptables OUTPUT REDIRECT and FreeBSD has divert-to; macOS pf has neither, so no rule tuning could fix it.",
+      "decision": "Intercept via an HTTP CONNECT proxy registered as the macOS system secure-web proxy (networksetup), not a transparent redirect. The client NAMES its destination in CONNECT, which is authoritative (better than the inferred lookup it replaces) and yields the real hostname without SNI \u2014 so pf_darwin.go, pfioc_natlook, DIOCNATLOOK and the anchor machinery were DELETED rather than repaired. Everything downstream (CA, pump, sinks, masking, teardown) was unchanged and is verified. Arming requires per-launch consent and always reverts. Accepted tradeoff: this is COOPERATIVE \u2014 apps honoring the system proxy are seen, evasive software is not; a NetworkExtension transparent proxy is approved as a LATER phase to close that gap. Redact/block stays Phase 3.",
       "consequences": [
-        "The user sees decrypted plaintext of their own outbound TLS (masked), not just destinations",
-        "A trusted MITM root + full-TLS redirect is a large, consented, reversible trust change \u2014 disarmed reliably",
-        "Cert-pinned apps reject the leaf \u2192 shown honestly as 'pinned' (bypassed, not decrypted), never faked",
-        "Interception cannot silently persist: teardown runs on every exit path and --uninstall self-heals",
-        "The runtime pf redirect is UNVERIFIED in CI \u2014 it requires a root smoke test before it can be trusted"
+        "The user sees decrypted plaintext of their own outbound TLS (masked) \u2014 verified live: Proton Mail Sentry telemetry, iTunes commerce endpoints",
+        "Cert-pinned apps reject the leaf and are shown honestly as 'pinned' (bypassed, not decrypted), never faked",
+        "Evasive software that ignores the system proxy is NOT covered \u2014 an honest, documented gap, not a silent one",
+        "The whole pf/ioctl layer is gone: less code, no root-only struct layout to keep in sync with xnu",
+        "Interception cannot silently persist: teardown reverts the system proxy + trust on every exit path",
+        "A NetworkExtension transparent proxy would require an app bundle + entitlement \u2014 a distribution change, scoped as a later phase"
       ],
       "relatedNodes": [
         "mod-intercept",

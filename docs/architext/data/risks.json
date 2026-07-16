@@ -63,17 +63,17 @@
     },
     {
       "id": "risk-intercept-trust",
-      "title": "Intercept installs a trusted MITM root and redirects all outbound TLS",
+      "title": "Intercept installs a trusted MITM root and redirects the system HTTPS proxy",
       "category": "security",
       "severity": "high",
       "status": "open",
-      "summary": "Arming `intercept` adds a local CA as a System-keychain trusted root and pf-redirects :443 through a local proxy \u2014 a machine-wide MITM. If the CA key leaked, or trust/redirect were left installed, TLS on the host could be silently intercepted.",
+      "summary": "Arming `intercept` adds a local CA as a System-keychain trusted root and points every network service's HTTPS proxy at a local decrypt proxy. If the CA key leaked, or trust/proxy were left installed, traffic from proxy-honoring apps could be silently intercepted (and a stale proxy setting would break them).",
       "mitigations": [
         "Per-launch consent (y/N, default No); the CA is single-purpose, TLS-only (-p ssl), clearly named in the keychain",
-        "Reliable teardown: trust + redirect reverted on exit, panic, and SIGINT/TERM/HUP; --uninstall self-heals",
+        "Reliable teardown: proxy + trust reverted on exit, panic, and SIGINT/TERM/HUP; --uninstall self-heals; VERIFIED live 2026-07-16",
+        "Teardown restores each service's PRIOR proxy setting exactly (a user's own Charles/corporate proxy is not clobbered)",
         "CA key stored 0600 under ~/.counterspy; leaf cache bounded; upstream still verified against system roots",
-        "Read-only mirror (no modify/block in Phase 2); secrets masked before any flow is published",
-        "pf/keychain edges marked UNVERIFIED \u2014 a root smoke test must confirm redirect + clean teardown before trust"
+        "Read-only mirror (no modify/block in Phase 2); secrets masked before any flow is published"
       ],
       "relatedNodes": [
         "mod-intercept"

@@ -812,51 +812,54 @@
       "id": "mod-intercept",
       "type": "module",
       "name": "internal/intercept (+ intercept command)",
-      "summary": "Transparent, READ-ONLY TLS-intercepting decrypt proxy (Phase 2). A pf rdr rule redirects outbound TCP:443 to a local proxy that terminates the client TLS with a per-SNI leaf minted by a local reversible CA, re-dials the real server (verified normally against system roots), relays BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext (DecodeCleartext + Redact) into an InterceptedFlow published to a unix socket and/or a rotating 0600 log. Never modifies traffic. The crypto pump + publish sinks are stdlib and CI-tested over loopback; the pf/keychain edges are darwin+root, compile-guarded and marked UNVERIFIED pending a root smoke test.",
+      "summary": "READ-ONLY TLS-intercepting HTTPS proxy (Phase 2). Registers as the macOS system secure-web proxy (networksetup); clients CONNECT and NAME their destination, the proxy terminates their TLS with a per-SNI leaf minted by a local reversible CA, re-dials the real server (verified against the CONNECT authority using system roots), relays BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext (DecodeCleartext + Redact) into an InterceptedFlow published to a unix socket and/or a rotating 0600 log, viewed in the console's Intercepted TUI. Never modifies traffic. Originally used a pf rdr redirect; a root smoke test proved pf translates only INBOUND packets (27828 Evaluations / 0 Packets against local outbound), so the mechanism was replaced and the DIOCNATLOOK ioctl deleted. VERIFIED end-to-end on macOS.",
       "responsibilities": [
         "Mint per-SNI leaves from a local CA; install/uninstall it as a trusted root (consented)",
-        "pf rdr redirect of :443 to the local proxy; recover the original destination via DIOCNATLOOK",
-        "Terminate client TLS, re-dial the verified upstream, relay unmodified, capture + mask plaintext",
-        "Publish InterceptedFlow to a live socket and/or a rotating 0600 log; view via console --intercept",
-        "Arm and ALWAYS reliably disarm \u2014 trust + redirect reverted on exit, panic, or signal"
+        "Register as the system secure-web (HTTPS) proxy; restore each service's PRIOR setting on teardown",
+        "Terminate client TLS on a CONNECT tunnel, re-dial the verified upstream, relay unmodified, capture + mask",
+        "Publish InterceptedFlow to a live socket and/or a rotating 0600 log; render in the Intercepted TUI",
+        "Arm and ALWAYS reliably disarm (proxy + trust reverted on exit, panic, or signal)"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
         "intercept.go",
         "internal/intercept/proxy.go",
+        "internal/intercept/sysproxy_darwin.go",
         "internal/intercept/ca/ca.go",
         "internal/intercept/ca/trust_darwin.go",
         "internal/intercept/ca/persist.go",
-        "internal/intercept/pf_darwin.go",
         "internal/intercept/publish/socket.go",
         "internal/intercept/publish/logfile.go",
-        "internal/intercept/publish/helpers.go"
+        "internal/intercept/publish/helpers.go",
+        "internal/tui/interceptmodel.go",
+        "internal/tui/interceptview.go"
       ],
-      "runtime": "in-process (root daemon; pf + System keychain; requires sudo)",
+      "runtime": "in-process (root daemon; networksetup + System keychain; requires sudo)",
       "interfaces": [
         "intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]",
-        "console --intercept[=sock]",
+        "console --intercept[=path]",
         "Proxy.Serve(l)",
         "CA.LeafFor(host)",
-        "InstallRedirect / OrigDest"
+        "InstallProxy(port)"
       ],
       "dependencies": [
         "mod-model",
         "mod-inspect",
+        "mod-tui",
         "macos-tools"
       ],
       "dataHandled": [
         "decrypted-flow"
       ],
       "security": [
-        "MITM by design: installs a local CA as a trusted root + redirects all outbound TLS \u2014 consented per launch (y/N default No; --yes bypasses), reverted on exit/--uninstall",
-        "Read-only mirror: relayed bytes are NEVER modified; the upstream is verified against system roots",
-        "Secrets masked (Redact) BEFORE any flow leaves the proxy; socket/log content is already masked; the viewer re-Cleans per line",
+        "MITM by design: installs a local CA as a trusted root + points the system HTTPS proxy at localhost \u2014 consented per launch (y/N default No; --yes bypasses), reverted on exit/--uninstall",
+        "Read-only mirror: relayed bytes are NEVER modified; the upstream is verified against the CONNECT authority (the name the CLIENT asked for), not a server-influenced SNI",
+        "Secrets masked (Redact) BEFORE any flow leaves the proxy; the viewer re-Cleans per line at draw",
         "CA key persisted 0600 under ~/.counterspy and reused so trust installs once; leaf cache bounded (SNI is attacker-controlled)",
-        "pf/keychain edges compile-guarded (darwin) + marked UNVERIFIED pending a root smoke test"
+        "COOPERATIVE: software that ignores the system proxy is NOT intercepted \u2014 an honest gap, visible via the Exfiltration monitor's nettop view; closing it needs a NetworkExtension transparent proxy (later phase)"
       ],
       "observability": [
-        "live socket stream (console --intercept)",
+        "Intercepted TUI (console --intercept)",
         "rotating 0600 JSONL log",
         "honest flow status (decrypted / pinned / opaque / error)"
       ],
@@ -870,9 +873,9 @@
         "risk-intercept-trust"
       ],
       "verification": [
-        "go test ./internal/intercept/...",
+        "go test ./internal/intercept/... ./internal/tui/",
         "go test ./... -race",
-        "root smoke test (pf redirect + keychain trust) \u2014 REQUIRED, unverified in CI"
+        "root smoke test 2026-07-16: VERIFIED \u2014 live decrypt of system traffic + clean teardown"
       ]
     }
   ]

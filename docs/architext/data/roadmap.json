@@ -6,11 +6,11 @@
       "kind": "feature",
       "section": "v0.4.0",
       "status": "planned",
-      "summary": "Live tracking of what certified/legitimate apps actually send — moving CounterSpy from 'is this spyware?' to 'this app is trusted, but here's what it's exfiltrating; do you consent?'. A per-process egress observer (destination/volume tracking, consent deltas). v1 (now in development): a live TUI 'egress top' via sudo-CLI observation (nettop + lsof), observe-only. Rationale: the v0.3.0 feedback loop measures false positives among flagged apps; the next risk surface is the apps NOT flagged — notarized/allowlisted software that over-collects. Rhymes with the egress-only invariant: watch egress because egress is where the risk lives."
+      "summary": "Live tracking of what certified/legitimate apps actually send \u2014 moving CounterSpy from 'is this spyware?' to 'this app is trusted, but here's what it's exfiltrating; do you consent?'. A per-process egress observer (destination/volume tracking, consent deltas). v1 (now in development): a live TUI 'egress top' via sudo-CLI observation (nettop + lsof), observe-only. Rationale: the v0.3.0 feedback loop measures false positives among flagged apps; the next risk surface is the apps NOT flagged \u2014 notarized/allowlisted software that over-collects. Rhymes with the egress-only invariant: watch egress because egress is where the risk lives."
     },
     {
       "id": "roadmap-egress-packet-capture",
-      "title": "Phase 1 — Passive reveal: destination names + cleartext extraction",
+      "title": "Phase 1 \u2014 Passive reveal: destination names + cleartext extraction",
       "kind": "feature",
       "section": "v0.6.0",
       "status": "complete",
@@ -18,23 +18,23 @@
     },
     {
       "id": "roadmap-egress-keylog-decrypt",
-      "title": "TLS key-log decryption (SSLKEYLOGFILE) — optional add-on",
+      "title": "TLS key-log decryption (SSLKEYLOGFILE) \u2014 optional add-on",
       "kind": "feature",
       "section": "future",
       "status": "planned",
-      "summary": "Optional, non-invasive complement to the proxy: decrypt flows from apps launched with SSLKEYLOGFILE (browsers/curl/Go tooling) using keys they already export. Demoted from a phase to an add-on because it only reaches apps you launch with the env var — blind to Safari/native apps/already-running daemons — so the transparent proxy (now Phase 2) is the real broad-visibility path. Lower priority; layer onto the proxy's capture if wanted."
+      "summary": "Optional, non-invasive complement to the proxy: decrypt flows from apps launched with SSLKEYLOGFILE (browsers/curl/Go tooling) using keys they already export. Demoted from a phase to an add-on because it only reaches apps you launch with the env var \u2014 blind to Safari/native apps/already-running daemons \u2014 so the transparent proxy (now Phase 2) is the real broad-visibility path. Lower priority; layer onto the proxy's capture if wanted."
     },
     {
       "id": "roadmap-egress-payload-inspection",
-      "title": "Phase 2 — Transparent TLS-intercepting decrypt mirror",
+      "title": "Phase 2 \u2014 Transparent TLS-intercepting decrypt mirror",
       "kind": "feature",
       "section": "v0.7.0",
       "status": "planned",
-      "summary": "Pulled forward from Phase 3 (approved in brainstorming, see docs/superpowers/specs/2026-07-15-phase2-tls-interception-design.md): a consented, transparent, READ-ONLY intercepting proxy (local root CA + pf rdr redirect of TCP:443, original dest via /dev/pf DIOCNATLOOK, crypto/tls terminate+re-dial+relay). Decrypts already-running apps' HTTPS broadly — the 'visibility into all encrypted traffic' goal — and surfaces the plaintext via DecodeCleartext+Redact. Runs as `counterspy intercept` (background daemon, publishes decrypted flows over a live socket and/or a rotating/expiring log chosen at launch); `counterspy console` is a separate viewer. Honest coverage: pinned apps bypassed-not-broken, QUIC/opaque labeled. No traffic modification this cycle."
+      "summary": "Pulled forward from Phase 3 (approved in brainstorming, see docs/superpowers/specs/2026-07-15-phase2-tls-interception-design.md): a consented, transparent, READ-ONLY intercepting proxy (local root CA + pf rdr redirect of TCP:443, original dest via /dev/pf DIOCNATLOOK, crypto/tls terminate+re-dial+relay). Decrypts already-running apps' HTTPS broadly \u2014 the 'visibility into all encrypted traffic' goal \u2014 and surfaces the plaintext via DecodeCleartext+Redact. Runs as `counterspy intercept` (background daemon, publishes decrypted flows over a live socket and/or a rotating/expiring log chosen at launch); `counterspy console` is a separate viewer. Honest coverage: pinned apps bypassed-not-broken, QUIC/opaque labeled. No traffic modification this cycle."
     },
     {
       "id": "roadmap-egress-active-controls",
-      "title": "Phase 3 — Active egress controls: redact + block",
+      "title": "Phase 3 \u2014 Active egress controls: redact + block",
       "kind": "feature",
       "section": "future",
       "status": "planned",
@@ -46,7 +46,7 @@
       "kind": "chore",
       "section": "imminent",
       "status": "planned",
-      "summary": "Add Apple Developer ID codesigning + notarytool notarization to the GoReleaser release pipeline so prebuilt binaries run without any Gatekeeper friction. The v0.4.x release tooling ships UNSIGNED first (curl|sh and Homebrew avoid the quarantine flag; a browser-downloaded tar.gz needs xattr -d com.apple.quarantine); the intent is to wire signing imminently once a Developer ID cert + notarization secrets are in CI. Important for a security tool that runs under sudo — users rightly distrust an unsigned binary. The pipeline is structured so signing is a drop-in step."
+      "summary": "Add Apple Developer ID codesigning + notarytool notarization to the GoReleaser release pipeline so prebuilt binaries run without any Gatekeeper friction. The v0.4.x release tooling ships UNSIGNED first (curl|sh and Homebrew avoid the quarantine flag; a browser-downloaded tar.gz needs xattr -d com.apple.quarantine); the intent is to wire signing imminently once a Developer ID cert + notarization secrets are in CI. Important for a security tool that runs under sudo \u2014 users rightly distrust an unsigned binary. The pipeline is structured so signing is a drop-in step."
     },
     {
       "id": "roadmap-non-interactive-mode",
@@ -54,7 +54,15 @@
       "kind": "feature",
       "section": "future",
       "status": "planned",
-      "summary": "A maintainer-approved --non-interactive flag that runs CounterSpy's monitoring WITHOUT the interactive TUI, directing output to either the console (stdout) or a file with log rollover, a size limit, and expiration/retention. Default mode stays interactive (today's `console`). Rationale: many capabilities — the egress monitor, per-flow inspection, destination names, and the planned decryption/proxy phases — are currently gated behind the interactive console TUI; a headless mode is the mechanism to surface them for background/service execution and durable logging. Generalizes the existing one-shot `console --json`/`--once` non-TTY path into a CONTINUOUS logging run, and will likely require lifting some capabilities out of the TUI-gated code path so they can run headlessly. Per the standing 'no new CLI flags without explicit approval' rule, --non-interactive is maintainer-named and pre-approved for its future phase (not for the current Phase-1 traffic work)."
+      "summary": "A maintainer-approved --non-interactive flag that runs CounterSpy's monitoring WITHOUT the interactive TUI, directing output to either the console (stdout) or a file with log rollover, a size limit, and expiration/retention. Default mode stays interactive (today's `console`). Rationale: many capabilities \u2014 the egress monitor, per-flow inspection, destination names, and the planned decryption/proxy phases \u2014 are currently gated behind the interactive console TUI; a headless mode is the mechanism to surface them for background/service execution and durable logging. Generalizes the existing one-shot `console --json`/`--once` non-TTY path into a CONTINUOUS logging run, and will likely require lifting some capabilities out of the TUI-gated code path so they can run headlessly. Per the standing 'no new CLI flags without explicit approval' rule, --non-interactive is maintainer-named and pre-approved for its future phase (not for the current Phase-1 traffic work)."
+    },
+    {
+      "id": "intercept-netextension",
+      "title": "NetworkExtension transparent proxy for intercept",
+      "kind": "feature",
+      "section": "post-v0.7.0",
+      "status": "planned",
+      "summary": "Phase 2's intercept is a CONNECT proxy registered as the system HTTPS proxy, which is COOPERATIVE: apps on CFNetwork/NSURLSession are seen, but software that deliberately ignores the system proxy is not \u2014 and evasive software is exactly the counter-surveillance target. A NETransparentProxyProvider would intercept it transparently. Cost: a signed .app bundle, the com.apple.developer.networking.networkextension entitlement, Developer Program membership and notarization \u2014 a distribution change for a tool currently shipped as a single Go binary via curl|sh and Homebrew. User-approved sequencing (2026-07-16): ship CONNECT now for real visibility into trusted apps phoning home, scope NE later to close the evasive-software gap. Phase 2 documents the limitation rather than hiding it."
     }
   ]
 }

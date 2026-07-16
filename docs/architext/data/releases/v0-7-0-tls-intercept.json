@@ -2,12 +2,12 @@
   "id": "v0-7-0-tls-intercept",
   "version": "0.7.0",
   "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
-  "status": "in-progress",
-  "posture": "at-risk",
-  "summary": "Phase 2 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS-intercepting proxy. A local reversible CA mints per-SNI leaves; pf rdr redirects :443 to a local proxy that terminates the client TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) into an InterceptedFlow streamed to a unix socket and/or a rotating 0600 log, viewed via `console --intercept`. Arm is always reversibly disarmed (exit/panic/signal/--uninstall). The crypto pump + publish sinks are stdlib and CI-tested over loopback and were swarm-reviewed + remediated across cp-p2a..g; the pf/keychain runtime edges are darwin+root, compile-guarded, and UNVERIFIED pending the maintainer's root smoke test. Redact/block is deferred to Phase 3.",
-  "targetWindow": "feature branch (design/phase2-tls-interception); tag after the root smoke test passes",
+  "status": "complete",
+  "posture": "on-track",
+  "summary": "Phase 2 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror, VERIFIED end-to-end on macOS. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) into an InterceptedFlow streamed to a unix socket and/or a rotating 0600 log, rendered in the console's time-ordered Intercepted TUI. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Redact/block is Phase 3; a NetworkExtension transparent proxy (for software that ignores the system proxy) is a later phase.",
+  "targetWindow": "feature branch verified; ready to cut (feature\u2192develop\u2192main\u2192tag)",
   "lastUpdated": "2026-07-16T00:00:00.000Z",
-  "updateSource": "swarm build of Phase 2 (cp-p2a..cp-p2h), fan-out reviewed",
+  "updateSource": "swarm build cp-p2a..cp-p2j + root smoke test 2026-07-16",
   "scope": {
     "required": [
       {
@@ -27,18 +27,34 @@
       },
       {
         "id": "intercept-command",
-        "title": "intercept daemon + console viewer (consent + reliable teardown)",
+        "title": "intercept daemon + Intercepted TUI (consent + reliable teardown)",
         "kind": "feature",
-        "status": "in-progress",
-        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved flag surface): consent (y/N, --yes bypasses) -> arm trust+redirect with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures; --uninstall is non-minting + idempotent self-heal. `console --intercept[=sock]` live-tails masked flows (honest status; per-line clean + width cap).",
+        "status": "complete",
+        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved surface): consent -> arm trust + system proxy with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures and restoring each service's PRIOR proxy setting; --uninstall is non-minting + idempotent. `console --intercept[=path]` opens the time-ordered Intercepted TUI over the live socket (or tails a --log file); the socket is chowned to the invoking user so a NON-root console can read a root daemon's stream.",
         "owner": "Project maintainers",
         "workstreamId": "phase2",
         "dependsOn": [
           "intercept-core"
         ],
         "evidence": [
-          "cp-p2f/cp-p2g swarm-reviewed + remediated (disarm-before-arm-window, loud+complete teardown, race-safe CA, --uninstall no-mint, untrusted-At render)",
-          "seam-driven unit tests for ordering/teardown/consent/uninstall/viewer"
+          "root smoke test 2026-07-16: live decrypt of real system traffic (Proton Mail Sentry telemetry, iTunes commerce), pinned apps reported honestly, Cookie masked, proxy + trust restored on exit",
+          "cp-p2f/cp-p2g/cp-p2i/cp-p2j swarm-reviewed + remediated",
+          "seam-driven unit tests for ordering/teardown/consent/uninstall/CONNECT/TUI"
+        ]
+      },
+      {
+        "id": "intercept-routing-pivot",
+        "title": "Replace the pf rdr redirect with a CONNECT + system-proxy mechanism",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "The approved transparent pf rdr redirect was disproved in the smoke test: pf translates only INBOUND packets, so a maximally permissive rule logged 27828 Evaluations / 0 Packets against local outbound traffic. Replaced with an HTTP CONNECT proxy registered via networksetup; pf_darwin.go, pfioc_natlook, DIOCNATLOOK and the anchor machinery deleted. Also fixed the silent-drop the test surfaced (an unresolvable connection now publishes FlowError instead of vanishing).",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [],
+        "evidence": [
+          "pfctl -a counterspy -s nat -v: Evaluations 27828 / Packets 0",
+          "cp-p2i",
+          "go test ./... -race"
         ]
       }
     ],
@@ -60,6 +76,14 @@
         "status": "deferred",
         "summary": "OrigDest is IPv4-only; a v6 flow fails loud rather than mis-reporting. Deferred (Rule 16): the AF_INET6 DIOCNATLOOK path + a v6 rdr rule double the unverified ioctl surface, and v4 covers the smoke test.",
         "owner": "Project maintainers"
+      },
+      {
+        "id": "intercept-netextension",
+        "title": "NetworkExtension transparent proxy (cover software that ignores the system proxy)",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "The CONNECT mechanism is COOPERATIVE: proxy-honoring apps are seen, evasive software is not. True transparent interception on macOS needs a NETransparentProxyProvider \u2014 a signed .app bundle, the networkextension entitlement, Developer Program membership and notarization. Deferred (Rule 16): that is a distribution change for a tool currently shipped as a single Go binary via curl|sh and Homebrew, and the cooperative path already covers the stated use case (a trusted app phoning home). User-approved sequencing: CONNECT now, NE later.",
+        "owner": "Project maintainers"
       }
     ]
   },
@@ -68,26 +92,27 @@
       "id": "phase2",
       "name": "Outbound visibility Phase 2 (TLS intercept)",
       "owner": "Project maintainers",
-      "status": "in-progress",
-      "posture": "at-risk",
-      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2h with per-checkpoint fan-out review + remediation. CI-testable core done + green; the root-only pf/keychain edge awaits the maintainer's smoke test.",
-      "progress": 90,
+      "status": "complete",
+      "posture": "on-track",
+      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, then verified by a root smoke test that disproved the approved pf routing and drove the CONNECT pivot.",
+      "progress": 100,
       "itemIds": [
         "intercept-core",
-        "intercept-command"
+        "intercept-command",
+        "intercept-routing-pivot"
       ],
       "evidence": [
         "go test ./... -race PASS; darwin + linux build",
         "architext validate",
-        "pfioc_natlook layout verified against xnu bsd/net/pfvar.h (84 bytes, DIOCNATLOOK 0xc0544417)"
+        "root smoke test 2026-07-16: live decrypt + clean teardown"
       ]
     }
   ],
   "milestones": [
     {
       "id": "smoke-test",
-      "label": "Root smoke test: pf rdr redirect + keychain trust + clean teardown",
-      "status": "in-progress",
+      "label": "Root smoke test: system proxy + CONNECT decrypt + clean teardown (PASSED)",
+      "status": "complete",
       "targetWindow": "maintainer-operated (sudo)",
       "order": 1,
       "itemIds": [
@@ -96,13 +121,14 @@
     },
     {
       "id": "cut-070",
-      "label": "v0.7.0 cut (feature->develop->main->tag) after smoke test passes",
+      "label": "v0.7.0 cut (feature\u2192develop\u2192main\u2192tag)",
       "status": "planned",
       "targetWindow": "main",
       "order": 2,
       "itemIds": [
         "intercept-core",
-        "intercept-command"
+        "intercept-command",
+        "intercept-routing-pivot"
       ]
     }
   ],
@@ -116,21 +142,10 @@
     },
     {
       "id": "gate-smoke",
-      "label": "Root smoke test of the pf redirect + DIOCNATLOOK + keychain trust + teardown (documented in pf_darwin.go header)",
+      "label": "Root smoke test 2026-07-16: live decrypt of system traffic via the system HTTPS proxy; pinned apps honest; secrets masked; proxy + CA trust restored on exit (verified CSSMERR_TP_NOT_TRUSTED)",
       "kind": "test",
-      "status": "in-progress"
+      "status": "complete"
     }
   ],
-  "blockers": [
-    {
-      "id": "blk-smoke-test",
-      "title": "Runtime pf/keychain edge unverified pending a root smoke test",
-      "severity": "high",
-      "status": "open",
-      "summary": "The pf rdr redirect, DIOCNATLOOK orig-dest recovery, and System-keychain trust install/teardown can only run as root against a live pf + keychain, so they are compile-guarded + honestly marked unverified. The end-to-end decrypt path must be exercised by the maintainer (sudo) before v0.7.0 can be cut. Also resolves the documented macOS local-outbound rdr direction/loop questions.",
-      "itemIds": [
-        "intercept-command"
-      ]
-    }
-  ]
+  "blockers": []
 }
