@@ -5,7 +5,11 @@ integration_branch: feat/tls-intercept   # Phase 2 (TLS-intercept) single-writer
 roles:
   coding:      { model: opus,   enabled: true }   # the orchestrator itself, this session
   antagonist:  { model: haiku,  enabled: true }   # spawned as read-only subagent each tick
-  rca:         { model: sonnet, enabled: true }   # spawned only when a confirmed failure exists
+  rca:         { model: sonnet, enabled: true, skill: code-rca }
+                                                  # spawned only when a confirmed failure exists; MUST invoke
+                                                  # the code-rca skill — it enforces the gate the charter alone
+                                                  # can't: reproduce from recorded state + a falsifiable claim
+                                                  # before a cause may be stated (replaces "reproduce mentally").
   audit:       { model: sonnet, enabled: true }   # spawned as read-only subagent each tick
   scribe:      { model: haiku,  enabled: true }   # reconciles docs (local files only)
   conductor:   { model: opus,   enabled: true }   # RECONCILED: under orchestrator+subagents the Conductor
