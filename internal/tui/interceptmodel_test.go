@@ -14,27 +14,56 @@ func pidFlow(at string, pid int, app, dest string) model.InterceptedFlow {
 	return model.InterceptedFlow{At: at, PID: pid, App: app, DestName: dest, Status: model.FlowDecrypted}
 }
 
-// The left axis is PROCESSES, and it only grows when a pid not seen before speaks. Ten flows from one
-// app must not make ten rows — that was the flat-list design's core mistake.
-func TestInterceptModel_ListGrowsOnlyOnNewPID(t *testing.T) {
+// The navigation axis is APPS, and it only grows on a name not seen before. This is THE property that
+// makes it navigable: pids are not stable (every `curl` run is a new one, every Safari helper another),
+// so a pid-keyed list accumulates dead rows and becomes an endless scroll.
+func TestInterceptModel_ListGrowsOnlyOnNewApp(t *testing.T) {
 	m := NewIntercept()
 	for i := 0; i < 10; i++ {
 		m = m.withFlow(pidFlow("2026-07-16T10:00:0"+string(rune('0'+i))+"Z", 73722, "Safari", "a.example"))
 	}
 	if len(m.Apps) != 1 {
-		t.Fatalf("one process must stay one row, got %d", len(m.Apps))
+		t.Fatalf("one app must stay one row, got %d", len(m.Apps))
 	}
 	if len(m.Apps[0].Flows) != 10 {
 		t.Fatalf("its log should hold all 10 flows, got %d", len(m.Apps[0].Flows))
 	}
 	m = m.withFlow(pidFlow("2026-07-16T10:00:11Z", 600, "Mail", "b.example"))
 	if len(m.Apps) != 2 {
-		t.Fatalf("a NEW pid must add a row, got %d", len(m.Apps))
+		t.Fatalf("a NEW app must add a row, got %d", len(m.Apps))
 	}
 }
 
+// 50 curl runs are 50 pids but ONE app: the navigation pane must not grow per pid. This is the defect
+// that made the previous version an endless scroll.
+func TestInterceptModel_ManyPidsOfOneAppCollapse(t *testing.T) {
+	m := NewIntercept()
+	for pid := 1000; pid < 1050; pid++ {
+		m = m.withFlow(pidFlow("2026-07-16T10:00:00Z", pid, "curl", "example.com"))
+	}
+	if len(m.Apps) != 1 {
+		t.Fatalf("50 curl pids must collapse into one row, got %d", len(m.Apps))
+	}
+	if len(m.Apps[0].Flows) != 50 {
+		t.Fatalf("every pid's flow still belongs in the log, got %d", len(m.Apps[0].Flows))
+	}
+	// The pid is not lost — it moves into the log, where it is information rather than navigation.
+	if !strings.Contains(renderLog(m.Apps[0]), "[pid 1000]") {
+		t.Fatalf("the pid must appear on the log line:\n%s", renderLog(m.Apps[0]))
+	}
+}
+
+// renderLog flattens an app's log lines for assertions.
+func renderLog(a appRow) string {
+	var b strings.Builder
+	for _, l := range logLines(a) {
+		b.WriteString(l.text + "\n")
+	}
+	return b.String()
+}
+
 // Rows are first-seen ordered and never re-sorted: a list that reorders under you is unusable for
-// watching one process.
+// watching one app.
 func TestInterceptModel_ProcessOrderIsStable(t *testing.T) {
 	m := NewIntercept()
 	m = m.withFlow(pidFlow("2026-07-16T10:00:01Z", 1, "First", "a"))
@@ -83,50 +112,41 @@ func TestInterceptModel_UnattributedGetsItsOwnRow(t *testing.T) {
 	}
 }
 
-// Attribution can arrive on a later flow; the row adopts it rather than staying anonymous forever.
-func TestInterceptModel_RowAdoptsLateAttribution(t *testing.T) {
+// A flow we could not attribute STAYS in (unattributed), even if the same pid is later identified.
+// Re-homing it would move rows under the reader — the instability this whole design removes — and it
+// would also be a small lie: at capture time we genuinely did not know who sent it.
+func TestInterceptModel_UnattributedIsNotRetroactivelyRehomed(t *testing.T) {
 	m := NewIntercept()
 	m = m.withFlow(model.InterceptedFlow{At: "2026-07-16T10:00:01Z", PID: 7, Status: model.FlowDecrypted})
 	m = m.withFlow(pidFlow("2026-07-16T10:00:02Z", 7, "Safari", "a"))
-	if m.Apps[0].App != "Safari" {
-		t.Fatalf("row should adopt the later attribution, got %q", m.Apps[0].App)
+	if len(m.Apps) != 2 {
+		t.Fatalf("the unattributed flow must stay put, expected 2 rows, got %d", len(m.Apps))
+	}
+	if m.Apps[0].Label() != "(unattributed)" || m.Apps[1].App != "Safari" {
+		t.Fatalf("rows: %q, %q", m.Apps[0].Label(), m.Apps[1].Label())
 	}
 }
 
-// Both axes are bounded: the per-process log AND the process list (short-lived pids accumulate — every
-// `curl` is a new one).
-func TestInterceptModel_BothAxesBounded(t *testing.T) {
+// The log is bounded (flows are the unbounded axis). The APP list needs no eviction — it is bounded by
+// the number of distinct programs that actually talk, which is what makes it a navigation pane.
+func TestInterceptModel_LogIsBounded(t *testing.T) {
 	m := NewIntercept()
 	for i := 0; i < maxAppLog+50; i++ {
 		m = m.withFlow(pidFlow("2026-07-16T10:00:00Z", 1, "Busy", "a"))
 	}
 	if len(m.Apps[0].Flows) > maxAppLog {
-		t.Fatalf("per-process log unbounded: %d", len(m.Apps[0].Flows))
-	}
-	m2 := NewIntercept()
-	for i := 0; i < maxApps+20; i++ {
-		m2 = m2.withFlow(pidFlow("2026-07-16T10:00:00Z", i+1, "p", "a"))
-	}
-	if len(m2.Apps) > maxApps {
-		t.Fatalf("process list unbounded: %d", len(m2.Apps))
-	}
-	if m2.Selected < 0 || m2.Selected >= len(m2.visible()) {
-		t.Fatalf("selection out of range after eviction: %d", m2.Selected)
+		t.Fatalf("per-app log unbounded: %d", len(m.Apps[0].Flows))
 	}
 }
 
-// / finds a process by name or pid; it narrows which process you watch and never drops captured flows.
-func TestInterceptModel_FilterFindsAProcess(t *testing.T) {
+// / finds an app by name; it narrows which app you watch and never drops captured flows.
+func TestInterceptModel_FilterFindsAnApp(t *testing.T) {
 	m := NewIntercept()
 	m = m.withFlow(pidFlow("2026-07-16T10:00:01Z", 73722, "Safari", "a"))
 	m = m.withFlow(pidFlow("2026-07-16T10:00:02Z", 600, "Mail", "b"))
 	m.Filter = "safari"
 	if v := m.visible(); len(v) != 1 || v[0].App != "Safari" {
 		t.Fatalf("name filter failed: %+v", v)
-	}
-	m.Filter = "600"
-	if v := m.visible(); len(v) != 1 || v[0].App != "Mail" {
-		t.Fatalf("pid filter failed: %+v", v)
 	}
 	if len(m.Apps) != 2 {
 		t.Fatal("filtering must be a VIEW — no process may be dropped")
@@ -168,24 +188,46 @@ func TestInterceptModel_EscClearsFilterBeforeQuitting(t *testing.T) {
 	}
 }
 
-// Scrolling back through the log stops the tail; f/G resumes it. A log that yanks you to the bottom
-// while you're reading is unusable.
-func TestInterceptModel_ScrollingStopsTheTail(t *testing.T) {
-	m := NewIntercept().withFlow(pidFlow("2026-07-16T10:00:01Z", 1, "App", "a"))
-	if !m.Follow {
-		t.Fatal("a fresh view should follow")
+// Tailing is a POSITION (Back == 0), not a mode: it starts there, PgUp walks back, PgDn returns, and
+// switching apps returns. There is no follow key to press and no mode to track.
+func TestInterceptModel_TailingIsAPositionNotAMode(t *testing.T) {
+	m := NewIntercept()
+	for i := 0; i < 30; i++ {
+		m = m.withFlow(pidFlow("2026-07-16T10:00:00Z", 1, "App", "a"))
+	}
+	if m.Back != 0 {
+		t.Fatal("a fresh log starts at the newest line")
 	}
 	m, _ = interceptUpdate(m, tcell.KeyPgUp, 0)
-	if m.Follow {
-		t.Fatal("scrolling back must stop the tail")
+	if m.Back == 0 {
+		t.Fatal("PgUp must walk back through the log")
 	}
-	m, _ = interceptUpdate(m, tcell.KeyRune, 'f')
-	if !m.Follow {
-		t.Fatal("f must resume the tail")
+	m, _ = interceptUpdate(m, tcell.KeyPgDn, 0)
+	if m.Back != 0 {
+		t.Fatalf("PgDn back to the newest must resume tailing implicitly, Back=%d", m.Back)
 	}
-	m, _ = interceptUpdate(m, tcell.KeyRune, 'g')
-	if m.Follow {
-		t.Fatal("g (oldest) must stop the tail")
+	// Switching apps starts that app's log at its newest line.
+	m = m.withFlow(pidFlow("2026-07-16T10:00:31Z", 2, "Other", "b"))
+	m, _ = interceptUpdate(m, tcell.KeyPgUp, 0)
+	m, _ = interceptUpdate(m, tcell.KeyDown, 0)
+	if m.Back != 0 {
+		t.Fatalf("switching app must start at its newest line, Back=%d", m.Back)
+	}
+}
+
+// A reader scrolled back must stay on the SAME content as the log grows underneath them — otherwise a
+// busy app scrolls what you're reading off the screen.
+func TestInterceptModel_ScrollPositionHoldsAsLogGrows(t *testing.T) {
+	m := NewIntercept()
+	for i := 0; i < 30; i++ {
+		m = m.withFlow(pidFlow("2026-07-16T10:00:00Z", 1, "App", "a"))
+	}
+	m, _ = interceptUpdate(m, tcell.KeyPgUp, 0)
+	back, lines := m.Back, len(logLines(m.Apps[0]))
+	m = m.withFlow(pidFlow("2026-07-16T10:00:40Z", 1, "App", "a")) // a new flow lands below
+	grew := len(logLines(m.Apps[0])) - lines
+	if m.Back != back+grew {
+		t.Fatalf("position must hold as the log grows: Back %d -> %d, log grew by %d", back, m.Back, grew)
 	}
 }
 
@@ -204,8 +246,8 @@ func drawIntercept(t *testing.T, m InterceptModel) string {
 	return screenText(s)
 }
 
-// The process list shows the app + pid; the log shows timestamp, destination and content.
-func TestInterceptView_ProcessListAndRunningLog(t *testing.T) {
+// The app list shows the app; the log shows timestamp, destination, content — and the pid.
+func TestInterceptView_AppListAndRunningLog(t *testing.T) {
 	m := NewIntercept().withFlow(model.InterceptedFlow{
 		At: "2026-07-16T14:44:48Z", PID: 600, App: "Mail", DestName: "mail-api.proton.me",
 		Status: model.FlowDecrypted, SentText: "POST /core/v4/reports/sentry HTTP/1.1",
@@ -245,7 +287,7 @@ func TestInterceptView_EmptyStateIsExplicit(t *testing.T) {
 func TestInterceptView_EmptyFilterResultIsExplained(t *testing.T) {
 	m := NewIntercept().withFlow(pidFlow("2026-07-16T10:00:01Z", 1, "Safari", "a"))
 	m.Filter = "nothing-matches-this"
-	if out := drawIntercept(t, m); !strings.Contains(out, "no process matches") {
+	if out := drawIntercept(t, m); !strings.Contains(out, "no app matches") {
 		t.Fatalf("a filtered-empty list must explain itself:\n%s", out)
 	}
 }

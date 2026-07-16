@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -10,24 +11,21 @@ import (
 	"counterspy/internal/model"
 )
 
-// Bounds. Processes are the STABLE axis — a machine runs tens of them, and the list only grows when a
-// pid not seen before sends something. Flows are the fast axis, so each process keeps a bounded running
-// log; a long session must not grow without limit.
-const (
-	maxAppLog = 500 // flows retained per process (oldest dropped)
-	maxApps   = 256 // processes retained (least-recently-active dropped — short-lived pids accumulate)
-)
+// maxAppLog bounds one app's running log. Flows are the fast, unbounded axis; a long session must not
+// grow forever, so the oldest are dropped.
+const maxAppLog = 500
 
-// appRow is one originating process and its running log. Rows are append-only in FIRST-SEEN order and
-// never re-sorted: a list that reorders itself under a reader is unusable for watching one process.
+// appRow is one originating APP and its running log. The row identity is the process NAME, not a pid:
+// pids are not stable (every `curl` run is a new one, every Safari helper is another), so a pid-keyed
+// list accumulates dead entries and becomes an endless scroll — the opposite of a navigation pane. The
+// Exfiltration monitor already collapses "every PID, port, and protocol of an app" into one row; this
+// follows that convention. The pid stays visible per LOG LINE, where it is information, not navigation.
 type appRow struct {
-	PID    int
-	App    string
-	Flows  []model.InterceptedFlow // oldest first, bounded by maxAppLog
-	LastAt string                  // most recent flow's At, for eviction + display
+	App   string                  // "" = unattributed
+	Flows []model.InterceptedFlow // oldest first, bounded by maxAppLog
 }
 
-// Label is the process's display identity.
+// Label is the row's display identity.
 func (a appRow) Label() string {
 	if a.App == "" {
 		return "(unattributed)"
@@ -35,39 +33,40 @@ func (a appRow) Label() string {
 	return a.App
 }
 
-// InterceptModel is the pure state of the Intercepted viewer: processes on the left, the selected
-// process's running log on the right. No I/O touches it (§12); RunIntercepted feeds it flows.
+// InterceptModel is the pure state of the Intercepted viewer: apps on the left (navigation), the
+// selected app's running log on the right. No I/O touches it (§12).
 //
-// Processes are the axis because they are the STABLE one: a machine runs tens of them and the list only
-// grows when a new pid speaks, so it holds still while you read. Flows are the fast, unbounded axis —
-// pinning a cursor to "the newest flow" (an earlier design) means chasing a firehose.
+// There is deliberately NO follow flag. The log tails when Back == 0, which is simply where it starts;
+// scrolling back sets Back > 0 and it holds still; scrolling to the bottom (or switching apps) returns
+// Back to 0 and it tails again. "Following" is a position, not a mode the reader has to track.
 type InterceptModel struct {
 	Apps     []appRow
 	Selected int    // index into visible()
-	Scroll   int    // line offset into the selected process's log
-	Follow   bool   // pin the log to its newest line
-	Filter   string // narrows the PROCESS list (finding one among many), not the log
-	Typing   bool   // the filter prompt owns the keys
+	Back     int    // log lines scrolled back from the newest; 0 == tailing
+	Filter   string // narrows the APP list (finding one among many), not the log
+	Typing   bool   // the find prompt owns the keys
 	Status   string
 }
 
-func NewIntercept() InterceptModel { return InterceptModel{Follow: true} }
+func NewIntercept() InterceptModel { return InterceptModel{} }
 
-// withFlow files f under its originating process, creating that process's row only if the pid is new.
-// This is the only way the left list grows.
+// withFlow files f under its originating app, creating that app's row only if the NAME is new. This is
+// the only way the left list grows — and it grows per app, not per pid, so it stays navigable.
 func (m InterceptModel) withFlow(f model.InterceptedFlow) InterceptModel {
-	i := m.indexOf(f.PID)
+	i := m.indexOf(f.App)
 	if i < 0 {
-		if len(m.Apps) >= maxApps {
-			m = m.evictStalest()
-		}
-		m.Apps = append(m.Apps, appRow{PID: f.PID, App: f.App})
+		m.Apps = append(m.Apps, appRow{App: f.App})
 		i = len(m.Apps) - 1
 	}
-	row := m.Apps[i]
-	if row.App == "" && f.App != "" {
-		row.App = f.App // attribution can arrive on a later flow
+	// If the reader is scrolled back in THIS app's log, keep them on the same content as it grows.
+	before := 0
+	watching := false
+	if sel, ok := m.selected(); ok && sel.App == f.App && m.Back > 0 {
+		watching = true
+		before = len(logLines(sel))
 	}
+
+	row := m.Apps[i]
 	// Insert by At, not arrival: a flow is PUBLISHED when its connection closes but STAMPED when it
 	// opened, so a keep-alive flow lands after shorter ones that started later. The log is a timeline.
 	at := sort.Search(len(row.Flows), func(j int) bool { return row.Flows[j].At > f.At })
@@ -77,44 +76,26 @@ func (m InterceptModel) withFlow(f model.InterceptedFlow) InterceptModel {
 	if over := len(row.Flows) - maxAppLog; over > 0 {
 		row.Flows = row.Flows[over:]
 	}
-	if f.At > row.LastAt {
-		row.LastAt = f.At
-	}
 	m.Apps[i] = row
+
+	if watching {
+		m.Back += len(logLines(row)) - before // the newest moved down; hold the reader's position
+	}
 	m.Selected = clamp(m.Selected, len(m.visible()))
 	return m
 }
 
-func (m InterceptModel) indexOf(pid int) int {
+func (m InterceptModel) indexOf(app string) int {
 	for i, a := range m.Apps {
-		if a.PID == pid {
+		if a.App == app {
 			return i
 		}
 	}
 	return -1
 }
 
-// evictStalest drops the least-recently-active process. Short-lived pids (each `curl` is a new one)
-// would otherwise accumulate forever.
-func (m InterceptModel) evictStalest() InterceptModel {
-	if len(m.Apps) == 0 {
-		return m
-	}
-	worst := 0
-	for i, a := range m.Apps {
-		if a.LastAt < m.Apps[worst].LastAt {
-			worst = i
-		}
-	}
-	m.Apps = append(m.Apps[:worst:worst], m.Apps[worst+1:]...)
-	if m.Selected > worst {
-		m.Selected--
-	}
-	return m
-}
-
-// visible is the processes the Filter admits. Filtering narrows which PROCESS you watch; it never drops
-// captured flows — clearing it restores everything.
+// visible is the apps the Filter admits. Filtering narrows which app you watch; it never drops captured
+// flows — clearing it restores everything.
 func (m InterceptModel) visible() []appRow {
 	if m.Filter == "" {
 		return m.Apps
@@ -122,14 +103,14 @@ func (m InterceptModel) visible() []appRow {
 	q := strings.ToLower(m.Filter)
 	out := make([]appRow, 0, len(m.Apps))
 	for _, a := range m.Apps {
-		if strings.Contains(strings.ToLower(a.Label()), q) || strings.Contains(itoa(a.PID), q) {
+		if strings.Contains(strings.ToLower(a.Label()), q) {
 			out = append(out, a)
 		}
 	}
 	return out
 }
 
-// selected returns the process currently being watched.
+// selected returns the app currently being watched.
 func (m InterceptModel) selected() (appRow, bool) {
 	v := m.visible()
 	if m.Selected < 0 || m.Selected >= len(v) {
@@ -138,10 +119,10 @@ func (m InterceptModel) selected() (appRow, bool) {
 	return v[m.Selected], true
 }
 
-// interceptUpdate is the pure key handler: ↑↓ pick a process, PgUp/PgDn scroll its log, / find a
-// process, f/G follow the newest line, g oldest, q quit.
+// interceptUpdate is the pure key handler: ↑↓ pick an app, PgUp/PgDn walk its log, / find an app,
+// q quit. There is no follow key, because there is no follow mode.
 func interceptUpdate(m InterceptModel, key tcell.Key, r rune) (InterceptModel, bool) {
-	// The filter prompt owns every key while typing — otherwise 'q' in "squirrel" would quit.
+	// The find prompt owns every key while typing — otherwise 'q' in "squirrel" would quit.
 	if m.Typing {
 		switch key {
 		case tcell.KeyEnter:
@@ -173,28 +154,117 @@ func interceptUpdate(m InterceptModel, key tcell.Key, r rune) (InterceptModel, b
 	case r == '/':
 		m.Typing = true
 		return m, false
-	case key == tcell.KeyUp, r == 'k': // switching process shows its log from the newest line
+	case key == tcell.KeyUp, r == 'k': // a different app starts at its newest line
 		m.Selected--
-		m.Scroll, m.Follow = 0, true
+		m.Back = 0
 	case key == tcell.KeyDown, r == 'j':
 		m.Selected++
-		m.Scroll, m.Follow = 0, true
-	case key == tcell.KeyPgDn:
-		m.Scroll += 10
-		m.Follow = false // scrolling back through the log means you want it to hold still
-	case key == tcell.KeyPgUp:
-		m.Scroll -= 10
-		m.Follow = false
-	case r == 'g': // oldest line of this process's log
-		m.Scroll, m.Follow = 0, false
-	case r == 'G', r == 'f': // newest line, and keep up with it
-		m.Scroll, m.Follow = 0, true
+		m.Back = 0
+	case key == tcell.KeyPgUp: // walk back through the log; it stops tailing implicitly
+		m.Back += 10
+	case key == tcell.KeyPgDn: // walk forward; reaching the newest resumes tailing implicitly
+		m.Back -= 10
 	}
 	m.Selected = clamp(m.Selected, len(m.visible()))
-	if m.Scroll < 0 {
-		m.Scroll = 0
+	if m.Back < 0 {
+		m.Back = 0
+	}
+	if sel, ok := m.selected(); ok {
+		if maxBack := len(logLines(sel)); m.Back > maxBack {
+			m.Back = maxBack // can't scroll past the oldest line
+		}
 	}
 	return m, false
+}
+
+// logLine is one rendered line of an app's running log, tagged so the view can colour it without
+// re-deriving meaning at draw time.
+type logLine struct {
+	text string
+	col  tcell.Color
+	bold bool
+}
+
+func (l logLine) style(def tcell.Style) tcell.Style {
+	st := def.Foreground(l.col)
+	if l.bold {
+		st = st.Bold(true)
+	}
+	return st
+}
+
+// logLines flattens an app's flows into its running log: per flow, a header then its content, oldest
+// first so the newest lands at the bottom like a tail. Derived here (not in the view) so the model can
+// hold the reader's scroll position steady as the log grows.
+func logLines(a appRow) []logLine {
+	var out []logLine
+	for _, f := range a.Flows {
+		col, glyph, label := interceptStatusStyle(f.Status)
+		dest := f.DestName
+		if dest == "" {
+			dest = f.DestIP
+		}
+		head := fmt.Sprintf("%s %c %s  ↑%d ↓%d", clockOf(f.At), glyph, dest, f.SentBytes, f.RecvBytes)
+		if f.PID != 0 {
+			head += fmt.Sprintf("  [pid %d]", f.PID) // the pid belongs here, not in the navigation
+		}
+		out = append(out, logLine{text: capLine(head), col: col, bold: true})
+		if f.Status != model.FlowDecrypted {
+			// Say WHY there is no content rather than leaving a bare header the reader must interpret.
+			out = append(out, logLine{text: "   " + capLine(whyNoContent(label)), col: colDim})
+			continue
+		}
+		out = append(out, bodyLines("→", f.SentText)...)
+		out = append(out, bodyLines("←", f.RecvText)...)
+	}
+	return out
+}
+
+// bodyLines renders one direction's masked content, arrow-marking the first line and capping the rest.
+// The raw text is split BEFORE cleaning: report.Clean (via drawText) strips control bytes INCLUDING
+// newlines, so cleaning first would collapse a whole body onto one line.
+func bodyLines(arrow, raw string) []logLine {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	src := strings.Split(raw, "\n")
+	var out []logLine
+	for i, ln := range src {
+		if i >= logFlowLines {
+			out = append(out, logLine{text: fmt.Sprintf("     … (%d more lines)", len(src)-logFlowLines), col: colDim})
+			break
+		}
+		prefix := "     "
+		if i == 0 {
+			prefix = "   " + arrow + " "
+		}
+		out = append(out, logLine{text: capLine(prefix + ln), col: colText})
+	}
+	return out
+}
+
+func capLine(s string) string { return truncate(s, logMaxWidth) }
+
+// whyNoContent states plainly why a flow carries no plaintext — the log must never imply content it
+// does not have.
+func whyNoContent(label string) string {
+	switch label {
+	case "pinned":
+		return "pinned — this app rejected our leaf and was BYPASSED; its traffic reached the real server untouched"
+	case "opaque":
+		return "opaque — not interceptable (the bytes were not TLS we could terminate)"
+	default:
+		return "error — a capture/relay error; the connection was not tampered with"
+	}
+}
+
+// clockOf renders an RFC3339 stamp as HH:MM:SS (the date is noise in a live view).
+func clockOf(at string) string {
+	if i := strings.IndexByte(at, 'T'); i >= 0 && len(at) >= i+9 {
+		return at[i+1 : i+9]
+	}
+	return truncate(at, 8)
 }
 
 // interceptStatusStyle maps a flow status to its colour, glyph and label. Only `decrypted` reads as "we
