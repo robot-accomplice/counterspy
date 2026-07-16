@@ -46,12 +46,12 @@
       "category": "security",
       "severity": "medium",
       "status": "mitigating",
-      "summary": "Inspection reads raw packets from /dev/bpf as root — a privileged capture path over the user's own traffic that briefly holds the very secrets it hunts.",
+      "summary": "Inspection reads raw packets from /dev/bpf as root \u2014 a privileged capture path over the user's own traffic that briefly holds the very secrets it hunts.",
       "mitigations": [
         "Least-privilege: the cBPF filter is scoped to the single selected flow (host + TCP), not the whole interface",
         "Ephemeral: captured bytes live in memory for the view only; never written to disk without an explicit, confirmed export",
         "Local-only: captured content never leaves the machine (the feedback channel is egress-only and carries no payload)",
-        "Never decrypts; TLS ciphertext is not surfaced; readable secrets are masked until reveal (§6)"
+        "Never decrypts; TLS ciphertext is not surfaced; readable secrets are masked until reveal (\u00a76)"
       ],
       "relatedNodes": [
         "mod-inspect",
@@ -59,6 +59,27 @@
       ],
       "relatedFlows": [
         "inspection"
+      ]
+    },
+    {
+      "id": "risk-intercept-trust",
+      "title": "Intercept installs a trusted MITM root and redirects all outbound TLS",
+      "category": "security",
+      "severity": "high",
+      "status": "open",
+      "summary": "Arming `intercept` adds a local CA as a System-keychain trusted root and pf-redirects :443 through a local proxy \u2014 a machine-wide MITM. If the CA key leaked, or trust/redirect were left installed, TLS on the host could be silently intercepted.",
+      "mitigations": [
+        "Per-launch consent (y/N, default No); the CA is single-purpose, TLS-only (-p ssl), clearly named in the keychain",
+        "Reliable teardown: trust + redirect reverted on exit, panic, and SIGINT/TERM/HUP; --uninstall self-heals",
+        "CA key stored 0600 under ~/.counterspy; leaf cache bounded; upstream still verified against system roots",
+        "Read-only mirror (no modify/block in Phase 2); secrets masked before any flow is published",
+        "pf/keychain edges marked UNVERIFIED \u2014 a root smoke test must confirm redirect + clean teardown before trust"
+      ],
+      "relatedNodes": [
+        "mod-intercept"
+      ],
+      "relatedFlows": [
+        "intercept"
       ]
     }
   ]

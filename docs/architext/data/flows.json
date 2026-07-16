@@ -2,7 +2,7 @@
   "flows": [
     {
       "id": "scan-pipeline",
-      "name": "Scan pipeline (collect → score → interpret → report)",
+      "name": "Scan pipeline (collect \u2192 score \u2192 interpret \u2192 report)",
       "status": "implemented",
       "summary": "The read-only scan: fan out four collectors, score+correlate, synthesize recommendations, render a ranked report. Never mutates.",
       "trigger": "operator runs `sudo counterspy scan`",
@@ -109,7 +109,7 @@
     },
     {
       "id": "quarantine",
-      "name": "Consented quarantine (disable → move → manifest)",
+      "name": "Consented quarantine (disable \u2192 move \u2192 manifest)",
       "status": "implemented",
       "summary": "The only mutating flow: on per-item approval, disable the launch item and MOVE its artifacts into a reversible quarantine, recording a manifest.",
       "trigger": "operator answers y to a finding in `scan --interactive`",
@@ -152,7 +152,7 @@
         }
       ],
       "guarantees": [
-        "Never deletes — moves only",
+        "Never deletes \u2014 moves only",
         "Reversible (restore round-trips byte-identically)",
         "Partial failures still write a manifest so nothing is orphaned"
       ],
@@ -171,9 +171,9 @@
     },
     {
       "id": "inspection",
-      "name": "Flow inspection (i → /dev/bpf capture → honest verdict)",
+      "name": "Flow inspection (i \u2192 /dev/bpf capture \u2192 honest verdict)",
       "status": "implemented",
-      "summary": "On demand, capture one selected Exfiltration flow with a native /dev/bpf tap scoped to its 4-tuple and return an honest coverage verdict (readable plaintext, TLS ciphertext, or cleartext binary) — never decrypting, keeping bytes local and ephemeral.",
+      "summary": "On demand, capture one selected Exfiltration flow with a native /dev/bpf tap scoped to its 4-tuple and return an honest coverage verdict (readable plaintext, TLS ciphertext, or cleartext binary) \u2014 never decrypting, keeping bytes local and ephemeral.",
       "trigger": "operator presses `i` on a flow in the Exfiltration view",
       "actors": [
         "operator"
@@ -280,6 +280,129 @@
       "knownGaps": [
         "Destination NAMES (SNI/DNS) not yet threaded into the tree (issue #3)",
         "Full TCP reassembly deferred (T-10)"
+      ]
+    },
+    {
+      "id": "intercept",
+      "name": "TLS intercept (arm \u2192 redirect \u2192 decrypt \u2192 publish \u2192 console \u2192 disarm)",
+      "status": "partial",
+      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA + pf rdr redirect, terminate each redirected :443 connection with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into an InterceptedFlow, and stream it to the console \u2014 all reverted on exit. The runtime pf/keychain edge is UNVERIFIED pending a root smoke test.",
+      "trigger": "operator runs `sudo counterspy intercept` and consents",
+      "actors": [
+        "operator"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "intercept + consent",
+          "kind": "start",
+          "summary": "Run `intercept`; confirm the trusted-CA install + TLS redirect (y/N, default No).",
+          "data": []
+        },
+        {
+          "id": "s2",
+          "from": "counterspy-cli",
+          "to": "mod-intercept",
+          "action": "arm",
+          "kind": "process",
+          "summary": "Load-or-create the CA; install trust, THEN the pf redirect (teardown registered first so any interrupt still disarms).",
+          "data": []
+        },
+        {
+          "id": "s3",
+          "from": "mod-intercept",
+          "to": "macos-tools",
+          "action": "installTrust + rdr",
+          "kind": "persistence",
+          "summary": "Add the CA as a System-keychain trusted root (security) and a pf rdr rule (pfctl) redirecting :443 to the local proxy.",
+          "data": []
+        },
+        {
+          "id": "s4",
+          "from": "macos-tools",
+          "to": "mod-intercept",
+          "action": "redirected :443",
+          "kind": "process",
+          "summary": "A redirected connection arrives; recover its pre-redirect destination via DIOCNATLOOK on /dev/pf.",
+          "data": []
+        },
+        {
+          "id": "s5",
+          "from": "mod-intercept",
+          "to": "mod-model",
+          "action": "decode + mask",
+          "kind": "process",
+          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the verified upstream, relay unmodified, and DecodeCleartext + Redact the captured plaintext into an InterceptedFlow.",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s6",
+          "from": "mod-intercept",
+          "to": "counterspy-cli",
+          "action": "publish",
+          "kind": "persistence",
+          "summary": "Publish the masked flow to the live unix socket and/or the rotating 0600 log.",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s7",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "console --intercept",
+          "kind": "process",
+          "summary": "View the live decrypted flows.",
+          "data": []
+        },
+        {
+          "id": "s8",
+          "from": "counterspy-cli",
+          "to": "operator",
+          "action": "render flows",
+          "kind": "return",
+          "returnOf": "s7",
+          "summary": "Print each masked flow (decrypted content only for 'decrypted' status; pinned/opaque/error carry none).",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s9",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "Ctrl-C / --uninstall",
+          "kind": "stop",
+          "summary": "Teardown reverts the pf redirect then the CA trust (reverse order), exactly once, on exit/panic/signal.",
+          "data": []
+        }
+      ],
+      "guarantees": [
+        "Read-only mirror: relayed bytes are never modified; upstream verified against system roots",
+        "Secrets Redact-masked before any flow is published; only 'decrypted' flows carry plaintext",
+        "Arm is always reversible: trust + redirect reverted on exit, panic, and signal; --uninstall self-heals"
+      ],
+      "failureBehavior": [
+        "A cert-pinned client that rejects the leaf is shown honestly as 'pinned' (bypassed, not decrypted)",
+        "Any arming failure rolls back what was installed and fails loud; a revert failure is reported, never silent"
+      ],
+      "observability": [
+        "live socket stream (console --intercept)",
+        "rotating 0600 JSONL log",
+        "honest per-flow status (decrypted / pinned / opaque / error)"
+      ],
+      "verification": [
+        "go test ./internal/intercept/... ./... -race",
+        "root smoke test (pf rdr redirect + keychain trust + clean teardown) \u2014 REQUIRED, unverified in CI"
+      ],
+      "knownGaps": [
+        "The runtime pf redirect + DIOCNATLOOK + keychain trust edges are UNVERIFIED pending a root smoke test",
+        "Redact/block of outbound payloads deferred to Phase 3 (this phase is decrypt/visibility only)",
+        "IPv6 original-destination recovery not yet supported (fails loud on a v6 flow)"
       ]
     }
   ]

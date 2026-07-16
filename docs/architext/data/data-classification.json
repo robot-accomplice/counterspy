@@ -16,13 +16,13 @@
       "id": "process-list",
       "name": "Process list",
       "sensitivity": "low",
-      "handling": "ps/lsof output — running processes, ancestry, argv, and sockets. Read-only, in-memory."
+      "handling": "ps/lsof output \u2014 running processes, ancestry, argv, and sockets. Read-only, in-memory."
     },
     {
       "id": "code-signatures",
       "name": "Code signatures",
       "sensitivity": "low",
-      "handling": "codesign/spctl output — signing authority and Gatekeeper verdict. Read-only, in-memory."
+      "handling": "codesign/spctl output \u2014 signing authority and Gatekeeper verdict. Read-only, in-memory."
     },
     {
       "id": "tcc-grants",
@@ -34,19 +34,25 @@
       "id": "captured-flow-payload",
       "name": "Captured flow payload",
       "sensitivity": "high",
-      "handling": "Raw bytes read from /dev/bpf for a single user-selected flow. Ephemeral (in-memory, for the inspection view only; never written to disk unless the user runs an explicit export). Never leaves the machine. TLS ciphertext is not surfaced; readable plaintext is shown with secrets masked until reveal (§6). Least-privilege: the BPF filter is scoped to the one flow, not the interface."
+      "handling": "Raw bytes read from /dev/bpf for a single user-selected flow. Ephemeral (in-memory, for the inspection view only; never written to disk unless the user runs an explicit export). Never leaves the machine. TLS ciphertext is not surfaced; readable plaintext is shown with secrets masked until reveal (\u00a76). Least-privilege: the BPF filter is scoped to the one flow, not the interface."
     },
     {
       "id": "local-decision",
       "name": "Local triage decisions",
       "sensitivity": "low",
-      "handling": "A user's local 'reviewed / leave it' acks: subject key + a fingerprint of the finding's state + timestamp. Local-only — never transmitted; affects the Findings display (flag/recede) only. Stored under ~/.config/counterspy/ack.json."
+      "handling": "A user's local 'reviewed / leave it' acks: subject key + a fingerprint of the finding's state + timestamp. Local-only \u2014 never transmitted; affects the Findings display (flag/recede) only. Stored under ~/.config/counterspy/ack.json."
     },
     {
       "id": "dns-observations",
       "name": "Passive DNS observations",
       "sensitivity": "low",
       "handling": "IP->hostname pairs parsed from DNS responses seen on the wire, held in an ephemeral in-memory cache for the console session only. Never persisted, never transmitted; used to label egress destinations and as a light-touch concern hint."
+    },
+    {
+      "id": "decrypted-flow",
+      "name": "Decrypted TLS flow",
+      "sensitivity": "high",
+      "handling": "Plaintext of the user's OWN outbound TLS, decrypted by the consented intercept proxy (Phase 2). Decoded + Redact-masked (bearer/cookie/api-key/PEM + credential body fields) BEFORE it leaves the proxy, then published as an InterceptedFlow to a live unix socket and/or a rotating 0600 JSONL log (capped 50MB x5, pruned after 7 days). Captured bytes per direction are bounded; content never leaves the machine. Only a 'decrypted' flow carries plaintext \u2014 pinned/opaque/error flows carry none. Requires an explicit trusted-CA install + pf redirect, reverted on exit."
     }
   ]
 }

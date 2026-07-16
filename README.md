@@ -183,6 +183,38 @@ capture for the tree; observe-only):
   payload), and plaintext is shown masked until you press `v`. Cleartext HTTP is decoded —
   dechunked and gzip/deflate-decompressed — so a compressed body reads as text, not a hexdump.
 
+## Decrypting TLS (`intercept`) — opt-in, consented, read-only
+
+The monitor and inspector can *name* destinations and read cleartext, but TLS payloads stay opaque.
+`counterspy intercept` goes one step further and shows **what** your own machine is sending inside
+TLS — on your own hardware, with your explicit consent, and fully reversible.
+
+It is a **transparent, read-only decrypt mirror**. When armed it installs a local, single-purpose CA
+as a trusted root and uses a `pf` redirect to route outbound `:443` through a local proxy. The proxy
+terminates each connection's TLS with a per-SNI leaf, **re-dials the real server verified normally**,
+relays every byte **unmodified**, and captures the decrypted plaintext — decoded and secret-masked —
+for viewing. Nothing in the traffic is altered or blocked (that's a later phase); this only *reveals*.
+
+```sh
+sudo counterspy intercept                 # consent prompt, then a live socket (the default output)
+sudo counterspy intercept --log           # also persist to a rotating 0600 JSONL log
+counterspy console --intercept            # in another shell: watch the decrypted flows live
+sudo counterspy intercept --uninstall     # revert the CA trust + redirect (also happens on exit)
+```
+
+- **Consented, per launch** — a `y/N` prompt spells out exactly what arming does (default No; `--yes`
+  bypasses for scripted use). Everything is reverted on exit, panic, `Ctrl-C`, or `--uninstall`.
+- **Honest about what it couldn't decrypt** — a cert-pinned app that rejects the leaf is shown as
+  `pinned` (bypassed, not decrypted), non-TLS as `opaque`; only a `decrypted` flow carries plaintext,
+  so the view never implies content it doesn't have.
+- **Secrets masked** — bearer tokens, cookies, API keys, PEM blocks, and credential fields are masked
+  *before* any flow leaves the proxy.
+- **Scope** — this phase is decrypt/visibility only; redacting or blocking outbound payloads is Phase 3.
+
+> ⚠️ Arming installs a machine-wide trusted MITM root and redirects all outbound TLS. It's meant for
+> inspecting **your own** traffic on **your own** machine. The `pf`/keychain path is macOS + root and
+> is still pending a hands-on smoke test — treat it as experimental until then.
+
 ## Safety guarantees
 
 - **Never deletes** — quarantine only moves, into `~/CounterSpyQuarantine/<timestamp>/`.

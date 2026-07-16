@@ -1,0 +1,136 @@
+{
+  "id": "v0-7-0-tls-intercept",
+  "version": "0.7.0",
+  "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
+  "status": "in-progress",
+  "posture": "at-risk",
+  "summary": "Phase 2 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS-intercepting proxy. A local reversible CA mints per-SNI leaves; pf rdr redirects :443 to a local proxy that terminates the client TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) into an InterceptedFlow streamed to a unix socket and/or a rotating 0600 log, viewed via `console --intercept`. Arm is always reversibly disarmed (exit/panic/signal/--uninstall). The crypto pump + publish sinks are stdlib and CI-tested over loopback and were swarm-reviewed + remediated across cp-p2a..g; the pf/keychain runtime edges are darwin+root, compile-guarded, and UNVERIFIED pending the maintainer's root smoke test. Redact/block is deferred to Phase 3.",
+  "targetWindow": "feature branch (design/phase2-tls-interception); tag after the root smoke test passes",
+  "lastUpdated": "2026-07-16T00:00:00.000Z",
+  "updateSource": "swarm build of Phase 2 (cp-p2a..cp-p2h), fan-out reviewed",
+  "scope": {
+    "required": [
+      {
+        "id": "intercept-core",
+        "title": "CA + TLS terminate/re-dial/relay pump + publish sinks",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "internal/intercept: reversible P-256 CA with a bounded, expiry-aware per-SNI leaf cache + 0600 persistence (LoadOrCreate, O_EXCL race-safe); the read-only MITM pump (GetCertificate per SNI, honest handshake classification decrypted/pinned/opaque/error, verified upstream re-dial, idle-timeout relay, bounded capture, DecodeCleartext+Redact before the flow exists); publish sinks (non-blocking socket with reader reaping + drop counter, rotating 0600 JSONL log, bounded/sanitized untrusted-input readers).",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [],
+        "evidence": [
+          "go test ./... -race; coverage ~87%",
+          "GOOS=linux build",
+          "cp-p2a..cp-p2d swarm-reviewed + remediated (conn-leak, socket stall, untrusted-input bounds, body-secret masking)"
+        ]
+      },
+      {
+        "id": "intercept-command",
+        "title": "intercept daemon + console viewer (consent + reliable teardown)",
+        "kind": "feature",
+        "status": "in-progress",
+        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved flag surface): consent (y/N, --yes bypasses) -> arm trust+redirect with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures; --uninstall is non-minting + idempotent self-heal. `console --intercept[=sock]` live-tails masked flows (honest status; per-line clean + width cap).",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [
+          "intercept-core"
+        ],
+        "evidence": [
+          "cp-p2f/cp-p2g swarm-reviewed + remediated (disarm-before-arm-window, loud+complete teardown, race-safe CA, --uninstall no-mint, untrusted-At render)",
+          "seam-driven unit tests for ordering/teardown/consent/uninstall/viewer"
+        ]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "intercept-redact-block",
+        "title": "Redact / block outbound payloads (Phase 3)",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Phase 2 is decrypt/visibility ONLY. Stripping sensitive data from outbound payloads or blocking transmission is deferred to Phase 3 (Rule 16: read-only first establishes the pump + trust model before mutating live traffic, which is higher-risk).",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "intercept-ipv6-origdest",
+        "title": "IPv6 original-destination recovery",
+        "kind": "chore",
+        "status": "deferred",
+        "summary": "OrigDest is IPv4-only; a v6 flow fails loud rather than mis-reporting. Deferred (Rule 16): the AF_INET6 DIOCNATLOOK path + a v6 rdr rule double the unverified ioctl surface, and v4 covers the smoke test.",
+        "owner": "Project maintainers"
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "phase2",
+      "name": "Outbound visibility Phase 2 (TLS intercept)",
+      "owner": "Project maintainers",
+      "status": "in-progress",
+      "posture": "at-risk",
+      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2h with per-checkpoint fan-out review + remediation. CI-testable core done + green; the root-only pf/keychain edge awaits the maintainer's smoke test.",
+      "progress": 90,
+      "itemIds": [
+        "intercept-core",
+        "intercept-command"
+      ],
+      "evidence": [
+        "go test ./... -race PASS; darwin + linux build",
+        "architext validate",
+        "pfioc_natlook layout verified against xnu bsd/net/pfvar.h (84 bytes, DIOCNATLOOK 0xc0544417)"
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "smoke-test",
+      "label": "Root smoke test: pf rdr redirect + keychain trust + clean teardown",
+      "status": "in-progress",
+      "targetWindow": "maintainer-operated (sudo)",
+      "order": 1,
+      "itemIds": [
+        "intercept-command"
+      ]
+    },
+    {
+      "id": "cut-070",
+      "label": "v0.7.0 cut (feature->develop->main->tag) after smoke test passes",
+      "status": "planned",
+      "targetWindow": "main",
+      "order": 2,
+      "itemIds": [
+        "intercept-core",
+        "intercept-command"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "gate-ci",
+      "label": "go test ./... -race + GOOS=linux build + architext validate (green on the feature branch)",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "gate-smoke",
+      "label": "Root smoke test of the pf redirect + DIOCNATLOOK + keychain trust + teardown (documented in pf_darwin.go header)",
+      "kind": "test",
+      "status": "in-progress"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "blk-smoke-test",
+      "title": "Runtime pf/keychain edge unverified pending a root smoke test",
+      "severity": "high",
+      "status": "open",
+      "summary": "The pf rdr redirect, DIOCNATLOOK orig-dest recovery, and System-keychain trust install/teardown can only run as root against a live pf + keychain, so they are compile-guarded + honestly marked unverified. The end-to-end decrypt path must be exercised by the maintainer (sudo) before v0.7.0 can be cut. Also resolves the documented macOS local-outbound rdr direction/loop questions.",
+      "itemIds": [
+        "intercept-command"
+      ]
+    }
+  ]
+}

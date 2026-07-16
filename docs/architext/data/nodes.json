@@ -47,7 +47,7 @@
       "responsibilities": [
         "Detect userland persistence/process/TCC/codesign spyware signals",
         "Recommend, never auto-act",
-        "Never delete — reversible quarantine only"
+        "Never delete \u2014 reversible quarantine only"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -59,14 +59,17 @@
         "scan",
         "scan --json",
         "scan --interactive",
-        "restore"
+        "restore",
+        "intercept",
+        "console --intercept"
       ],
       "dependencies": [
         "macos-tools"
       ],
       "dataHandled": [
         "scan-findings",
-        "quarantine-manifest"
+        "quarantine-manifest",
+        "decrypted-flow"
       ],
       "security": [
         "Runs under sudo",
@@ -80,15 +83,18 @@
       ],
       "relatedFlows": [
         "scan-pipeline",
-        "quarantine"
+        "quarantine",
+        "intercept"
       ],
       "relatedDecisions": [
         "dec-move-not-delete",
-        "dec-deterministic-synthesis"
+        "dec-deterministic-synthesis",
+        "dec-tls-intercept"
       ],
       "knownRisks": [
         "risk-false-positive-volume",
-        "risk-signed-malware"
+        "risk-signed-malware",
+        "risk-intercept-trust"
       ],
       "verification": [
         "go test ./...",
@@ -134,7 +140,7 @@
       "responsibilities": [
         "Parse subcommands/flags",
         "Fan out collectors (fail-loud gaps)",
-        "Run score→interpret→report",
+        "Run score\u2192interpret\u2192report",
         "Drive the consented quarantine loop"
       ],
       "owner": "Project maintainers",
@@ -246,7 +252,7 @@
         "scan-findings"
       ],
       "security": [
-        "Display-only — trust/liveness marks never change verdicts or scoring; Apple-authority check excludes the Developer-ID leaf so it can't be spoofed"
+        "Display-only \u2014 trust/liveness marks never change verdicts or scoring; Apple-authority check excludes the Developer-ID leaf so it can't be spoofed"
       ],
       "observability": [
         "CLI legend footer",
@@ -362,12 +368,12 @@
       "id": "mod-interpret",
       "type": "module",
       "name": "internal/interpret",
-      "summary": "Pure, rule-based synthesizer: turns each Finding into a verdict, category, recommendation (Quarantine/Investigate/Monitor), a liveness run-state (active/armed/dormant), and a coarse concern band (trust×location×behavior) used for coloring/sorting the Findings view.",
+      "summary": "Pure, rule-based synthesizer: turns each Finding into a verdict, category, recommendation (Quarantine/Investigate/Monitor), a liveness run-state (active/armed/dormant), and a coarse concern band (trust\u00d7location\u00d7behavior) used for coloring/sorting the Findings view.",
       "responsibilities": [
         "Assess([]Finding, running) []Assessment",
         "Categorize (keylogger/backdoor/surveillance-capable/...)",
         "Recommend action (dormant remnants capped at Monitor)",
-        "Derive liveness (active/armed/dormant) and concern band (minimal→elevated)"
+        "Derive liveness (active/armed/dormant) and concern band (minimal\u2192elevated)"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -386,7 +392,7 @@
         "local-decision"
       ],
       "security": [
-        "Deterministic — no LLM in the decision path; verdicts are auditable"
+        "Deterministic \u2014 no LLM in the decision path; verdicts are auditable"
       ],
       "observability": [],
       "relatedFlows": [
@@ -428,7 +434,7 @@
         "scan-findings"
       ],
       "security": [
-        "No analysis logic — cannot change verdicts"
+        "No analysis logic \u2014 cannot change verdicts"
       ],
       "observability": [
         "Human report",
@@ -452,7 +458,7 @@
         "Quarantine (refuse allowlisted/protected paths)",
         "Write manifest (undo + RCA trail)",
         "Restore without clobbering",
-        "Per-item undo (RestoreItem) — reverse one manifest item, trim it from the manifest"
+        "Per-item undo (RestoreItem) \u2014 reverse one manifest item, trim it from the manifest"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -500,7 +506,7 @@
       "responsibilities": [
         "Render Findings triage (findings + evidence) and the Exfiltration monitor (tree, zoom, trend)",
         "Navigate/filter/sort; quarantine with confirm; restore; inspect a flow (i); zoom an app (z)",
-        "Stay a thin face — imports only internal/model + internal/mark",
+        "Stay a thin face \u2014 imports only internal/model + internal/mark",
         "Render resolved destination names (name-or-IP) in the tree/zoom/inspect, Clean'd before draw"
       ],
       "owner": "Project maintainers",
@@ -609,9 +615,9 @@
       "id": "mod-ack",
       "type": "module",
       "name": "internal/ack",
-      "summary": "Local, revisitable triage-decision store: records that the user reviewed a finding and chose to 'leave it'. Deliberately separate from internal/feedback — an ack is private and NEVER transmitted; it only affects how the Findings view flags a row. Fingerprints the finding's material state so a later change re-flags it 'reviewed · changed' rather than silently masking new signal.",
+      "summary": "Local, revisitable triage-decision store: records that the user reviewed a finding and chose to 'leave it'. Deliberately separate from internal/feedback \u2014 an ack is private and NEVER transmitted; it only affects how the Findings view flags a row. Fingerprints the finding's material state so a later change re-flags it 'reviewed \u00b7 changed' rather than silently masking new signal.",
       "responsibilities": [
-        "Fingerprint(Assessment) — stable digest of score + evidence shape (Facts excluded)",
+        "Fingerprint(Assessment) \u2014 stable digest of score + evidence shape (Facts excluded)",
         "Persist/clear local ack decisions keyed by Subject.Key()",
         "Atomic write (temp+fsync+rename) under the invoking user's home"
       ],
@@ -650,7 +656,7 @@
       "id": "mod-egress",
       "type": "module",
       "name": "internal/egress",
-      "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability × egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only at the tree level (reads no payloads); on demand, a selected flow can be handed to internal/inspect for a root /dev/bpf capture + honest coverage verdict.",
+      "summary": "Sudo-CLI egress observation: polls nettop + lsof per tick, joins provenance/codesign-trust/TCC-capability from internal/collect, aggregates by application (collapsing pids/ports/protocols), and scores concern + exfiltration-risk (capability \u00d7 egress). Pure given inputs; the exec edge + joins are injectable seams (mockable in CI). Observe-only at the tree level (reads no payloads); on demand, a selected flow can be handed to internal/inspect for a root /dev/bpf capture + honest coverage verdict.",
       "responsibilities": [
         "Parse nettop/lsof; diff cumulative bytes to out-rates; classify cadence",
         "Group by app; score concern; infer exfil risk + candidate categories",
@@ -685,7 +691,7 @@
       ],
       "security": [
         "Observe-only; no blocking, no payload reading",
-        "Exfil is INFERRED from capability × egress, never confirmed content",
+        "Exfil is INFERRED from capability \u00d7 egress, never confirmed content",
         "Exec edge injectable so CI runs without sudo/tools"
       ],
       "observability": [
@@ -705,11 +711,11 @@
       "id": "mod-netname",
       "type": "module",
       "name": "internal/netname",
-      "summary": "Passive DNS name resolution: a long-lived port-53 capture parses observed DNS RESPONSES into a bounded, race-safe IP->hostname cache, so the egress monitor can show the name an app actually resolved instead of a bare IP. Observe-only — issues no queries; a spoofable name is a display + light-touch-concern hint, never a security decision.",
+      "summary": "Passive DNS name resolution: a long-lived port-53 capture parses observed DNS RESPONSES into a bounded, race-safe IP->hostname cache, so the egress monitor can show the name an app actually resolved instead of a bare IP. Observe-only \u2014 issues no queries; a spoofable name is a display + light-touch-concern hint, never a security decision.",
       "responsibilities": [
-        "ParseDNSResponse — tolerant DNS answer parser (A/AAAA attributed to the queried name, CNAME-safe, bounded compression-pointer following)",
-        "Cache — bounded LRU-by-write IP->name map, mutex-guarded (observer writes, sampler reads)",
-        "Observer — drain a packet source, extract UDP/53 payloads, feed the cache; clean start/stop"
+        "ParseDNSResponse \u2014 tolerant DNS answer parser (A/AAAA attributed to the queried name, CNAME-safe, bounded compression-pointer following)",
+        "Cache \u2014 bounded LRU-by-write IP->name map, mutex-guarded (observer writes, sampler reads)",
+        "Observer \u2014 drain a packet source, extract UDP/53 payloads, feed the cache; clean start/stop"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
@@ -732,7 +738,7 @@
       ],
       "security": [
         "Observe-only: issues no DNS queries; cannot be steered",
-        "An injected DNS response can poison a name, ACCEPTED — names are display + light-touch-concern only, never a security decision, and a DNS injector is already on-path"
+        "An injected DNS response can poison a name, ACCEPTED \u2014 names are display + light-touch-concern only, never a security decision, and a DNS injector is already on-path"
       ],
       "observability": [
         "in-memory name cache (ephemeral, per session)"
@@ -752,7 +758,7 @@
       "id": "mod-inspect",
       "type": "module",
       "name": "internal/inspect",
-      "summary": "On-demand per-flow inspection engine. Opens a native /dev/bpf live capture scoped to one selected flow (BIOCSETIF/BIOCSETF filter, IPv4/IPv6 + TCP framing, link-layer strip), correlates both directions, and returns an HONEST coverage verdict: readable plaintext, TLS ciphertext (only with real evidence — SNI/handshake/TLS-port), or cleartext-binary. Reads the user’s OWN traffic locally; never decrypts; captured bytes are ephemeral and never leave the machine. Pure over an injectable PacketSource (CI-testable without root).",
+      "summary": "On-demand per-flow inspection engine. Opens a native /dev/bpf live capture scoped to one selected flow (BIOCSETIF/BIOCSETF filter, IPv4/IPv6 + TCP framing, link-layer strip), correlates both directions, and returns an HONEST coverage verdict: readable plaintext, TLS ciphertext (only with real evidence \u2014 SNI/handshake/TLS-port), or cleartext-binary. Reads the user\u2019s OWN traffic locally; never decrypts; captured bytes are ephemeral and never leave the machine. Pure over an injectable PacketSource (CI-testable without root).",
       "responsibilities": [
         "Capture one flow via native /dev/bpf (root), scoped by a cBPF host+TCP filter",
         "Parse IPv4/IPv6 + TCP framing; correlate outbound/inbound",
@@ -781,9 +787,9 @@
         "captured-flow-payload"
       ],
       "security": [
-        "Root packet capture of the user’s OWN outbound traffic; least-privilege BPF filter scoped to the single flow",
+        "Root packet capture of the user\u2019s OWN outbound traffic; least-privilege BPF filter scoped to the single flow",
         "Never decrypts; TLS ciphertext is not surfaced; captured bytes are ephemeral (memory-only) and never leave the machine",
-        "Secrets in readable plaintext are masked until the user reveals (§6)"
+        "Secrets in readable plaintext are masked until the user reveals (\u00a76)"
       ],
       "observability": [
         "on-screen coverage verdict"
@@ -800,6 +806,73 @@
       "verification": [
         "go test ./internal/inspect/",
         "root smoke test (COUNTERSPY_LIVE_CAPTURE=1)"
+      ]
+    },
+    {
+      "id": "mod-intercept",
+      "type": "module",
+      "name": "internal/intercept (+ intercept command)",
+      "summary": "Transparent, READ-ONLY TLS-intercepting decrypt proxy (Phase 2). A pf rdr rule redirects outbound TCP:443 to a local proxy that terminates the client TLS with a per-SNI leaf minted by a local reversible CA, re-dials the real server (verified normally against system roots), relays BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext (DecodeCleartext + Redact) into an InterceptedFlow published to a unix socket and/or a rotating 0600 log. Never modifies traffic. The crypto pump + publish sinks are stdlib and CI-tested over loopback; the pf/keychain edges are darwin+root, compile-guarded and marked UNVERIFIED pending a root smoke test.",
+      "responsibilities": [
+        "Mint per-SNI leaves from a local CA; install/uninstall it as a trusted root (consented)",
+        "pf rdr redirect of :443 to the local proxy; recover the original destination via DIOCNATLOOK",
+        "Terminate client TLS, re-dial the verified upstream, relay unmodified, capture + mask plaintext",
+        "Publish InterceptedFlow to a live socket and/or a rotating 0600 log; view via console --intercept",
+        "Arm and ALWAYS reliably disarm \u2014 trust + redirect reverted on exit, panic, or signal"
+      ],
+      "owner": "Project maintainers",
+      "sourcePaths": [
+        "intercept.go",
+        "internal/intercept/proxy.go",
+        "internal/intercept/ca/ca.go",
+        "internal/intercept/ca/trust_darwin.go",
+        "internal/intercept/ca/persist.go",
+        "internal/intercept/pf_darwin.go",
+        "internal/intercept/publish/socket.go",
+        "internal/intercept/publish/logfile.go",
+        "internal/intercept/publish/helpers.go"
+      ],
+      "runtime": "in-process (root daemon; pf + System keychain; requires sudo)",
+      "interfaces": [
+        "intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]",
+        "console --intercept[=sock]",
+        "Proxy.Serve(l)",
+        "CA.LeafFor(host)",
+        "InstallRedirect / OrigDest"
+      ],
+      "dependencies": [
+        "mod-model",
+        "mod-inspect",
+        "macos-tools"
+      ],
+      "dataHandled": [
+        "decrypted-flow"
+      ],
+      "security": [
+        "MITM by design: installs a local CA as a trusted root + redirects all outbound TLS \u2014 consented per launch (y/N default No; --yes bypasses), reverted on exit/--uninstall",
+        "Read-only mirror: relayed bytes are NEVER modified; the upstream is verified against system roots",
+        "Secrets masked (Redact) BEFORE any flow leaves the proxy; socket/log content is already masked; the viewer re-Cleans per line",
+        "CA key persisted 0600 under ~/.counterspy and reused so trust installs once; leaf cache bounded (SNI is attacker-controlled)",
+        "pf/keychain edges compile-guarded (darwin) + marked UNVERIFIED pending a root smoke test"
+      ],
+      "observability": [
+        "live socket stream (console --intercept)",
+        "rotating 0600 JSONL log",
+        "honest flow status (decrypted / pinned / opaque / error)"
+      ],
+      "relatedFlows": [
+        "intercept"
+      ],
+      "relatedDecisions": [
+        "dec-tls-intercept"
+      ],
+      "knownRisks": [
+        "risk-intercept-trust"
+      ],
+      "verification": [
+        "go test ./internal/intercept/...",
+        "go test ./... -race",
+        "root smoke test (pf redirect + keychain trust) \u2014 REQUIRED, unverified in CI"
       ]
     }
   ]

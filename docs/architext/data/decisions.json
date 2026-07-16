@@ -4,14 +4,14 @@
       "id": "dec-liveness-scoring",
       "status": "accepted",
       "title": "Liveness is derived once in interpret and feeds both scoring and display",
-      "context": "Run-state was display-only (mark.Classify, 2-state ▸/†) and computed after interpret. A dead persistence remnant (disabled .bak + missing target, the com.ironclad.agent case) therefore scored the same as a live, loaded agent, and the mark layer re-derived a run-state the scorer never saw — a DRY split that could drift.",
-      "decision": "interpret.livenessState derives a 3-state run-state (active ▸ / armed ◐ / dormant †) once, against the live-process set passed into Assess, and stores it on Assessment.Liveness. recommend() caps a dormant subject at Monitor (it cannot execute) unless a tripwire fires; active/armed keep the score-based recommendation (down-weight the dead, never up-weight the live). mark.Classify now only maps that single value to a glyph and adds the socket mark. This reverses the earlier 'liveness never influences scoring' invariant, but only ever to LOWER urgency, so it cannot manufacture a false escalation. Assess itself stays I/O-free — the caller collects running paths — so verdicts remain reproducible from (findings, running).",
+      "context": "Run-state was display-only (mark.Classify, 2-state \u25b8/\u2020) and computed after interpret. A dead persistence remnant (disabled .bak + missing target, the com.ironclad.agent case) therefore scored the same as a live, loaded agent, and the mark layer re-derived a run-state the scorer never saw \u2014 a DRY split that could drift.",
+      "decision": "interpret.livenessState derives a 3-state run-state (active \u25b8 / armed \u25d0 / dormant \u2020) once, against the live-process set passed into Assess, and stores it on Assessment.Liveness. recommend() caps a dormant subject at Monitor (it cannot execute) unless a tripwire fires; active/armed keep the score-based recommendation (down-weight the dead, never up-weight the live). mark.Classify now only maps that single value to a glyph and adds the socket mark. This reverses the earlier 'liveness never influences scoring' invariant, but only ever to LOWER urgency, so it cannot manufacture a false escalation. Assess itself stays I/O-free \u2014 the caller collects running paths \u2014 so verdicts remain reproducible from (findings, running).",
       "consequences": [
         "A dead remnant no longer reads as urgently as a live agent",
-        "Scored and displayed run-state are the same value — cannot disagree",
-        "armed ◐ distinguishes loaded-not-running from dormant in the UI",
+        "Scored and displayed run-state are the same value \u2014 cannot disagree",
+        "armed \u25d0 distinguishes loaded-not-running from dormant in the UI",
         "A --from snapshot carries its scan-time liveness, not a re-derivation against a different machine",
-        "Liveness can only reduce a recommendation, never escalate — no new false-positive surface"
+        "Liveness can only reduce a recommendation, never escalate \u2014 no new false-positive surface"
       ],
       "relatedNodes": [
         "mod-interpret",
@@ -26,7 +26,7 @@
       "status": "accepted",
       "title": "The scoring engine is a pure function",
       "context": "Scoring is the risk center; it must be testable and free of side effects so weights can be tuned with confidence.",
-      "decision": "internal/score is a pure Score([]Evidence) []Finding with no I/O — collectors do all I/O at the edge, so the entire brain is unit-tested from fixtures.",
+      "decision": "internal/score is a pure Score([]Evidence) []Finding with no I/O \u2014 collectors do all I/O at the edge, so the entire brain is unit-tested from fixtures.",
       "consequences": [
         "Zero-risk to run",
         "Fully fixture-testable",
@@ -62,7 +62,7 @@
       "status": "accepted",
       "title": "Verdicts are rule-based, not model-generated",
       "context": "The tool recommends quarantining people's software; its recommendations must be reproducible and auditable.",
-      "decision": "internal/interpret derives verdict/category/recommendation from deterministic rules over the evidence — no LLM in the decision path — so a reviewer (or the ABORT gate) can confirm or refute every label.",
+      "decision": "internal/interpret derives verdict/category/recommendation from deterministic rules over the evidence \u2014 no LLM in the decision path \u2014 so a reviewer (or the ABORT gate) can confirm or refute every label.",
       "consequences": [
         "Reproducible verdicts",
         "Auditable by a release gate",
@@ -97,7 +97,7 @@
       "status": "accepted",
       "title": "Inspection tells the truth about coverage and shows the wire bytes",
       "context": "An inspector that overstates ('encrypted') or hides ('nothing to view') undermines the tool's credibility. A cleartext binary payload once read as 'ENCRYPTED (TLS)' because its bytes looked like ciphertext.",
-      "decision": "'Encrypted (TLS)' requires positive evidence (a ClientHello SNI, a TLS record, or a well-known TLS port), never merely non-printable bytes. Captured bytes are always shown — readable text as text, cleartext-binary as a hexdump — while TLS ciphertext is withheld as noise. This revises the earlier §6 'never render encrypted' rule, which over-hid.",
+      "decision": "'Encrypted (TLS)' requires positive evidence (a ClientHello SNI, a TLS record, or a well-known TLS port), never merely non-printable bytes. Captured bytes are always shown \u2014 readable text as text, cleartext-binary as a hexdump \u2014 while TLS ciphertext is withheld as noise. This revises the earlier \u00a76 'never render encrypted' rule, which over-hid.",
       "consequences": [
         "Verdicts match reality (no false TLS labels)",
         "The actual outbound payload is inspectable, even when binary",
@@ -108,6 +108,27 @@
       ],
       "relatedFlows": [
         "inspection"
+      ]
+    },
+    {
+      "id": "dec-tls-intercept",
+      "status": "accepted",
+      "title": "Phase 2 gains visibility by consented, read-only TLS interception \u2014 not by weakening or blocking",
+      "context": "Passive egress observation (Phase 1) can name destinations and inspect cleartext, but TLS payloads stay opaque \u2014 the user cannot see WHAT their own machine sends. The user asked to reveal as much of the encrypted traffic as possible, on their own hardware, explicitly accepting invasiveness.",
+      "decision": "Add an opt-in `intercept` daemon that installs a local reversible CA as a trusted root and pf-redirects outbound :443 through a local proxy which terminates the client TLS with a per-SNI leaf, RE-DIALS the real server verified normally, relays byte-for-byte UNMODIFIED, and captures the decrypted plaintext (already Redact-masked) into an InterceptedFlow for the console. It is a read-only mirror: redact/block is explicitly deferred to Phase 3. Arming requires per-launch consent and is always reverted on exit/panic/signal/--uninstall. The pf/keychain edges are darwin+root, compile-guarded, and marked UNVERIFIED pending a root smoke test; the crypto pump + sinks are stdlib and CI-tested over loopback.",
+      "consequences": [
+        "The user sees decrypted plaintext of their own outbound TLS (masked), not just destinations",
+        "A trusted MITM root + full-TLS redirect is a large, consented, reversible trust change \u2014 disarmed reliably",
+        "Cert-pinned apps reject the leaf \u2192 shown honestly as 'pinned' (bypassed, not decrypted), never faked",
+        "Interception cannot silently persist: teardown runs on every exit path and --uninstall self-heals",
+        "The runtime pf redirect is UNVERIFIED in CI \u2014 it requires a root smoke test before it can be trusted"
+      ],
+      "relatedNodes": [
+        "mod-intercept",
+        "counterspy-system"
+      ],
+      "relatedFlows": [
+        "intercept"
       ]
     }
   ]
