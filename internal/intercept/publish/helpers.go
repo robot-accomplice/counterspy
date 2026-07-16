@@ -56,6 +56,8 @@ func sanitizeFlow(fl model.InterceptedFlow) model.InterceptedFlow {
 	fl.RecvText = capStr(fl.RecvText, maxFieldLen)
 	fl.DestName = capStr(fl.DestName, 512)
 	fl.SNI = capStr(fl.SNI, 512)
+	fl.At = capStr(fl.At, 64) // a forged producer could set an oversized/garbage timestamp
+	fl.DestIP = capStr(fl.DestIP, 64)
 	return fl
 }
 

@@ -299,14 +299,20 @@ func runInterceptView(path string, stdout io.Writer) int {
 	return 0
 }
 
-// flowMaxLines bounds how many lines of a decrypted body the viewer prints, so a large payload doesn't
-// flood the terminal (the proxy already caps captured bytes; this caps the DISPLAY).
-const flowMaxLines = 6
+// Display bounds for a decrypted body: at most flowMaxLines lines, each at most flowMaxWidth runes, so a
+// large or single-enormous-line payload can't flood the terminal (the proxy caps captured BYTES; these
+// cap the DISPLAY). report.Clean (which strips control bytes INCLUDING newlines) must run PER LINE,
+// after the raw split — cleaning first would delete the newlines and collapse the body into one line,
+// defeating the line cap (Audit cp-p2g).
+const (
+	flowMaxLines = 6
+	flowMaxWidth = 120
+)
 
 // formatFlow renders one flow: a header line (time, destination, status, byte counts) and — only for a
 // decrypted flow — its masked request/response. A pinned/opaque/error flow shows its status and NO
-// content, so the viewer never implies plaintext it doesn't have. report.Clean strips control bytes at
-// render time (defense-in-depth; the proxy already masked secrets).
+// content, so the viewer never implies plaintext it doesn't have. EVERY field that reaches the terminal
+// is report.Clean'd (the socket is untrusted input; even At/Status could carry an escape sequence).
 func formatFlow(fl model.InterceptedFlow) string {
 	name := fl.DestName
 	if name == "" {
@@ -316,27 +322,31 @@ func formatFlow(fl model.InterceptedFlow) string {
 		name = fl.DestIP
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s  %s  ↑%d ↓%d\n", fl.At, report.Clean(name), fl.Status, fl.SentBytes, fl.RecvBytes)
+	fmt.Fprintf(&b, "%s  %s  %s  ↑%d ↓%d\n", report.Clean(fl.At), report.Clean(name), report.Clean(fl.Status), fl.SentBytes, fl.RecvBytes)
 	if fl.Status == model.FlowDecrypted {
-		if t := strings.TrimSpace(fl.SentText); t != "" {
-			b.WriteString(indentFlowBody("→", report.Clean(t)))
-		}
-		if t := strings.TrimSpace(fl.RecvText); t != "" {
-			b.WriteString(indentFlowBody("←", report.Clean(t)))
-		}
+		b.WriteString(renderFlowBody("→", fl.SentText))
+		b.WriteString(renderFlowBody("←", fl.RecvText))
 	}
 	return b.String()
 }
 
-// indentFlowBody indents a decoded body under its header, arrow-marking the first line and capping the
-// number of printed lines.
-func indentFlowBody(arrow, text string) string {
-	lines := strings.Split(text, "\n")
+// renderFlowBody indents a decoded body under its header, splitting on the RAW newlines first, then
+// cleaning + width-capping each line, arrow-marking the first, and capping the line count. Empty → "".
+func renderFlowBody(arrow, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
 	var b strings.Builder
 	for i, ln := range lines {
 		if i >= flowMaxLines {
 			fmt.Fprintf(&b, "     %s\n", dim(fmt.Sprintf("… (%d more lines)", len(lines)-flowMaxLines)))
 			break
+		}
+		ln = report.Clean(ln)
+		if len([]rune(ln)) > flowMaxWidth {
+			ln = string([]rune(ln)[:flowMaxWidth]) + "…"
 		}
 		if i == 0 {
 			fmt.Fprintf(&b, "   %s %s\n", arrow, ln)

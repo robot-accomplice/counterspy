@@ -331,3 +331,29 @@ func TestInterceptView_StreamErrorNonZero(t *testing.T) {
 		t.Fatalf("stream error must return 1, got %d", code)
 	}
 }
+
+// cp-p2g review: a multi-line body must render as MULTIPLE lines (clean runs per-line, after the split),
+// and a single enormous line must be width-capped — neither can collapse or flood.
+func TestFormatFlow_MultilineAndWidthCapped(t *testing.T) {
+	body := "GET /v1 HTTP/1.1\nAuthorization: ***\nHost: api.example.com"
+	out := formatFlow(model.InterceptedFlow{At: "T", DestName: "api.example.com", Status: model.FlowDecrypted, SentText: body})
+	// Three body lines must survive as separate lines (not glued into one).
+	if !strings.Contains(out, "→ GET /v1 HTTP/1.1\n") || !strings.Contains(out, "Host: api.example.com") {
+		t.Fatalf("multi-line body must stay multi-line:\n%q", out)
+	}
+	// A single 10k-rune line must be width-capped (nowhere near 10k on one line).
+	huge := formatFlow(model.InterceptedFlow{At: "T", Status: model.FlowDecrypted, SentText: strings.Repeat("A", 10000)})
+	for _, ln := range strings.Split(huge, "\n") {
+		if len([]rune(ln)) > flowMaxWidth+10 {
+			t.Fatalf("a line escaped the width cap: %d runes", len([]rune(ln)))
+		}
+	}
+}
+
+// cp-p2g review: a forged At with an escape sequence must be stripped at render (untrusted socket input).
+func TestFormatFlow_CleansUntrustedAt(t *testing.T) {
+	out := formatFlow(model.InterceptedFlow{At: "\x1b[31mHACK\x1b[0m", DestName: "x", Status: model.FlowError})
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("escape sequence in At must be stripped:\n%q", out)
+	}
+}
