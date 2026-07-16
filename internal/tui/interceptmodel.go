@@ -2,6 +2,7 @@ package tui
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -19,6 +20,8 @@ type InterceptModel struct {
 	Selected int                     // index into Flows
 	Scroll   int                     // detail-pane scroll offset
 	Follow   bool                    // stick to the newest flow as they arrive
+	Filter   string                  // tail a single source: substring match on app (or destination)
+	Typing   bool                    // the filter prompt owns the keys
 	Status   string
 }
 
@@ -44,25 +47,82 @@ func (m InterceptModel) withFlow(f model.InterceptedFlow) InterceptModel {
 		m.Selected -= over
 	}
 	if m.Follow {
-		m.Selected = len(m.Flows) - 1 // newest
+		m.Selected = len(m.visible()) - 1 // newest VISIBLE flow
 		m.Scroll = 0
 	}
-	m.Selected = clamp(m.Selected, len(m.Flows))
+	m.Selected = clamp(m.Selected, len(m.visible()))
 	return m
 }
 
-// selected returns the currently selected flow, ok=false when there are none yet.
+// visible is the flows the Filter admits — tailing a single source is a view over the same timeline,
+// not a separate capture, so nothing is lost when the filter is cleared.
+//
+// The match is on the ORIGINATING APP first (the question the tool is organised around: "what is THIS
+// app sending?"), and falls back to the destination so a filter still works for flows we could not
+// attribute. Case-insensitive substring: "safari" finds Safari, "proton" finds both proton.me hosts.
+func (m InterceptModel) visible() []model.InterceptedFlow {
+	if m.Filter == "" {
+		return m.Flows
+	}
+	q := strings.ToLower(m.Filter)
+	out := make([]model.InterceptedFlow, 0, len(m.Flows))
+	for _, f := range m.Flows {
+		if flowMatches(f, q) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// flowMatches reports whether f belongs to the filtered source.
+func flowMatches(f model.InterceptedFlow, lowerQuery string) bool {
+	return strings.Contains(strings.ToLower(f.App), lowerQuery) ||
+		strings.Contains(strings.ToLower(f.DestName), lowerQuery) ||
+		strings.Contains(strings.ToLower(f.DestIP), lowerQuery)
+}
+
+// selected returns the currently selected VISIBLE flow, ok=false when the filter admits none.
 func (m InterceptModel) selected() (model.InterceptedFlow, bool) {
-	if m.Selected < 0 || m.Selected >= len(m.Flows) {
+	v := m.visible()
+	if m.Selected < 0 || m.Selected >= len(v) {
 		return model.InterceptedFlow{}, false
 	}
-	return m.Flows[m.Selected], true
+	return v[m.Selected], true
 }
 
 // interceptUpdate is the pure key handler: navigate the list, scroll the detail, toggle follow, quit.
 func interceptUpdate(m InterceptModel, key tcell.Key, r rune) (InterceptModel, bool) {
+	// The filter prompt owns every key while typing — otherwise 'q' in "squirrel" would quit.
+	if m.Typing {
+		switch key {
+		case tcell.KeyEnter:
+			m.Typing = false
+		case tcell.KeyEscape:
+			m.Typing, m.Filter = false, ""
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			if m.Filter != "" {
+				m.Filter = m.Filter[:len(m.Filter)-1]
+			}
+		default:
+			if r != 0 {
+				m.Filter += string(r)
+			}
+		}
+		m.Selected = clamp(m.Selected, len(m.visible()))
+		return m, false
+	}
 	switch {
-	case key == tcell.KeyEscape, key == tcell.KeyCtrlC, r == 'q':
+	case key == tcell.KeyEscape:
+		if m.Filter != "" {
+			m.Filter = "" // Esc clears the filter before it quits — losing your place is worse than a keypress
+			m.Selected = clamp(m.Selected, len(m.visible()))
+			return m, false
+		}
+		return m, true
+	case r == '/':
+		m.Typing = true
+		return m, false
+	case key == tcell.KeyCtrlC, r == 'q':
 		return m, true
 	case key == tcell.KeyUp, r == 'k':
 		m.Selected--
@@ -71,11 +131,11 @@ func interceptUpdate(m InterceptModel, key tcell.Key, r rune) (InterceptModel, b
 	case key == tcell.KeyDown, r == 'j':
 		m.Selected++
 		m.Scroll = 0
-		m.Follow = m.Selected >= len(m.Flows)-1 // stepping onto the newest resumes following
+		m.Follow = m.Selected >= len(m.visible())-1 // stepping onto the newest resumes following
 	case key == tcell.KeyHome, r == 'g':
 		m.Selected, m.Scroll, m.Follow = 0, 0, false
 	case key == tcell.KeyEnd, r == 'G':
-		m.Selected, m.Scroll, m.Follow = len(m.Flows)-1, 0, true
+		m.Selected, m.Scroll, m.Follow = len(m.visible())-1, 0, true
 	case key == tcell.KeyPgDn:
 		m.Scroll += 10
 	case key == tcell.KeyPgUp:
@@ -83,11 +143,11 @@ func interceptUpdate(m InterceptModel, key tcell.Key, r rune) (InterceptModel, b
 	case r == 'f':
 		m.Follow = !m.Follow
 		if m.Follow {
-			m.Selected = len(m.Flows) - 1
+			m.Selected = len(m.visible()) - 1
 			m.Scroll = 0
 		}
 	}
-	m.Selected = clamp(m.Selected, len(m.Flows))
+	m.Selected = clamp(m.Selected, len(m.visible()))
 	if m.Scroll < 0 {
 		m.Scroll = 0
 	}

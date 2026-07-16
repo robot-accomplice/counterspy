@@ -174,3 +174,113 @@ func TestRunIntercepted_QuitsCleanly(t *testing.T) {
 	}
 	close(flows)
 }
+
+func appFlow(at, app, dest string) model.InterceptedFlow {
+	return model.InterceptedFlow{At: at, App: app, PID: 42, DestName: dest, Status: model.FlowDecrypted}
+}
+
+// Tailing a single source: the filter matches the ORIGINATING APP — the question the tool asks.
+func TestInterceptModel_TailsASingleApp(t *testing.T) {
+	m := NewIntercept()
+	m = m.withFlow(appFlow("2026-07-16T10:00:01Z", "Safari", "example.com"))
+	m = m.withFlow(appFlow("2026-07-16T10:00:02Z", "Mail", "mail-api.proton.me"))
+	m = m.withFlow(appFlow("2026-07-16T10:00:03Z", "Safari", "news.example"))
+	m.Filter = "safari" // case-insensitive
+	vis := m.visible()
+	if len(vis) != 2 {
+		t.Fatalf("expected Safari's 2 flows, got %d", len(vis))
+	}
+	for _, f := range vis {
+		if f.App != "Safari" {
+			t.Fatalf("filter leaked %q", f.App)
+		}
+	}
+	if len(m.Flows) != 3 {
+		t.Fatal("filtering must be a VIEW — the underlying timeline must not be dropped")
+	}
+}
+
+// The filter falls back to the destination so it still works for flows we could not attribute.
+func TestInterceptModel_FilterFallsBackToDestination(t *testing.T) {
+	m := NewIntercept()
+	m = m.withFlow(appFlow("2026-07-16T10:00:01Z", "", "mail-api.proton.me")) // unattributed
+	m = m.withFlow(appFlow("2026-07-16T10:00:02Z", "Safari", "example.com"))
+	m.Filter = "proton"
+	if v := m.visible(); len(v) != 1 || v[0].DestName != "mail-api.proton.me" {
+		t.Fatalf("destination fallback failed: %+v", v)
+	}
+}
+
+// While typing the filter, ordinary keys must NOT act as commands — 'q' in "squirrel" must not quit.
+func TestInterceptModel_TypingCapturesKeys(t *testing.T) {
+	m := NewIntercept()
+	m, _ = interceptUpdate(m, tcell.KeyRune, '/')
+	if !m.Typing {
+		t.Fatal("/ must open the filter prompt")
+	}
+	for _, r := range "squirrel" {
+		var quit bool
+		m, quit = interceptUpdate(m, tcell.KeyRune, r)
+		if quit {
+			t.Fatalf("typing %q must not quit", r)
+		}
+	}
+	if m.Filter != "squirrel" {
+		t.Fatalf("filter = %q", m.Filter)
+	}
+	m, _ = interceptUpdate(m, tcell.KeyEnter, 0)
+	if m.Typing {
+		t.Fatal("Enter must close the prompt")
+	}
+	// Now q quits again.
+	if _, quit := interceptUpdate(m, tcell.KeyRune, 'q'); !quit {
+		t.Fatal("q must quit once the prompt is closed")
+	}
+}
+
+// Esc clears the filter before it quits — losing your place is worse than an extra keypress.
+func TestInterceptModel_EscClearsFilterBeforeQuitting(t *testing.T) {
+	m := NewIntercept()
+	m.Filter = "safari"
+	m, quit := interceptUpdate(m, tcell.KeyEscape, 0)
+	if quit || m.Filter != "" {
+		t.Fatalf("Esc must clear the filter first (quit=%v filter=%q)", quit, m.Filter)
+	}
+	if _, quit := interceptUpdate(m, tcell.KeyEscape, 0); !quit {
+		t.Fatal("Esc with no filter must quit")
+	}
+}
+
+// Follow must stick to the newest VISIBLE flow, not the newest overall — otherwise tailing one app
+// jumps to another app's traffic.
+func TestInterceptModel_FollowRespectsTheFilter(t *testing.T) {
+	m := NewIntercept()
+	m.Filter = "safari"
+	m = m.withFlow(appFlow("2026-07-16T10:00:01Z", "Safari", "a"))
+	m = m.withFlow(appFlow("2026-07-16T10:00:02Z", "Mail", "b")) // filtered OUT, and newest
+	got, ok := m.selected()
+	if !ok || got.App != "Safari" {
+		t.Fatalf("follow must stay on the tailed source, got %+v ok=%v", got, ok)
+	}
+}
+
+// The app is the headline in the list, and an unattributed flow says so rather than looking blank.
+func TestInterceptView_ShowsAppAndUnattributed(t *testing.T) {
+	m := NewIntercept().withFlow(appFlow("2026-07-16T14:44:48Z", "Mail", "mail-api.proton.me"))
+	if out := drawIntercept(t, m); !strings.Contains(out, "Mail") || !strings.Contains(out, "pid 42") {
+		t.Fatalf("view must show the app + pid:\n%s", out)
+	}
+	u := NewIntercept().withFlow(model.InterceptedFlow{At: "2026-07-16T14:44:48Z", DestName: "x.example", Status: model.FlowDecrypted})
+	if out := drawIntercept(t, u); !strings.Contains(out, "unattributed") {
+		t.Fatalf("an unattributed flow must say so:\n%s", out)
+	}
+}
+
+// A filter that hides everything must say so — an empty list must not read as "nothing is happening".
+func TestInterceptView_EmptyFilterResultIsExplained(t *testing.T) {
+	m := NewIntercept().withFlow(appFlow("2026-07-16T10:00:01Z", "Safari", "a"))
+	m.Filter = "nothing-matches-this"
+	if out := drawIntercept(t, m); !strings.Contains(out, "no flows match") {
+		t.Fatalf("a filtered-empty list must explain itself:\n%s", out)
+	}
+}

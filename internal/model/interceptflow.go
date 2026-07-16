@@ -6,8 +6,9 @@ package model
 // it lives in model (which the tui may import), mirroring InspectView. Content is already decoded and
 // Redact-masked by the proxy before it is ever published, so no sink or viewer sees a raw secret.
 type InterceptedFlow struct {
-	At        string `json:"at"` // RFC3339 capture time
-	PID       int    `json:"pid,omitempty"`
+	At        string `json:"at"`            // RFC3339 capture time
+	PID       int    `json:"pid,omitempty"` // the originating process, when it could be attributed
+	App       string `json:"app,omitempty"` // its process name ("Safari"); "" when unattributed
 	DestIP    string `json:"dest_ip"`
 	DestName  string `json:"dest_name,omitempty"` // SNI or passively-resolved name, if known
 	SNI       string `json:"sni,omitempty"`

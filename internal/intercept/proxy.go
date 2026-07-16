@@ -34,11 +34,14 @@ import (
 )
 
 // Proxy is the running interception service: it accepts CONNECT tunnels, intercepts (decrypt → relay →
-// capture), and publishes the flow. Dial is a seam so the accept loop is testable without real upstreams.
+// capture), attributes each to the app that opened it, and publishes the flow. Dial and Owner are seams
+// so the accept loop is testable without real upstreams or lsof.
 type Proxy struct {
 	CA   *ca.CA
 	Dial dialFunc // nil → defaultDial (verified upstream)
 	Sink publish.Sink
+	// Owner maps a client's local port to the process that owns it. nil → portOwner (lsof on darwin).
+	Owner func(port int) (pid int, name string, ok bool)
 }
 
 // Serve accepts on l until it errors (listener closed), handling each connection in its own goroutine.
@@ -103,10 +106,13 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 			conn.Close()
 		}
 	}()
+	// Attribute BEFORE the tunnel runs: the lookup needs the client's socket to still be open, and a
+	// long-lived flow would otherwise be attributed (or not) minutes later, after the app may have exited.
+	pid, app := p.owner(conn)
 	target, err := readConnect(conn)
 	if err != nil {
 		p.publish(model.InterceptedFlow{
-			At: nowRFC3339(), Status: model.FlowError,
+			At: nowRFC3339(), Status: model.FlowError, PID: pid, App: app,
 			DestName: "(unresolved: " + firstLine(err.Error()) + ")",
 		})
 		conn.Close()
@@ -117,7 +123,26 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 		return
 	}
 	flow := intercept(conn, target, p.CA, dial) // intercept owns closing conn on the normal path
+	flow.PID, flow.App = pid, app
 	p.publish(flow)
+}
+
+// owner attributes a connection to the process that opened it. An unattributable flow is published
+// UNATTRIBUTED rather than dropped — a flow we can't name is still one the user needs to see (Rule 13).
+func (p *Proxy) owner(conn net.Conn) (int, string) {
+	lookup := p.Owner
+	if lookup == nil {
+		lookup = portOwner
+	}
+	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
+	if err != nil {
+		return 0, ""
+	}
+	pid, name, ok := lookup(int(ap.Port()))
+	if !ok {
+		return 0, ""
+	}
+	return pid, name
 }
 
 func (p *Proxy) publish(fl model.InterceptedFlow) {
