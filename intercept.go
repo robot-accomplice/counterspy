@@ -16,6 +16,7 @@ import (
 	"counterspy/internal/intercept"
 	"counterspy/internal/intercept/ca"
 	"counterspy/internal/intercept/publish"
+	"counterspy/internal/model"
 	"counterspy/internal/report"
 )
 
@@ -48,6 +49,7 @@ var (
 	interceptCALoadOrCreate  = ca.LoadOrCreate
 	interceptCALoad          = ca.Load
 	interceptNewSocketSink   = publish.NewSocketSink
+	interceptReadSocket      = publish.ReadSocket
 	interceptNewLogSink      = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
 	}
@@ -277,6 +279,72 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "intercept: reverted (pf redirect flushed, CA trust removed).")
 	return 0
+}
+
+// runInterceptView is `counterspy console --intercept[=sock]`: connect to the intercept daemon's live
+// socket and print each decrypted flow as it arrives (a plain live tail, not the alt-screen TUI —
+// mirrors how console --json/--once are non-TUI exits). It ends when the socket closes or on Ctrl-C.
+func runInterceptView(path string, stdout io.Writer) int {
+	if path == "" {
+		path = interceptSocketPath
+	}
+	fmt.Fprintln(stdout, dim("counterspy — intercepted flows from "+path+" (Ctrl-C to stop)"))
+	err := interceptReadSocket(path, func(fl model.InterceptedFlow) {
+		fmt.Fprint(stdout, formatFlow(fl))
+	})
+	if err != nil {
+		fmt.Fprintln(stdout, "console: intercept stream ended:", report.Clean(err.Error()))
+		return 1
+	}
+	return 0
+}
+
+// flowMaxLines bounds how many lines of a decrypted body the viewer prints, so a large payload doesn't
+// flood the terminal (the proxy already caps captured bytes; this caps the DISPLAY).
+const flowMaxLines = 6
+
+// formatFlow renders one flow: a header line (time, destination, status, byte counts) and — only for a
+// decrypted flow — its masked request/response. A pinned/opaque/error flow shows its status and NO
+// content, so the viewer never implies plaintext it doesn't have. report.Clean strips control bytes at
+// render time (defense-in-depth; the proxy already masked secrets).
+func formatFlow(fl model.InterceptedFlow) string {
+	name := fl.DestName
+	if name == "" {
+		name = fl.SNI
+	}
+	if name == "" {
+		name = fl.DestIP
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s  %s  %s  ↑%d ↓%d\n", fl.At, report.Clean(name), fl.Status, fl.SentBytes, fl.RecvBytes)
+	if fl.Status == model.FlowDecrypted {
+		if t := strings.TrimSpace(fl.SentText); t != "" {
+			b.WriteString(indentFlowBody("→", report.Clean(t)))
+		}
+		if t := strings.TrimSpace(fl.RecvText); t != "" {
+			b.WriteString(indentFlowBody("←", report.Clean(t)))
+		}
+	}
+	return b.String()
+}
+
+// indentFlowBody indents a decoded body under its header, arrow-marking the first line and capping the
+// number of printed lines.
+func indentFlowBody(arrow, text string) string {
+	lines := strings.Split(text, "\n")
+	var b strings.Builder
+	for i, ln := range lines {
+		if i >= flowMaxLines {
+			fmt.Fprintf(&b, "     %s\n", dim(fmt.Sprintf("… (%d more lines)", len(lines)-flowMaxLines)))
+			break
+		}
+		if i == 0 {
+			fmt.Fprintf(&b, "   %s %s\n", arrow, ln)
+		} else {
+			fmt.Fprintf(&b, "     %s\n", ln)
+		}
+	}
+	return b.String()
 }
 
 // confirmConsent prints what arming does and requires an explicit y/yes. A MITM that installs a trusted

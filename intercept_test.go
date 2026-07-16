@@ -285,3 +285,49 @@ func TestUsage_ListsInterceptAndApprovedFlagsOnly(t *testing.T) {
 		}
 	}
 }
+
+// The --intercept viewer streams flows from the socket seam and renders a decrypted flow's masked body.
+func TestInterceptView_RendersDecryptedFlow(t *testing.T) {
+	origRead := interceptReadSocket
+	t.Cleanup(func() { interceptReadSocket = origRead })
+	interceptReadSocket = func(path string, fn func(model.InterceptedFlow)) error {
+		if path != interceptSocketPath {
+			t.Fatalf("default path expected, got %q", path)
+		}
+		fn(model.InterceptedFlow{At: "T", DestName: "api.example.com", Status: model.FlowDecrypted,
+			SentText: "GET /v1 HTTP/1.1\nAuthorization: ***", RecvText: "HTTP/1.1 200 OK", SentBytes: 5, RecvBytes: 9})
+		return nil
+	}
+	var b bytes.Buffer
+	if code := runInterceptView("", &b); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	out := b.String()
+	for _, want := range []string{"api.example.com", "decrypted", "GET /v1", "HTTP/1.1 200 OK"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("viewer output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A pinned/opaque/error flow shows its status and NO content (never implies plaintext it lacks).
+func TestInterceptView_NonDecryptedShowsNoContent(t *testing.T) {
+	out := formatFlow(model.InterceptedFlow{At: "T", DestName: "pinned.example", Status: model.FlowPinned,
+		SentText: "should-not-render", RecvText: "should-not-render"})
+	if strings.Contains(out, "should-not-render") {
+		t.Fatalf("non-decrypted flow must not render captured text:\n%s", out)
+	}
+	if !strings.Contains(out, "pinned") {
+		t.Fatalf("status must be shown:\n%s", out)
+	}
+}
+
+// A socket that never opens surfaces the error and exits non-zero.
+func TestInterceptView_StreamErrorNonZero(t *testing.T) {
+	origRead := interceptReadSocket
+	t.Cleanup(func() { interceptReadSocket = origRead })
+	interceptReadSocket = func(string, func(model.InterceptedFlow)) error { return errors.New("no such socket") }
+	if code := runInterceptView("/tmp/nope.sock", &bytes.Buffer{}); code != 1 {
+		t.Fatalf("stream error must return 1, got %d", code)
+	}
+}
