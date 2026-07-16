@@ -19,6 +19,7 @@ import (
 	"counterspy/internal/intercept/publish"
 	"counterspy/internal/model"
 	"counterspy/internal/report"
+	"counterspy/internal/tui"
 )
 
 // interceptProxyPort is the fixed loopback port the decrypt proxy listens on and the system
@@ -354,6 +355,11 @@ func runInterceptView(path string, stdout io.Writer) int {
 		}
 		return 0
 	}
+	// A live socket on a real terminal gets the interactive Intercepted view (console means the TUI);
+	// piped/redirected output falls back to the plain tail so `console --intercept | tee` still works.
+	if isTerminal(os.Stdout) {
+		return runInterceptTUI(path, stdout)
+	}
 	fmt.Fprintln(stdout, dim("counterspy — intercepted flows from "+path+" (Ctrl-C to stop)"))
 	err := interceptReadSocket(path, func(fl model.InterceptedFlow) {
 		fmt.Fprint(stdout, formatFlow(fl))
@@ -364,6 +370,67 @@ func runInterceptView(path string, stdout io.Writer) int {
 	}
 	return 0
 }
+
+// runInterceptTUI opens the alt-screen Intercepted viewer over the live socket. The socket read runs
+// off the UI thread and feeds tui.RunIntercepted through a channel, keeping all I/O out of the
+// decoupled tui package (§12). Mirrors runConsole's screen/fini/signal discipline: the terminal is
+// restored exactly once whether we exit by quit, panic, or an external kill.
+func runInterceptTUI(path string, stdout io.Writer) (code int) {
+	screen, err := newScreen()
+	if err != nil {
+		fmt.Fprintln(stdout, "console: cannot open screen:", report.Clean(err.Error()))
+		return 1
+	}
+	if err := screen.Init(); err != nil {
+		fmt.Fprintln(stdout, "console: cannot init screen:", report.Clean(err.Error()))
+		return 1
+	}
+	screen.SetTitle("CounterSpy — Intercepted")
+	var finiOnce sync.Once
+	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	sigDone := make(chan struct{})
+	defer func() { signal.Stop(sigCh); close(sigDone) }()
+	go func() {
+		select {
+		case <-sigCh:
+			fini()
+			os.Exit(130)
+		case <-sigDone:
+		}
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			fini()
+			fmt.Fprintln(os.Stderr, "console: internal error:", r)
+			code = 1
+		}
+	}()
+	defer fini()
+
+	flows := make(chan model.InterceptedFlow, 64)
+	var readErr error
+	go func() {
+		defer close(flows)
+		readErr = interceptReadSocket(path, func(fl model.InterceptedFlow) { flows <- fl })
+	}()
+	if err := interceptRunTUI(screen, flows); err != nil {
+		fini()
+		fmt.Fprintln(stdout, "console:", report.Clean(err.Error()))
+		return 1
+	}
+	fini()
+	if readErr != nil {
+		fmt.Fprintln(stdout, "console: intercept stream ended:", report.Clean(readErr.Error()))
+		return 1
+	}
+	return 0
+}
+
+// interceptRunTUI is a seam so the wiring is testable without a real terminal.
+var interceptRunTUI = tui.RunIntercepted
 
 // Display bounds for a decrypted body: at most flowMaxLines lines, each at most flowMaxWidth runes, so a
 // large or single-enormous-line payload can't flood the terminal (the proxy caps captured BYTES; these
