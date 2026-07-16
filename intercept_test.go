@@ -38,6 +38,7 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 	origServe := interceptServe
 	origStdin := interceptStdin
 	origHome := interceptUserHomeDir
+	origChown := interceptChownSocket
 	t.Cleanup(func() {
 		interceptCALoadOrCreate = origLoad
 		interceptCALoad = origCALoad
@@ -49,9 +50,11 @@ func fakeIntercept(t *testing.T, log *[]string, serveHook func()) {
 		interceptServe = origServe
 		interceptStdin = origStdin
 		interceptUserHomeDir = origHome
+		interceptChownSocket = origChown
 	})
 
 	interceptUserHomeDir = func() (string, error) { return t.TempDir(), nil }
+	interceptChownSocket = func(string) error { return nil }
 	interceptCALoadOrCreate = func(string) (*ca.CA, error) { return caObj, nil }
 	interceptCALoad = func(string) (*ca.CA, bool, error) { return caObj, true, nil }
 	interceptInstallTrust = func([]byte) error { *log = append(*log, "trust-install"); return nil }
@@ -355,5 +358,40 @@ func TestFormatFlow_CleansUntrustedAt(t *testing.T) {
 	out := formatFlow(model.InterceptedFlow{At: "\x1b[31mHACK\x1b[0m", DestName: "x", Status: model.FlowError})
 	if strings.Contains(out, "\x1b") {
 		t.Fatalf("escape sequence in At must be stripped:\n%q", out)
+	}
+}
+
+// The root daemon must hand the stream socket to the invoking (sudo) user — macOS enforces write
+// permission on unix connect(), so a root-owned 0755 socket would refuse the non-root console.
+func TestSudoInvoker_ReadsSudoEnv(t *testing.T) {
+	t.Setenv("SUDO_UID", "501")
+	t.Setenv("SUDO_GID", "20")
+	uid, gid, ok := sudoInvoker()
+	if !ok || uid != 501 || gid != 20 {
+		t.Fatalf("expected 501/20/true, got %d/%d/%v", uid, gid, ok)
+	}
+	// Not under sudo → no-op (don't chown a socket we already own).
+	t.Setenv("SUDO_UID", "")
+	if _, _, ok := sudoInvoker(); ok {
+		t.Fatal("no SUDO_UID must report not-under-sudo")
+	}
+	// A root SUDO_UID (uid 0) is not a meaningful hand-off target.
+	t.Setenv("SUDO_UID", "0")
+	t.Setenv("SUDO_GID", "0")
+	if _, _, ok := sudoInvoker(); ok {
+		t.Fatal("uid 0 must not be treated as an invoking user")
+	}
+}
+
+// A chown failure must abort BEFORE arming (the stream is the primary output; don't MITM for nothing).
+func TestIntercept_ChownFailureAbortsBeforeArming(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	interceptChownSocket = func(string) error { return errors.New("chown: not permitted") }
+	if code := runIntercept([]string{"--yes"}, &bytes.Buffer{}); code != 1 {
+		t.Fatalf("chown failure must return 1, got %d", code)
+	}
+	if idx(log, "trust-install") != -1 || idx(log, "redirect-install") != -1 {
+		t.Fatalf("must not arm when the stream socket is unusable: %v", log)
 	}
 }

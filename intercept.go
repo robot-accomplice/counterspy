@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,7 +64,39 @@ var (
 	interceptStdin io.Reader = os.Stdin
 	// interceptUserHomeDir is a seam so the home-resolution-failure path is testable.
 	interceptUserHomeDir = os.UserHomeDir
+	// interceptChownSocket hands the stream socket to the invoking user (seam for tests).
+	interceptChownSocket = chownSocketToInvoker
 )
+
+// sudoInvoker returns the uid/gid of the human who ran `sudo`, from the environment sudo sets. ok is
+// false when not running under sudo (or the values are unusable), in which case the caller keeps the
+// current owner. Deliberately reads SUDO_UID/SUDO_GID rather than looking the user up by name: os/user
+// lookups are unreliable on macOS without cgo, and these are plain integers sudo always provides.
+func sudoInvoker() (uid, gid int, ok bool) {
+	us, gs := os.Getenv("SUDO_UID"), os.Getenv("SUDO_GID")
+	if us == "" || gs == "" {
+		return 0, 0, false
+	}
+	uid, uerr := strconv.Atoi(us)
+	gid, gerr := strconv.Atoi(gs)
+	if uerr != nil || gerr != nil || uid <= 0 {
+		return 0, 0, false
+	}
+	return uid, gid, true
+}
+
+// chownSocketToInvoker gives the live stream socket to the user who ran sudo. `intercept` runs as root,
+// so a socket it creates is root-owned at mode 0755 under the usual umask — and macOS ENFORCES write
+// permission on unix-socket connect(), so the human's NON-root `console --intercept` would be refused
+// with "permission denied". Handing it to the invoker makes the documented viewer flow work while still
+// denying every OTHER local user (the stream carries decrypted traffic). A no-op when not under sudo.
+func chownSocketToInvoker(path string) error {
+	uid, gid, ok := sudoInvoker()
+	if !ok {
+		return nil // not under sudo — the socket already belongs to the running user
+	}
+	return os.Chown(path, uid, gid)
+}
 
 // interceptDir is where the reusable CA (and default log) live — installed-once trust reused across
 // runs. ok is false when the home directory can't be resolved: we must NOT fall back to a relative
@@ -155,6 +188,13 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		s, err := interceptNewSocketSink(streamPath)
 		if err != nil {
 			fmt.Fprintln(stdout, "intercept: cannot open stream socket:", report.Clean(err.Error()))
+			return 1
+		}
+		// Hand the socket to the invoking user BEFORE arming: root's socket is otherwise unreachable to
+		// the non-root console the flow tells them to run. Fail loud — the stream is the primary output.
+		if err := interceptChownSocket(streamPath); err != nil {
+			s.Close()
+			fmt.Fprintln(stdout, "intercept: cannot hand the stream socket to the invoking user:", report.Clean(err.Error()))
 			return 1
 		}
 		sinks = append(sinks, s)

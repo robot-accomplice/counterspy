@@ -22,16 +22,20 @@ import (
 // UNVERIFIED — requires a root smoke test. This file is the pf/ioctl edge: it is
 // compile-guarded (darwin-only) and struct-size-guarded, but it CANNOT be unit
 // tested (needs root + a live pf). The crypto pump and sinks it feeds are CI-tested
-// over loopback; this redirect layer must be exercised by hand. Smoke test:
+// over loopback; this redirect layer must be exercised by hand. Smoke test — run
+// from the repo root against a FRESH build (counterspy is not installed on PATH by
+// default, and `sudo` would not resolve it there anyway; use the ./ path):
 //
-//	sudo counterspy intercept --socket /tmp/cs.sock      # installs trust + rdr, runs proxy
-//	# in another shell:
-//	curl https://example.com/                            # should appear, decrypted, in:
-//	counterspy console --intercept /tmp/cs.sock
+//	go build -o counterspy .            # Phase 2 is not in any older binary
+//	sudo ./counterspy intercept         # consent, install trust + rdr, run the proxy
+//	# in a SECOND shell, as your normal user (the daemon hands it the socket):
+//	./counterspy console --intercept
+//	# in a THIRD shell:
+//	curl https://example.com/           # should appear, decrypted, in the console
 //	# Ctrl-C the daemon → verify teardown restored pf:
-//	sudo pfctl -a counterspy -s nat                      # empty
-//	sudo pfctl -sr ; sudo pfctl -sn                      # user's rules back, no counterspy ref
-//	sudo pfctl -s info                                   # ref count back down
+//	sudo pfctl -a counterspy -s nat     # empty
+//	sudo pfctl -sr ; sudo pfctl -sn     # user's rules back, no counterspy ref
+//	sudo pfctl -s info                  # ref count back down
 //
 // THINGS THE SMOKE TEST MUST RESOLVE (not provable statically):
 //  1. LOCAL-OUTBOUND direction. macOS pf `rdr` translates packets arriving INBOUND
@@ -50,6 +54,13 @@ import (
 //     the translation section (pf requires translation rules before filter rules).
 //     insertRdrAnchor targets the standard /etc/pf.conf layout; confirm the reload
 //     succeeds on your system (`pfctl -f -` errors loudly if ordering is wrong).
+//  4. WHERE ~/.counterspy LANDS UNDER SUDO. The daemon resolves its CA (and the
+//     default --log path) via os.UserHomeDir(), which depends on whether sudo
+//     preserves HOME on this machine — unverified here, since reading the sudoers
+//     policy needs root. Either result is self-consistent (intercept is always run
+//     under sudo), but confirm which: if it resolves to /var/root/.counterspy the CA
+//     is fine, but a default --log would be unreadable to you without sudo. Check
+//     with: sudo ./counterspy intercept --yes --log  (then note the printed path).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // pfAnchor is the named pf anchor counterspy owns. All our rdr rules live here so teardown is a single
