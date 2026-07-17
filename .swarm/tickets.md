@@ -78,3 +78,8 @@
       http.ReadRequest) accepts UNBOUNDED headers from any local client, bounded only by the 10s
       connectTimeout — live unbounded memory exposure in the root daemon. Bound it (LimitReader /
       MaxHeaderBytes-style wrap) in Phase 2.5's pump work, where §3.1.5 already mandates a header cap.
+- [ ] T-21 (sev:low, cp-spec2.5-r3 C4-beater F-3) readConnect (internal/intercept/proxy.go:72) reads the
+      CONNECT via http.ReadRequest(bufio.NewReader(conn)) and DISCARDS the bufio.Reader: a client that
+      pipelines its ClientHello in the same write as the CONNECT headers has those bytes swallowed —
+      tls.Server then sees a truncated CH and the flow fails pinned/error. Latent Phase-2 bug for a rare
+      client behavior. Fixed incidentally by Phase 2.5's ALPN peek, which must thread the buffered bytes.
