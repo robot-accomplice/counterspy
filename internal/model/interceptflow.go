@@ -19,6 +19,12 @@ type InterceptedFlow struct {
 	RecvBytes int    `json:"recv_bytes"`
 }
 
+// FlowCaptureBytes is how many bytes PER DIRECTION the proxy keeps for decode/display. The wire is
+// relayed in full regardless — this bounds only what we KEEP. It lives here, not in the proxy, because
+// the VIEWER needs it too: a flow whose SentBytes/RecvBytes exceed this was truncated AT CAPTURE, and
+// showing its text without saying so implies content we never had.
+const FlowCaptureBytes = 8 << 10
+
 // Flow status — the closed, honest set. "decrypted" is the only one carrying plaintext; the others say
 // exactly why there is none, so the viewer never implies content it doesn't have.
 const (

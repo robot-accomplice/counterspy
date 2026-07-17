@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -332,4 +333,78 @@ func TestRunIntercepted_QuitsCleanly(t *testing.T) {
 		t.Fatal("RunIntercepted did not exit on q")
 	}
 	close(flows)
+}
+
+// The log shows the FULL captured body — no display cap. An earlier version capped at 8 lines and
+// printed "… (N more lines)", which was both unreachable and a lie.
+func TestInterceptView_ShowsFullCapturedBody(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&b, "Header-%d: value\n", i)
+	}
+	m := NewIntercept().withFlow(model.InterceptedFlow{
+		At: "2026-07-17T12:45:56Z", PID: 717, App: "WhatsApp", DestName: "api.whatsapp.net",
+		Status: model.FlowDecrypted, SentText: b.String(), SentBytes: 715, RecvBytes: 707,
+	})
+	out := renderLog(m.Apps[0])
+	if !strings.Contains(out, "Header-39: value") {
+		t.Fatalf("every captured line must be present (the log scrolls):\n%s", out)
+	}
+	if strings.Contains(out, "more lines") {
+		t.Fatalf("no unreachable ellipsis should remain:\n%s", out)
+	}
+}
+
+// THE honesty fix: the proxy caps what it CAPTURES at model.FlowCaptureBytes per direction. A flow whose
+// wire bytes exceed that was truncated at capture — the rest was never recorded — and saying "… N more
+// lines" would imply content we never had. It must say so explicitly.
+func TestInterceptView_SaysWhenTheCAPTUREWasTruncated(t *testing.T) {
+	m := NewIntercept().withFlow(model.InterceptedFlow{
+		At: "2026-07-17T12:45:56Z", PID: 600, App: "Proton Mail Helper", DestName: "mail-api.proton.me",
+		Status: model.FlowDecrypted, SentText: "POST /core/v4/reports/sentry HTTP/1.1\nbody",
+		SentBytes: 26836, RecvBytes: 1518, // 26836 on the wire, only FlowCaptureBytes captured
+	})
+	out := renderLog(m.Apps[0])
+	if !strings.Contains(out, "capture truncated") || !strings.Contains(out, "never captured") {
+		t.Fatalf("a capture-truncated flow must SAY so, not imply the rest is merely hidden:\n%s", out)
+	}
+	if !strings.Contains(out, "8 KB") || !strings.Contains(out, "26 KB") {
+		t.Fatalf("it must state how much of how much:\n%s", out)
+	}
+}
+
+// A flow that fits inside the capture cap must NOT claim truncation.
+func TestInterceptView_NoTruncationNoticeWhenFullyCaptured(t *testing.T) {
+	m := NewIntercept().withFlow(model.InterceptedFlow{
+		At: "2026-07-17T12:45:56Z", PID: 717, App: "WhatsApp", DestName: "api.whatsapp.net",
+		Status: model.FlowDecrypted, SentText: "POST /falco/pigeon_health_metrics HTTP/1.1",
+		SentBytes: 715, RecvBytes: 707,
+	})
+	if out := renderLog(m.Apps[0]); strings.Contains(out, "capture truncated") {
+		t.Fatalf("a fully-captured flow must not claim truncation:\n%s", out)
+	}
+}
+
+// Packets are separate things: the log carries a divider between them (and none before the first).
+func TestInterceptView_DividerBetweenPackets(t *testing.T) {
+	m := NewIntercept()
+	m = m.withFlow(pidFlow("2026-07-17T12:45:56Z", 1, "App", "a.example"))
+	if rules := countRules(logLines(m.Apps[0])); rules != 0 {
+		t.Fatalf("one packet needs no divider, got %d", rules)
+	}
+	m = m.withFlow(pidFlow("2026-07-17T12:45:57Z", 1, "App", "b.example"))
+	m = m.withFlow(pidFlow("2026-07-17T12:45:58Z", 1, "App", "c.example"))
+	if rules := countRules(logLines(m.Apps[0])); rules != 2 {
+		t.Fatalf("three packets need two dividers, got %d", rules)
+	}
+}
+
+func countRules(ls []logLine) int {
+	n := 0
+	for _, l := range ls {
+		if l.rule {
+			n++
+		}
+	}
+	return n
 }

@@ -7,9 +7,6 @@ import (
 // Layout + display bounds.
 const (
 	interceptListWidth = 30 // the app column (navigation); the rest is the running log
-	// logFlowLines caps how many content lines ONE flow contributes, so a 26KB telemetry POST can't
-	// bury the flows around it. PgUp walks the log; the cap keeps it scannable.
-	logFlowLines = 8
 	// logMaxWidth caps a single line so one enormous header can't push the pane sideways.
 	logMaxWidth = 200
 )
@@ -116,6 +113,13 @@ func drawAppLog(m InterceptModel, s tcell.Screen, x0, w, h int) {
 	}
 	y := 2
 	for i := start; i < end && y < h-1; i++ {
+		if lines[i].rule { // a seam between packets, drawn across the pane
+			for x := x0; x < x0+width; x++ {
+				s.SetContent(x, y, '─', nil, def.Foreground(colDivider))
+			}
+			y++
+			continue
+		}
 		drawText(s, x0, y, lines[i].style(def), truncate(lines[i].text, width))
 		y++
 	}

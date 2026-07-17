@@ -160,8 +160,9 @@ func firstLine(s string) string {
 }
 
 // maxCapture bounds how many bytes per direction we hold for decode/display (the wire is relayed in
-// full regardless — this only bounds what we KEEP).
-const maxCapture = 8 << 10
+// full regardless — this only bounds what we KEEP). Defined in model because the viewer must also know
+// it, to say when a flow's text is a truncated capture rather than the whole thing.
+const maxCapture = model.FlowCaptureBytes
 
 // Timeouts reap a stalled flow so a hung client/upstream can't leak goroutines + fds forever
 // (Audit/Antagonist cp-p2c F-1): a bound on the TLS handshake, on dialing the upstream, and an idle

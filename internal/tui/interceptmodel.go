@@ -183,6 +183,7 @@ type logLine struct {
 	text string
 	col  tcell.Color
 	bold bool
+	rule bool // a divider between packets; the view draws it across the pane
 }
 
 func (l logLine) style(def tcell.Style) tcell.Style {
@@ -198,7 +199,10 @@ func (l logLine) style(def tcell.Style) tcell.Style {
 // hold the reader's scroll position steady as the log grows.
 func logLines(a appRow) []logLine {
 	var out []logLine
-	for _, f := range a.Flows {
+	for i, f := range a.Flows {
+		if i > 0 {
+			out = append(out, logLine{rule: true}) // packets are separate things; show the seam
+		}
 		col, glyph, label := interceptStatusStyle(f.Status)
 		dest := f.DestName
 		if dest == "" {
@@ -214,34 +218,54 @@ func logLines(a appRow) []logLine {
 			out = append(out, logLine{text: "   " + capLine(whyNoContent(label)), col: colDim})
 			continue
 		}
-		out = append(out, bodyLines("→", f.SentText)...)
-		out = append(out, bodyLines("←", f.RecvText)...)
+		out = append(out, bodyLines("→", f.SentText, f.SentBytes)...)
+		out = append(out, bodyLines("←", f.RecvText, f.RecvBytes)...)
 	}
 	return out
 }
 
-// bodyLines renders one direction's masked content, arrow-marking the first line and capping the rest.
+// bodyLines renders one direction's masked content in FULL — every captured line is emitted, and the log
+// scrolls (PgUp/PgDn), so nothing is unreachable. An earlier version capped the display at 8 lines and
+// printed "… (N more lines)", which was unreachable AND a lie: the proxy also caps what it CAPTURES at
+// model.FlowCaptureBytes per direction, so for a 26KB post most of those "more lines" were never
+// captured at all. wireBytes is the TRUE byte count from the wire; when it exceeds the capture cap we say
+// so explicitly rather than implying the rest is merely hidden.
+//
 // The raw text is split BEFORE cleaning: report.Clean (via drawText) strips control bytes INCLUDING
 // newlines, so cleaning first would collapse a whole body onto one line.
-func bodyLines(arrow, raw string) []logLine {
+func bodyLines(arrow, raw string, wireBytes int) []logLine {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
 	src := strings.Split(raw, "\n")
-	var out []logLine
+	out := make([]logLine, 0, len(src)+1)
 	for i, ln := range src {
-		if i >= logFlowLines {
-			out = append(out, logLine{text: fmt.Sprintf("     … (%d more lines)", len(src)-logFlowLines), col: colDim})
-			break
-		}
 		prefix := "     "
 		if i == 0 {
 			prefix = "   " + arrow + " "
 		}
 		out = append(out, logLine{text: capLine(prefix + ln), col: colText})
 	}
+	if wireBytes > model.FlowCaptureBytes {
+		out = append(out, logLine{
+			text: fmt.Sprintf("     ⋯ capture truncated: this is the first %s of %s on the wire — the rest was never captured",
+				byteSize(model.FlowCaptureBytes), byteSize(wireBytes)),
+			col: colWarn,
+		})
+	}
 	return out
+}
+
+// byteSize renders a byte count compactly for the truncation notice.
+func byteSize(n int) string {
+	if n >= 1<<20 {
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	if n >= 1<<10 {
+		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 func capLine(s string) string { return truncate(s, logMaxWidth) }
