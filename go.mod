@@ -3,6 +3,7 @@ module counterspy
 go 1.26.5
 
 require (
+	github.com/andybalholm/brotli v1.2.2
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/net v0.6.0

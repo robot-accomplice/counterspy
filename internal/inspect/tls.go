@@ -88,3 +88,80 @@ func parseSNIExtension(b []byte) (string, bool) {
 	}
 	return "", false
 }
+
+// ClientHelloALPN extracts the Application-Layer Protocol Negotiation list from
+// a TLS ClientHello handshake record. Returns the ordered protocol names and
+// true when the ClientHello carries an ALPN extension. Like ClientHelloSNI, it
+// is deliberately tolerant of truncation/garbage.
+func ClientHelloALPN(rec []byte) ([]string, bool) {
+	// Walk to the extensions block using the same parser as ClientHelloSNI.
+	if len(rec) < 5 || rec[0] != 0x16 {
+		return nil, false
+	}
+	body := rec[5:]
+	if len(body) < 4 || body[0] != 0x01 {
+		return nil, false
+	}
+	hs := body[4:]
+	if len(hs) < 34 {
+		return nil, false
+	}
+	p := 34
+	if p >= len(hs) {
+		return nil, false
+	}
+	p += 1 + int(hs[p])
+	if p+2 > len(hs) {
+		return nil, false
+	}
+	p += 2 + int(binary.BigEndian.Uint16(hs[p:]))
+	if p+1 > len(hs) {
+		return nil, false
+	}
+	p += 1 + int(hs[p])
+	if p+2 > len(hs) {
+		return nil, false
+	}
+	end := p + 2 + int(binary.BigEndian.Uint16(hs[p:]))
+	p += 2
+	if end > len(hs) {
+		end = len(hs)
+	}
+	for p+4 <= end {
+		etype := binary.BigEndian.Uint16(hs[p:])
+		elen := int(binary.BigEndian.Uint16(hs[p+2:]))
+		p += 4
+		if p+elen > end {
+			return nil, false
+		}
+		if etype == 0x0010 { // application_layer_protocol_negotiation
+			return parseALPNExtension(hs[p : p+elen])
+		}
+		p += elen
+	}
+	return nil, false
+}
+
+// parseALPNExtension reads protocol names from an ALPN extension body:
+// protocol_list_len(2), then entries of len(1) + protocol.
+func parseALPNExtension(b []byte) ([]string, bool) {
+	if len(b) < 2 {
+		return nil, false
+	}
+	listLen := int(binary.BigEndian.Uint16(b))
+	if listLen > len(b)-2 {
+		return nil, false
+	}
+	p := 2
+	var out []string
+	for p+1 <= 2+listLen {
+		plen := int(b[p])
+		p++
+		if p+plen > 2+listLen {
+			return nil, false
+		}
+		out = append(out, string(b[p:p+plen]))
+		p += plen
+	}
+	return out, len(out) > 0
+}

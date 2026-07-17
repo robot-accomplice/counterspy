@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/andybalholm/brotli"
 )
 
 // maxBodyPreview bounds how much decoded body we render for one direction.
@@ -80,6 +82,8 @@ func decodeBody(enc string, raw []byte) (out []byte, decoded bool) {
 		fr := flate.NewReader(bytes.NewReader(raw))
 		defer fr.Close()
 		r = fr
+	case "br":
+		r = brotli.NewReader(bytes.NewReader(raw))
 	default:
 		return raw, false
 	}
