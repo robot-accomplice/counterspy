@@ -454,8 +454,11 @@ func TestInterceptView_RegularFileReadsLog(t *testing.T) {
 }
 
 // A path that is neither socket nor log is reported PLAINLY — never as a bogus "dial unix" against an
-// obvious .jsonl (the confusing error a real run produced) — and a bare --intercept names the default
-// socket so "is the daemon running?" reads correctly.
+// obvious .jsonl (the confusing error a real run produced).
+//
+// Uses a temp path, NOT the default socket: an earlier version asserted through runInterceptView("") and
+// so depended on /tmp/counterspy-intercept.sock being ABSENT — meaning it failed whenever the daemon it
+// tests was actually running. A test must not break because the product is in use.
 func TestInterceptView_MissingPathReportsPlainly(t *testing.T) {
 	origLog, origSock := interceptReadLog, interceptReadSocket
 	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
@@ -468,16 +471,29 @@ func TestInterceptView_MissingPathReportsPlainly(t *testing.T) {
 		return nil
 	}
 	var b bytes.Buffer
-	if code := runInterceptView("/tmp/definitely-not-here.jsonl", &b); code != 1 {
+	missing := filepath.Join(t.TempDir(), "definitely-not-here.jsonl")
+	if code := runInterceptView(missing, &b); code != 1 {
 		t.Fatalf("expected 1, got %d", code)
 	}
 	if !strings.Contains(b.String(), "no intercept socket or log at") || strings.Contains(b.String(), "dial unix") {
 		t.Fatalf("expected a plain not-found message, got:\n%s", b.String())
 	}
-	var d bytes.Buffer
-	runInterceptView("", &d)
-	if !strings.Contains(d.String(), interceptSocketPath) {
-		t.Fatalf("bare --intercept must name the default socket:\n%s", d.String())
+}
+
+// A bare --intercept uses the DEFAULT socket path. Asserted without caring whether that socket happens
+// to exist (a daemon may be running on this machine), so it holds either way.
+func TestInterceptView_BareFlagUsesTheDefaultSocket(t *testing.T) {
+	origSock := interceptReadSocket
+	t.Cleanup(func() { interceptReadSocket = origSock })
+	var dialed string
+	interceptReadSocket = func(p string, _ func(model.InterceptedFlow)) error {
+		dialed = p
+		return errors.New("not connecting in a test")
+	}
+	var b bytes.Buffer
+	runInterceptView("", &b)
+	if dialed != interceptSocketPath && !strings.Contains(b.String(), interceptSocketPath) {
+		t.Fatalf("bare --intercept must use %s; dialed=%q out=%q", interceptSocketPath, dialed, b.String())
 	}
 }
 
@@ -490,5 +506,84 @@ func TestInterceptView_UnexpandedTildeHint(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), "did not expand") {
 		t.Fatalf("expected a tilde hint, got:\n%s", b.String())
+	}
+}
+
+// --install-daemon takes its OWN consent: the session prompt buys "until Ctrl-C", not "across reboots".
+func TestInstallDaemon_RequiresItsOwnConsent(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	installed := false
+	interceptInstallDaemon = func(exe, home string) error { installed = true; return nil }
+	interceptStdin = strings.NewReader("n\n")
+	if code := runIntercept([]string{"--install-daemon"}, &bytes.Buffer{}); code != 1 {
+		t.Fatalf("declined consent must return 1, got %d", code)
+	}
+	if installed {
+		t.Fatal("a persistent daemon must NOT be installed without its own consent")
+	}
+}
+
+// The consent text must state the things that make it different from a session: persistence, no further
+// prompts, and that it logs while unattended.
+func TestInstallDaemon_ConsentStatesPersistence(t *testing.T) {
+	var b bytes.Buffer
+	confirmDaemonConsent(&b, strings.NewReader("n\n"), "/usr/local/bin/counterspy")
+	out := b.String()
+	for _, want := range []string{"PERSISTENT", "EVERY BOOT", "without asking again", "--uninstall-daemon"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("daemon consent must state %q:\n%s", want, out)
+		}
+	}
+}
+
+// A consented install passes an ABSOLUTE exe + the invoking user's home (so the daemon shares ONE CA —
+// launchd sets no HOME, so it would otherwise mint a second CA at /var/root that --uninstall never reverts).
+func TestInstallDaemon_PassesAbsoluteExeAndHome(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	home := t.TempDir()
+	interceptUserHomeDir = func() (string, error) { return home, nil }
+	interceptExecutable = func() (string, error) { return "/usr/local/bin/counterspy", nil }
+	var gotExe, gotHome string
+	interceptInstallDaemon = func(exe, h string) error { gotExe, gotHome = exe, h; return nil }
+	if code := runIntercept([]string{"--install-daemon", "--yes"}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if !filepath.IsAbs(gotExe) || gotExe != "/usr/local/bin/counterspy" {
+		t.Fatalf("exe = %q", gotExe)
+	}
+	if gotHome != home {
+		t.Fatalf("home = %q, want %q (the daemon must share the user's CA)", gotHome, home)
+	}
+}
+
+// --uninstall-daemon removes the service AND force-reverts trust/proxy: bootout signals the daemon to
+// tear down, but a crash/power loss means it may never have run.
+func TestUninstallDaemon_AlsoForcesTheRevert(t *testing.T) {
+	var log []string
+	fakeIntercept(t, &log, nil)
+	removed := false
+	interceptUninstallDaemon = func() error { removed = true; return nil }
+	if code := runIntercept([]string{"--uninstall-daemon"}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if !removed {
+		t.Fatal("the daemon must be removed")
+	}
+	if idx(log, "trust-uninstall") == -1 || idx(log, "proxy-teardown") == -1 {
+		t.Fatalf("uninstall-daemon must force-revert trust + proxy: %v", log)
+	}
+}
+
+// The daemon flags are part of the approved surface; a typo near them is still rejected.
+func TestInterceptFlags_DaemonSurfaceAcceptedTyposRejected(t *testing.T) {
+	for _, ok := range []string{"--install-daemon", "--uninstall-daemon"} {
+		if bad, isBad := unknownInterceptFlag([]string{ok}); isBad {
+			t.Fatalf("%q must be accepted, got rejected as %q", ok, bad)
+		}
+	}
+	if _, isBad := unknownInterceptFlag([]string{"--install-deamon"}); !isBad {
+		t.Fatal("a typo'd daemon flag must be rejected, not silently ignored")
 	}
 }

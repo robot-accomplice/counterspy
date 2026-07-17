@@ -103,6 +103,9 @@ Commands:
       --log[=path]           publish flows to a rotating 0600 JSONL log
       --uninstall            revert the CA trust + system proxy and exit
       --yes                  skip the interactive consent prompt
+      --install-daemon       install a PERSISTENT root daemon (re-arms at every boot, logs to
+                             /var/log/counterspy; prompts separately). counterspy scan will flag it.
+      --uninstall-daemon     remove the daemon and revert everything
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)

@@ -66,7 +66,10 @@ var (
 	// interceptUserHomeDir is a seam so the home-resolution-failure path is testable.
 	interceptUserHomeDir = os.UserHomeDir
 	// interceptChownSocket hands the stream socket to the invoking user (seam for tests).
-	interceptChownSocket = chownSocketToInvoker
+	interceptChownSocket     = chownSocketToInvoker
+	interceptInstallDaemon   = intercept.InstallDaemon
+	interceptUninstallDaemon = intercept.UninstallDaemon
+	interceptExecutable      = os.Executable
 )
 
 // sudoInvoker returns the uid/gid of the human who ran `sudo`, from the environment sudo sets. ok is
@@ -131,6 +134,7 @@ func unknownInterceptFlag(flags []string) (string, bool) {
 	for _, f := range flags {
 		switch {
 		case f == "--uninstall", f == "--yes", f == "--stream", f == "--log":
+		case f == "--install-daemon", f == "--uninstall-daemon":
 		case strings.HasPrefix(f, "--stream="), strings.HasPrefix(f, "--log="):
 		default:
 			return f, true
@@ -159,6 +163,12 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		return 1
 	}
 
+	if has(flags, "--uninstall-daemon") {
+		return runUninstallDaemon(dir, stdout)
+	}
+	if has(flags, "--install-daemon") {
+		return runInstallDaemon(dir, yes, stdout)
+	}
 	if uninstall {
 		return runInterceptUninstall(dir, stdout)
 	}
@@ -488,6 +498,83 @@ func renderFlowBody(arrow, raw string) string {
 		}
 	}
 	return b.String()
+}
+
+// runInstallDaemon installs the persistent LaunchDaemon. Requires root.
+//
+// It takes its OWN consent, separate from the session prompt, because it is a different decision: the
+// session prompt asks "decrypt my traffic until I press Ctrl-C"; this one asks "stay armed across
+// reboots, with no further prompts". Reusing the session prompt would let the smaller yes buy the
+// larger thing.
+func runInstallDaemon(dir string, yes bool, stdout io.Writer) int {
+	exe, err := interceptExecutable()
+	if err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot resolve my own path:", report.Clean(err.Error()))
+		return 1
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved // launchd needs the real target, not a symlink that may move
+	}
+	home, herr := interceptUserHomeDir()
+	if herr != nil || home == "" {
+		fmt.Fprintln(stdout, "intercept: cannot determine home directory")
+		return 1
+	}
+	// A daemon whose program lives in a build tree or home dir breaks when that tree moves — and
+	// counterspy's own scanner treats user-path persistence as a signal, so this is the shape the tool
+	// teaches people to distrust. Warn loudly; don't refuse (it's the user's machine).
+	if intercept.UnstableExePath(exe) {
+		fmt.Fprintln(stdout, "  ⚠", exe)
+		fmt.Fprintln(stdout, dim("    this is not a stable location for a root LaunchDaemon — it breaks if you move or"))
+		fmt.Fprintln(stdout, dim("    delete it. Install to /usr/local/bin first, then run --install-daemon from there."))
+	}
+	if !yes && !confirmDaemonConsent(stdout, interceptStdin, exe) {
+		fmt.Fprintln(stdout, "intercept: aborted (no consent).")
+		return 1
+	}
+	if err := interceptInstallDaemon(exe, home); err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot install the daemon:", report.Clean(err.Error()))
+		return 1
+	}
+	fmt.Fprintln(stdout, "intercept: daemon installed and started.")
+	fmt.Fprintln(stdout, "  definition:", intercept.DaemonPlistPath(), dim("(auditable — read it)"))
+	fmt.Fprintln(stdout, "  flow log:  ", intercept.DaemonFlowLog, dim("(0600; view: sudo counterspy console --intercept="+intercept.DaemonFlowLog+")"))
+	fmt.Fprintln(stdout, dim("  It is armed NOW and will re-arm at every boot until you run --uninstall-daemon."))
+	fmt.Fprintln(stdout, dim("  `counterspy scan` will flag this daemon. That is correct — it is a machine-wide MITM."))
+	return 0
+}
+
+// runUninstallDaemon removes the daemon and force-reverts the trust + proxy. Idempotent: this is the
+// self-heal path, so "nothing was installed" is a success, not an error.
+func runUninstallDaemon(dir string, stdout io.Writer) int {
+	if err := interceptUninstallDaemon(); err != nil {
+		fmt.Fprintln(stdout, "intercept: cannot remove the daemon:", report.Clean(err.Error()))
+		return 1
+	}
+	fmt.Fprintln(stdout, "intercept: daemon removed.")
+	// bootout signals the daemon, whose own teardown reverts trust + proxy — but it may have been
+	// killed uncleanly (a crash/power loss can't run teardown), so force the revert regardless.
+	return runInterceptUninstall(dir, stdout)
+}
+
+// confirmDaemonConsent is the PERSISTENT-install gate. It states the thing the session prompt does not:
+// this survives reboots and will not ask again.
+func confirmDaemonConsent(w io.Writer, r io.Reader, exe string) bool {
+	fmt.Fprintln(w, "counterspy intercept --install-daemon will install a PERSISTENT root daemon:")
+	fmt.Fprintln(w, "  •", exe, "intercept --yes --log")
+	fmt.Fprintln(w, "  • it starts NOW and re-arms at EVERY BOOT, without asking again")
+	fmt.Fprintln(w, "  • your local CA stays a trusted root and the system HTTPS proxy stays redirected")
+	fmt.Fprintln(w, "  • it decrypts and LOGS your TLS traffic to", intercept.DaemonFlowLog, "while you are not watching")
+	fmt.Fprintln(w, dim("  This is the point of it — and it is a standing machine-wide MITM, not a session."))
+	fmt.Fprintln(w, dim("  Remove it with: counterspy intercept --uninstall-daemon"))
+	fmt.Fprint(w, "Install the persistent daemon? [y/N] ")
+	line, _ := bufio.NewReader(r).ReadString('\n')
+	switch strings.TrimSpace(strings.ToLower(line)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // confirmConsent prints what arming does and requires an explicit y/yes. A MITM that installs a trusted
