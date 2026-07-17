@@ -3,18 +3,15 @@
   "installedAt": "2026-07-08T15:49:50.902Z",
   "updatedAt": "2026-07-08T15:49:50.902Z",
   "source": "architext-cli",
-  "cliVersion": "1.7.6",
-  "operation": "install",
-  "dataPolicy": "starter-written",
+  "cliVersion": "1.7.9",
+  "operation": "sync",
+  "dataPolicy": "preserved",
   "copiedInstallMigrated": false,
   "instructionFiles": {
     "AGENTS.md": true,
     "CLAUDE.md": true
   },
-  "managedInstructions": [
-    "AGENTS.md",
-    "CLAUDE.md"
-  ],
+  "managedInstructions": [],
   "gitignoreManaged": true,
   "syncChoices": {
     "branch": "current",
