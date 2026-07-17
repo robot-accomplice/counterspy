@@ -56,3 +56,25 @@
 - [ ] T-14b (sev:low, deferred cp-t7)  Render Facts["inline_code"] in the text report (report.dedupe
       only surfaces ancestry/argv today); the source is captured for RCA via JSON but not shown in the
       primary human surface. Deferred: reporting UX, separate from detection correctness. Origin: cp-t7 Audit F-4.
+- [x] T-15 (DONE cp-p1e) (sev:nit, cp-p1a Audit)  Move the Resolver interface from producer (internal/netname) to
+      its consumer (internal/egress) at wiring time — idiomatic Go; netname.Cache satisfies it
+      structurally, letting netname/resolver.go be deleted. Do in cp-p1c (egress wiring).
+- [x] T-16 (DONE cp-p1d) (sev:med, cp-p1c Audit F-1)  Harden internal/inspect bpfCapture for concurrent Close: add
+      an atomic "closed" flag set by Close() and checked in Next() (return io.EOF if closed, incl. when
+      a racing read errors), so Observer.Close→Run always ends via a clean io.EOF, not a benign-but-
+      unsynchronized fd-close-during-read. Do in cp-p1d (already editing bpf_darwin.go there).
+- [ ] T-17 (sev:low, cp-p1h Audit F-1)  Surface the passive DNS observer's terminating error for RCA
+      (Rule 14). Can't stderr mid-alt-screen; do it in the --non-interactive/logging mode
+      (roadmap-non-interactive-mode), which has a file/stdout channel. Today: mid-session read failure
+      degrades destinations to IPs with no log line.
+- [ ] T-18 (sev:low, cp-p2c F-3)  High-entropy body-secret detection for the intercept/inspect content
+      (feature #4 territory): Redact masks pattern-exact credential fields + known headers, but a
+      free-form high-entropy secret in a body (a raw token with no field name) is still shown. Add the
+      fuzzy detector when feature #4 lands.
+- [ ] T-19 (sev:med, cp-p2d)  The intercept daemon's unix socket path MUST be short (<~104 chars,
+      macOS sun_path limit) — use e.g. /tmp/counterspy-intercept.sock or a short ~ path, not a long
+      nested path. Surfaced by a socket test that overflowed t.TempDir()'s path. Enforce in cp-p2f.
+- [ ] T-20 (sev:med, cp-spec2.5-r2 Audit F-6) The root proxy's CONNECT read (internal/intercept/proxy.go:70-72,
+      http.ReadRequest) accepts UNBOUNDED headers from any local client, bounded only by the 10s
+      connectTimeout — live unbounded memory exposure in the root daemon. Bound it (LimitReader /
+      MaxHeaderBytes-style wrap) in Phase 2.5's pump work, where §3.1.5 already mandates a header cap.
