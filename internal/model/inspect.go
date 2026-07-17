@@ -55,7 +55,14 @@ var (
 	// followed by = or : and a value. Pattern-exact on well-known field NAMES (like the headers), not
 	// fuzzy high-entropy detection — that stays feature #4 (T-18). Decrypted bodies now flow through
 	// Redact via the intercept proxy, so masking the obvious body credentials matters (cp-p2c F-3).
-	reBodySecret = regexp.MustCompile(`(?i)("?\b(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|client[_-]?secret|authorization)"?\s*[:=]\s*)("[^"]*"|[^&\s"]+)`)
+	// The value alternation MUST include a dangling open-quote case (`"[^"]*$`). A capture is bounded
+	// (the proxy keeps only FlowCaptureBytes per direction), so a JSON body can be cut mid-value: the
+	// text ends `"api_key":"sk_live_ABC` with no closing quote. Without that alternative the quoted
+	// branch cannot match (it requires a close quote) and the unquoted branch cannot start (it excludes
+	// `"`), so the whole match FAILS and the partial secret is published in the clear. Same lesson as
+	// rePEMOpen above, which was added for a dangling BEGIN and never generalised to body fields
+	// (cp-p25 Audit F-1 — reproduced against the live pipeline, not hypothetical).
+	reBodySecret = regexp.MustCompile(`(?i)("?\b(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|client[_-]?secret|authorization)"?\s*[:=]\s*)("[^"]*"|"[^"]*$|[^&\s"]+)`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under

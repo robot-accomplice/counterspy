@@ -83,3 +83,41 @@ func TestRedact_MasksBodyCredentialFields(t *testing.T) {
 		t.Fatalf("non-secret field must survive: %s", out)
 	}
 }
+
+// A BOUNDED capture cuts bodies mid-value, so masking must survive truncation. Before the dangling
+// open-quote alternative, `"api_key":"sk_live_ABC` (no closing quote) matched NEITHER value branch —
+// the quoted one needs a close quote, the unquoted one excludes `"` — so the whole match failed and the
+// partial secret was published in the clear, to the socket and the 0600 log. This shipped, and the
+// daemon writes exactly these truncated bodies. Reproduced against the live pipeline before the fix.
+func TestRedact_TruncatedQuotedBodySecretIsMasked(t *testing.T) {
+	full := `{"user":"jon","api_key":"sk_live_51H8xN2eKq9zTg_NOT_A_REAL_KEY"}`
+	if got := Redact(full); strings.Contains(got, "sk_live") {
+		t.Fatalf("baseline: a complete body must mask: %s", got)
+	}
+	// Cut mid-value, exactly as the capture bound does on a larger body.
+	for _, cut := range []string{
+		`{"user":"jon","api_key":"sk_live_51H8xN2eKq9zTg`,
+		`{"user":"jon","api_key":"`,
+		`{"password":"hunter2`,
+		`{"access_token":"ya29.a0AfH6SM`,
+	} {
+		got := Redact(cut)
+		if strings.Contains(got, "sk_live") || strings.Contains(got, "hunter2") || strings.Contains(got, "ya29.a0") {
+			t.Fatalf("truncated secret leaked: %q -> %q", cut, got)
+		}
+	}
+}
+
+// The fix must not over-mask: a COMPLETE quoted value followed by more JSON still masks only the value,
+// and later fields survive.
+func TestRedact_DanglingRuleDoesNotSwallowLaterFields(t *testing.T) {
+	got := Redact(`{"api_key":"sk_live_ABC","user":"jon","host":"example.com"}`)
+	if strings.Contains(got, "sk_live_ABC") {
+		t.Fatalf("secret leaked: %s", got)
+	}
+	for _, keep := range []string{`"user":"jon"`, `"host":"example.com"`} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("the dangling rule must not swallow later fields (%s missing): %s", keep, got)
+		}
+	}
+}
