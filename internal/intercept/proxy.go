@@ -40,8 +40,8 @@ type Proxy struct {
 	CA   *ca.CA
 	Dial dialFunc // nil → defaultDial (verified upstream)
 	Sink publish.Sink
-	// Owner maps a client's local port to the process that owns it. nil → portOwner (lsof on darwin).
-	Owner func(port int) (pid int, name string, ok bool)
+	// Owner maps a client's local port to the process that owns it. nil → portOwner (lsof + proc_pidpath on darwin).
+	Owner func(port int) (pid int, name string, path string, ok bool)
 }
 
 // Serve accepts on l until it errors (listener closed), handling each connection in its own goroutine.
@@ -108,11 +108,11 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	}()
 	// Attribute BEFORE the tunnel runs: the lookup needs the client's socket to still be open, and a
 	// long-lived flow would otherwise be attributed (or not) minutes later, after the app may have exited.
-	pid, app := p.owner(conn)
+	pid, app, path := p.owner(conn)
 	target, err := readConnect(conn)
 	if err != nil {
 		p.publish(model.InterceptedFlow{
-			At: nowRFC3339(), Status: model.FlowError, PID: pid, App: app,
+			At: nowRFC3339(), Status: model.FlowError, PID: pid, App: app, Path: path,
 			DestName: "(unresolved: " + firstLine(err.Error()) + ")",
 		})
 		conn.Close()
@@ -123,26 +123,26 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 		return
 	}
 	flow := intercept(conn, target, p.CA, dial) // intercept owns closing conn on the normal path
-	flow.PID, flow.App = pid, app
+	flow.PID, flow.App, flow.Path = pid, app, path
 	p.publish(flow)
 }
 
 // owner attributes a connection to the process that opened it. An unattributable flow is published
 // UNATTRIBUTED rather than dropped — a flow we can't name is still one the user needs to see (Rule 13).
-func (p *Proxy) owner(conn net.Conn) (int, string) {
+func (p *Proxy) owner(conn net.Conn) (int, string, string) {
 	lookup := p.Owner
 	if lookup == nil {
 		lookup = portOwner
 	}
 	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 	if err != nil {
-		return 0, ""
+		return 0, "", ""
 	}
-	pid, name, ok := lookup(int(ap.Port()))
+	pid, name, path, ok := lookup(int(ap.Port()))
 	if !ok {
-		return 0, ""
+		return 0, "", ""
 	}
-	return pid, name
+	return pid, name, path
 }
 
 func (p *Proxy) publish(fl model.InterceptedFlow) {

@@ -60,14 +60,26 @@ func TestParseLsofPorts_SkipsListeners(t *testing.T) {
 // than dropping it.
 func TestPortOwner_UnknownPortIsNotFatal(t *testing.T) {
 	orig := runLsof
-	t.Cleanup(func() { runLsof = orig; ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{} })
+	origProcPidPath := procPidPath
+	t.Cleanup(func() {
+		runLsof = orig
+		procPidPath = origProcPidPath
+		ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
+	})
 	runLsof = func() (string, error) { return lsofFixture, nil }
+	procPidPath = func(pid int) (string, bool) {
+		if pid == 73722 {
+			return "/Applications/Safari.app/Contents/MacOS/Safari", true
+		}
+		return "", false
+	}
 	ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
 
-	if pid, name, ok := portOwner(54321); !ok || pid != 73722 || name != "Safari" {
-		t.Fatalf("known port: got %d/%q/%v", pid, name, ok)
+	pid, name, path, ok := portOwner(54321)
+	if !ok || pid != 73722 || name != "Safari" || path != "/Applications/Safari.app/Contents/MacOS/Safari" {
+		t.Fatalf("known port: got %d/%q/%q/%v", pid, name, path, ok)
 	}
-	if _, _, ok := portOwner(9999); ok {
+	if _, _, _, ok := portOwner(9999); ok {
 		t.Fatal("an unknown port must report ok=false, not a wrong attribution")
 	}
 }
@@ -75,14 +87,39 @@ func TestPortOwner_UnknownPortIsNotFatal(t *testing.T) {
 // The sweep is cached: a burst of lookups must not fork lsof per flow.
 func TestPortOwner_SweepIsCached(t *testing.T) {
 	orig := runLsof
-	t.Cleanup(func() { runLsof = orig; ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{} })
+	origProcPidPath := procPidPath
+	t.Cleanup(func() {
+		runLsof = orig
+		procPidPath = origProcPidPath
+		ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
+	})
 	sweeps := 0
 	runLsof = func() (string, error) { sweeps++; return lsofFixture, nil }
+	procPidPath = func(pid int) (string, bool) { return "/some/path", true }
 	ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
 	for i := 0; i < 20; i++ {
 		portOwner(54321) // all hits
 	}
 	if sweeps != 1 {
 		t.Fatalf("a hit must reuse the snapshot; swept %d times", sweeps)
+	}
+}
+
+// procPidPath failures degrade to path="" rather than losing the attribution.
+func TestPortOwner_PathFallback(t *testing.T) {
+	orig := runLsof
+	origProcPidPath := procPidPath
+	t.Cleanup(func() {
+		runLsof = orig
+		procPidPath = origProcPidPath
+		ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
+	})
+	runLsof = func() (string, error) { return lsofFixture, nil }
+	procPidPath = func(int) (string, bool) { return "", false }
+	ownerMap, ownerAt, ownerLast = nil, time.Time{}, time.Time{}
+
+	pid, name, path, ok := portOwner(54321)
+	if !ok || pid != 73722 || name != "Safari" || path != "" {
+		t.Fatalf("expected pid/name with empty path fallback, got %d/%q/%q/%v", pid, name, path, ok)
 	}
 }

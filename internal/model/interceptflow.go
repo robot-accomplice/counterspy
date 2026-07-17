@@ -9,6 +9,7 @@ type InterceptedFlow struct {
 	At        string `json:"at"`            // RFC3339 capture time
 	PID       int    `json:"pid,omitempty"` // the originating process, when it could be attributed
 	App       string `json:"app,omitempty"` // its process name ("Safari"); "" when unattributed
+	Path      string `json:"path,omitempty"` // resolved executable path — the Exfiltration join key
 	DestIP    string `json:"dest_ip"`
 	DestName  string `json:"dest_name,omitempty"` // SNI or passively-resolved name, if known
 	SNI       string `json:"sni,omitempty"`

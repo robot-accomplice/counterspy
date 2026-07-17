@@ -2,6 +2,12 @@
 
 package intercept
 
+/*
+#include <libproc.h>
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"context"
 	"os"
@@ -10,7 +16,26 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
+
+// procPidPath resolves the executable path of pid using proc_pidpath(3).
+// It is a package var so tests can inject a fake.
+var procPidPath = func(pid int) (string, bool) {
+	var buf [4096]byte
+	n := C.proc_pidpath(C.int(pid), unsafe.Pointer(&buf[0]), C.uint32_t(len(buf)))
+	if n <= 0 {
+		return "", false
+	}
+	end := int(n)
+	for i := 0; i < end; i++ {
+		if buf[i] == 0 {
+			end = i
+			break
+		}
+	}
+	return string(buf[:end]), true
+}
 
 // Attribution: which APP made this request?
 //
@@ -36,6 +61,7 @@ const (
 type ownerEntry struct {
 	pid  int
 	name string
+	path string // executable path from proc_pidpath
 }
 
 var (
@@ -112,24 +138,24 @@ func portOf(addr string) (int, bool) {
 // portOwner reports the process owning local TCP port `port`. ok=false when it can't be attributed —
 // the caller must show the flow anyway, unattributed, rather than drop it (Rule 13: a flow we can't
 // name is still a flow the user needs to see).
-func portOwner(port int) (int, string, bool) {
+func portOwner(port int) (pid int, name string, path string, ok bool) {
 	ownerMu.Lock()
 	defer ownerMu.Unlock()
 	if ownerMap == nil || time.Since(ownerAt) > ownerTTL {
 		sweepOwners()
 	}
 	if e, ok := ownerMap[port]; ok {
-		return e.pid, e.name, true
+		return e.pid, e.name, e.path, true
 	}
 	// A miss is expected for a connection newer than the snapshot — re-sweep, but throttled so a burst
 	// of new flows can't fork lsof per flow.
 	if time.Since(ownerLast) > ownerMinRefresh {
 		sweepOwners()
 		if e, ok := ownerMap[port]; ok {
-			return e.pid, e.name, true
+			return e.pid, e.name, e.path, true
 		}
 	}
-	return 0, "", false
+	return 0, "", "", false
 }
 
 // sweepOwners refreshes the snapshot. Caller holds ownerMu. A failed sweep keeps the previous map
@@ -141,6 +167,12 @@ func sweepOwners() {
 		return
 	}
 	if m := parseLsofPorts(out, selfPID); len(m) > 0 || ownerMap == nil {
+		for port, e := range m {
+			if p, ok := procPidPath(e.pid); ok {
+				e.path = p
+			}
+			m[port] = e
+		}
 		ownerMap, ownerAt = m, time.Now()
 	}
 }
