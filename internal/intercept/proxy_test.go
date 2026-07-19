@@ -184,7 +184,7 @@ func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 	pxLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer pxLn.Close()
 
-	got := make(chan model.InterceptedMessage, 1)
+	got := make(chan model.InterceptedMessage, 4)
 	p := &Proxy{CA: proxyCA, Dial: dialTo(dest, upCA), Sink: chanSink(got)}
 	go p.Serve(pxLn)
 
@@ -196,7 +196,18 @@ func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	cc.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
-	io.ReadAll(cc)
+	br := bufio.NewReader(cc)
+	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal("client read response:", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "hi" {
+		t.Fatalf("client received wrong body: %q", body)
+	}
+	cc.Close()
+
 	select {
 	case m := <-got:
 		if m.Status != model.FlowDecrypted {

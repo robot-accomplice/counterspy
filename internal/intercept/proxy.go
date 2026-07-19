@@ -40,7 +40,10 @@ import (
 type Proxy struct {
 	CA   *ca.CA
 	Dial dialFunc // nil → defaultDial (verified upstream)
-	Sink publish.Sink
+	// DialPlain dials the real upstream over plain TCP for the h2-only ALPN bypass.
+	// nil → net.DialTimeout with dialTimeout.
+	DialPlain func(network, addr string, timeout time.Duration) (net.Conn, error)
+	Sink      publish.Sink
 	// Owner maps a client's local port to the process that owns it. nil → portOwner (lsof + proc_pidpath on darwin).
 	Owner func(port int) (pid int, name string, path string, ok bool)
 
@@ -68,31 +71,48 @@ func (p *Proxy) Serve(l net.Listener) error {
 // says nothing can't pin a goroutine.
 const connectTimeout = 10 * time.Second
 
-// readConnect reads the client's `CONNECT host:port HTTP/1.1` request and returns the target authority.
-// The client naming its own destination is what replaces the pf/DIOCNATLOOK lookup. A non-CONNECT
-// request is an error: we are configured ONLY as the secure-web (https) proxy, so plain-HTTP requests
-// are not ours to serve and must not be silently swallowed.
-func readConnect(conn net.Conn) (string, error) {
+// readConnect reads the client's `CONNECT host:port HTTP/1.1` request and returns the target authority
+// and a connection that replays any bytes already buffered beyond the request. Those buffered bytes are
+// the start of the TLS ClientHello; preserving them lets us peek ALPN before deciding whether to MITM.
+func readConnect(conn net.Conn) (string, net.Conn, error) {
 	conn.SetReadDeadline(time.Now().Add(connectTimeout))
-	req, err := http.ReadRequest(bufio.NewReader(conn))
+	br := bufio.NewReader(conn)
+	req, err := http.ReadRequest(br)
 	if err != nil {
-		return "", fmt.Errorf("read CONNECT: %w", err)
+		conn.SetReadDeadline(time.Time{})
+		return "", nil, fmt.Errorf("read CONNECT: %w", err)
 	}
 	if req.Method != http.MethodConnect {
-		return "", fmt.Errorf("expected CONNECT, got %s", req.Method)
+		conn.SetReadDeadline(time.Time{})
+		return "", nil, fmt.Errorf("expected CONNECT, got %s", req.Method)
 	}
 	host := req.Host
 	if host == "" {
 		host = req.URL.Host
 	}
 	if host == "" {
-		return "", fmt.Errorf("CONNECT with no target")
+		conn.SetReadDeadline(time.Time{})
+		return "", nil, fmt.Errorf("CONNECT with no target")
 	}
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		host = net.JoinHostPort(host, "443") // authority may omit the port
 	}
 	conn.SetReadDeadline(time.Time{})
-	return host, nil
+	return host, &bufConn{Conn: conn, buf: br}, nil
+}
+
+// bufConn is a net.Conn that replays bytes already buffered in a bufio.Reader before reading from the
+// underlying connection. This preserves pipelined bytes (e.g. a ClientHello already sent after CONNECT).
+type bufConn struct {
+	net.Conn
+	buf *bufio.Reader
+}
+
+func (b *bufConn) Read(p []byte) (int, error) {
+	if b.buf.Buffered() > 0 {
+		return b.buf.Read(p)
+	}
+	return b.Conn.Read(p)
 }
 
 // connectEstablished is the tunnel-open response; after it the bytes are raw TLS.
@@ -115,22 +135,17 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	// long-lived flow would otherwise be attributed (or not) minutes later, after the app may have exited.
 	pid, app, path := p.owner(conn)
 	connID := p.nextConnID()
-	target, err := readConnect(conn)
+	target, wrapped, err := readConnect(conn)
 	if err != nil {
-		p.publish(flowToMessage(model.InterceptedFlow{
-			At: nowRFC3339(), Status: model.FlowError, PID: pid, App: app, Path: path,
-			DestName: "(unresolved: " + firstLine(err.Error()) + ")",
-		}, connID, 0))
+		p.publish(connEvent(connID, pid, app, path, model.FlowError, "(unresolved: "+firstLine(err.Error())+")"))
 		conn.Close()
 		return
 	}
-	if _, werr := conn.Write([]byte(connectEstablished)); werr != nil {
-		conn.Close()
+	if _, werr := wrapped.Write([]byte(connectEstablished)); werr != nil {
+		wrapped.Close()
 		return
 	}
-	flow := intercept(conn, target, p.CA, dial) // intercept owns closing conn on the normal path
-	flow.PID, flow.App, flow.Path = pid, app, path
-	p.publish(flowToMessage(flow, connID, 1))
+	p.pump(wrapped, target, pid, app, path, connID, dial)
 }
 
 func (p *Proxy) nextConnID() string {
@@ -167,37 +182,19 @@ func (p *Proxy) publish(msg model.InterceptedMessage) {
 	}
 }
 
-// flowToMessage is a TEMPORARY bridge: the old per-flow capture is folded into
-// a single per-connection message so the rest of the proxy still compiles while
-// Task 4 replaces this with real per-message pumping. It will be deleted.
-func flowToMessage(fl model.InterceptedFlow, connID string, seq int) model.InterceptedMessage {
-	msg := model.InterceptedMessage{
+// connEvent builds a Seq-0 connection-level event.
+func connEvent(connID string, pid int, app, path, status, reason string) model.InterceptedMessage {
+	return model.InterceptedMessage{
 		SchemaVersion: model.InterceptMessageSchemaVersion,
 		ConnID:        connID,
-		Seq:           seq,
-		At:            fl.At,
-		PID:           fl.PID,
-		App:           fl.App,
-		Path:          fl.Path,
-		DestIP:        fl.DestIP,
-		DestName:      fl.DestName,
-		SNI:           fl.SNI,
-		Status:        fl.Status,
-		Bytes:         fl.SentBytes + fl.RecvBytes,
-		Total:         fl.SentBytes + fl.RecvBytes,
+		Seq:           0,
+		At:            nowRFC3339(),
+		PID:           pid,
+		App:           app,
+		Path:          path,
+		Status:        status,
+		Reason:        reason,
 	}
-	switch fl.Status {
-	case model.FlowDecrypted:
-		msg.State = model.StateComplete
-		if fl.SentText != "" && fl.RecvText != "" {
-			msg.Text = fl.SentText + "\n---\n" + fl.RecvText
-		} else {
-			msg.Text = fl.SentText + fl.RecvText
-		}
-	case model.FlowError:
-		msg.Reason = fl.DestName
-	}
-	return msg
 }
 
 // firstLine keeps an error to one displayable line (it reaches the console's flow list).
@@ -329,7 +326,9 @@ func copyIdle(dst net.Conn, src net.Conn, cap *capBuf) {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				return
 			}
-			cap.Write(buf[:n])
+			if cap != nil {
+				cap.Write(buf[:n])
+			}
 		}
 		if err != nil {
 			return
