@@ -3,6 +3,7 @@ package publish
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -27,38 +28,82 @@ func removeIfSocket(path string) error {
 	return os.Remove(path)
 }
 
-// scanFlows reads newline-delimited JSON flows from r, size-bounding each line (no OOM on a giant
-// record) and skipping a malformed one, calling fn with each sanitized flow. Shared by the socket and
-// log readers — both consume untrusted input (anyone who can write the socket/log).
-func scanFlows(r io.Reader, fn func(model.InterceptedFlow)) error {
+// scanMessages reads newline-delimited JSON messages from r, size-bounding each line (no OOM on a
+// giant record) and skipping a malformed one, calling fn with each sanitized message. Shared by the
+// socket and log readers — both consume untrusted input (anyone who can write the socket/log).
+func scanMessages(r io.Reader, fn func(model.InterceptedMessage)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxFlowLine)
+	var mismatches int
+	var mismatchNoticed bool
 	for sc.Scan() {
-		var fl model.InterceptedFlow
-		if json.Unmarshal(sc.Bytes(), &fl) == nil {
-			fn(sanitizeFlow(fl))
+		line := sc.Bytes()
+		var msg model.InterceptedMessage
+		if json.Unmarshal(line, &msg) != nil {
+			mismatches++
+			if !mismatchNoticed {
+				mismatchNoticed = true
+				fn(synthesizeVersionError("malformed JSON"))
+			}
+			continue
 		}
+		if msg.SchemaVersion != model.InterceptMessageSchemaVersion {
+			mismatches++
+			if !mismatchNoticed {
+				mismatchNoticed = true
+				fn(synthesizeVersionError(fmt.Sprintf("unsupported record version (got %d, want %d) — is the daemon the same build?", msg.SchemaVersion, model.InterceptMessageSchemaVersion)))
+			}
+			continue
+		}
+		fn(sanitizeMessage(msg))
 	}
 	return sc.Err() // bufio.ErrTooLong if a line exceeded the cap — bounded, not an OOM
 }
 
-// sanitizeFlow validates a flow read from an UNTRUSTED source. An unknown Status is coerced to
-// FlowError so a malformed record can't imply a state (e.g. "decrypted") it doesn't represent (the
-// deferred cp-p2a consumer-side validation); text fields are length-capped so an oversized record
-// can't blow up the viewer's memory. The TUI still applies model.Clean at render time.
-func sanitizeFlow(fl model.InterceptedFlow) model.InterceptedFlow {
-	switch fl.Status {
-	case model.FlowDecrypted, model.FlowPinned, model.FlowOpaque, model.FlowError:
-	default:
-		fl.Status = model.FlowError
+// synthesizeVersionError creates a single stream-level error event for the first malformed or
+// version-mismatched record. It carries the current schema version so it passes the sanitize gate
+// and is rendered in the inspector chrome with its reason.
+func synthesizeVersionError(reason string) model.InterceptedMessage {
+	return model.InterceptedMessage{
+		SchemaVersion: model.InterceptMessageSchemaVersion,
+		Status:        model.FlowError,
+		Reason:        reason,
 	}
-	fl.SentText = capStr(fl.SentText, maxFieldLen)
-	fl.RecvText = capStr(fl.RecvText, maxFieldLen)
-	fl.DestName = capStr(fl.DestName, 512)
-	fl.SNI = capStr(fl.SNI, 512)
-	fl.At = capStr(fl.At, 64) // a forged producer could set an oversized/garbage timestamp
-	fl.DestIP = capStr(fl.DestIP, 64)
-	return fl
+}
+
+// sanitizeMessage validates a message read from an UNTRUSTED source. Unknown Status is coerced per
+// event class (message vs Seq-0 connection event) so a malformed record can't imply a state it does
+// not represent; text fields are length-capped so an oversized record can't blow up the viewer's
+// memory. The TUI still applies model.Clean at render time.
+func sanitizeMessage(msg model.InterceptedMessage) model.InterceptedMessage {
+	if msg.Seq == 0 {
+		// Connection-level event: State must be empty; Status is one of the closed set.
+		switch msg.Status {
+		case model.FlowPinned, model.FlowOpaque, model.FlowError:
+		default:
+			msg.Status = model.FlowError
+		}
+		msg.State = ""
+	} else {
+		// Message event: Status is decrypted; State is one of the closed set.
+		msg.Status = model.FlowDecrypted
+		switch msg.State {
+		case model.StateComplete, model.StatePartial, model.StateStreaming:
+		default:
+			msg.State = model.StatePartial
+		}
+	}
+
+	msg.App = capStr(msg.App, 256)
+	msg.Path = capStr(msg.Path, 4096)
+	msg.Text = capStr(msg.Text, maxFieldLen)
+	msg.Reason = capStr(msg.Reason, 512)
+	msg.DestName = capStr(msg.DestName, 512)
+	msg.SNI = capStr(msg.SNI, 512)
+	msg.At = capStr(msg.At, 64)
+	msg.DestIP = capStr(msg.DestIP, 64)
+	msg.ConnID = capStr(msg.ConnID, 128)
+	return msg
 }
 
 func capStr(s string, n int) string {

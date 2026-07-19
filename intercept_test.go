@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ import (
 // recSink records its Close into the shared ordering log.
 type recSink struct{ log *[]string }
 
-func (r recSink) Publish(model.InterceptedFlow) error { return nil }
+func (r recSink) Publish(model.InterceptedMessage) error { return nil }
 func (r recSink) Close() error                        { *r.log = append(*r.log, "sink-close"); return nil }
 
 // fakeIntercept swaps every intercept seam with a recorder writing into `log`, and restores on cleanup.
@@ -290,102 +289,6 @@ func TestUsage_ListsInterceptAndApprovedFlagsOnly(t *testing.T) {
 	}
 }
 
-// liveSock creates a REAL unix socket at a SHORT path — the viewer now Lstats the path to dispatch, and
-// macOS caps sun_path at ~104B so t.TempDir()'s long name can't be used (T-19).
-func liveSock(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "cs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(dir, "s.sock")
-	l, err := net.Listen("unix", p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { l.Close(); os.RemoveAll(dir) })
-	return p
-}
-
-// The --intercept viewer streams flows from a live socket and renders a decrypted flow's masked body.
-func TestInterceptView_RendersDecryptedFlow(t *testing.T) {
-	origRead := interceptReadSocket
-	t.Cleanup(func() { interceptReadSocket = origRead })
-	sock := liveSock(t)
-	interceptReadSocket = func(path string, fn func(model.InterceptedFlow)) error {
-		if path != sock {
-			t.Fatalf("socket path expected %q, got %q", sock, path)
-		}
-		fn(model.InterceptedFlow{At: "T", DestName: "api.example.com", Status: model.FlowDecrypted,
-			SentText: "GET /v1 HTTP/1.1\nAuthorization: ***", RecvText: "HTTP/1.1 200 OK", SentBytes: 5, RecvBytes: 9})
-		return nil
-	}
-	var b bytes.Buffer
-	if code := runInterceptView(sock, &b); code != 0 {
-		t.Fatalf("code=%d", code)
-	}
-	out := b.String()
-	for _, want := range []string{"api.example.com", "decrypted", "GET /v1", "HTTP/1.1 200 OK"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("viewer output missing %q:\n%s", want, out)
-		}
-	}
-}
-
-// A pinned/opaque/error flow shows its status and NO content (never implies plaintext it lacks).
-func TestInterceptView_NonDecryptedShowsNoContent(t *testing.T) {
-	out := formatFlow(model.InterceptedFlow{At: "T", DestName: "pinned.example", Status: model.FlowPinned,
-		SentText: "should-not-render", RecvText: "should-not-render"})
-	if strings.Contains(out, "should-not-render") {
-		t.Fatalf("non-decrypted flow must not render captured text:\n%s", out)
-	}
-	if !strings.Contains(out, "pinned") {
-		t.Fatalf("status must be shown:\n%s", out)
-	}
-}
-
-// A LIVE socket whose stream then errors surfaces it and exits non-zero. Must use a real socket: a
-// nonexistent path now short-circuits with a not-found message, which would pass this test for the
-// wrong reason (never reaching the stream at all).
-func TestInterceptView_StreamErrorNonZero(t *testing.T) {
-	origRead := interceptReadSocket
-	t.Cleanup(func() { interceptReadSocket = origRead })
-	reached := false
-	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
-		reached = true
-		return errors.New("stream broke")
-	}
-	if code := runInterceptView(liveSock(t), &bytes.Buffer{}); code != 1 || !reached {
-		t.Fatalf("stream error must return 1 via the stream; code=%d reached=%v", code, reached)
-	}
-}
-
-// cp-p2g review: a multi-line body must render as MULTIPLE lines (clean runs per-line, after the split),
-// and a single enormous line must be width-capped — neither can collapse or flood.
-func TestFormatFlow_MultilineAndWidthCapped(t *testing.T) {
-	body := "GET /v1 HTTP/1.1\nAuthorization: ***\nHost: api.example.com"
-	out := formatFlow(model.InterceptedFlow{At: "T", DestName: "api.example.com", Status: model.FlowDecrypted, SentText: body})
-	// Three body lines must survive as separate lines (not glued into one).
-	if !strings.Contains(out, "→ GET /v1 HTTP/1.1\n") || !strings.Contains(out, "Host: api.example.com") {
-		t.Fatalf("multi-line body must stay multi-line:\n%q", out)
-	}
-	// A single 10k-rune line must be width-capped (nowhere near 10k on one line).
-	huge := formatFlow(model.InterceptedFlow{At: "T", Status: model.FlowDecrypted, SentText: strings.Repeat("A", 10000)})
-	for _, ln := range strings.Split(huge, "\n") {
-		if len([]rune(ln)) > flowMaxWidth+10 {
-			t.Fatalf("a line escaped the width cap: %d runes", len([]rune(ln)))
-		}
-	}
-}
-
-// cp-p2g review: a forged At with an escape sequence must be stripped at render (untrusted socket input).
-func TestFormatFlow_CleansUntrustedAt(t *testing.T) {
-	out := formatFlow(model.InterceptedFlow{At: "\x1b[31mHACK\x1b[0m", DestName: "x", Status: model.FlowError})
-	if strings.Contains(out, "\x1b") {
-		t.Fatalf("escape sequence in At must be stripped:\n%q", out)
-	}
-}
-
 // The root daemon must hand the stream socket to the invoking (sudo) user — macOS enforces write
 // permission on unix connect(), so a root-owned 0755 socket would refuse the non-root console.
 func TestSudoInvoker_ReadsSudoEnv(t *testing.T) {
@@ -418,94 +321,6 @@ func TestIntercept_ChownFailureAbortsBeforeArming(t *testing.T) {
 	}
 	if idx(log, "trust-install") != -1 || idx(log, "proxy-install") != -1 {
 		t.Fatalf("must not arm when the stream socket is unusable: %v", log)
-	}
-}
-
-// --intercept dispatches on what the path IS: a regular file reads the rotating --log (previously
-// unreachable — publish.ReadLog had no production caller), a socket streams live.
-func TestInterceptView_RegularFileReadsLog(t *testing.T) {
-	origLog, origSock := interceptReadLog, interceptReadSocket
-	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
-
-	f := filepath.Join(t.TempDir(), "flows.jsonl")
-	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	logRead := false
-	interceptReadLog = func(p string, fn func(model.InterceptedFlow)) error {
-		logRead = true
-		if p != f {
-			t.Fatalf("log path %q != %q", p, f)
-		}
-		fn(model.InterceptedFlow{At: "T", DestName: "logged.example", Status: model.FlowDecrypted, SentText: "GET /x"})
-		return nil
-	}
-	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
-		t.Fatal("a regular file must NOT be dialed as a socket")
-		return nil
-	}
-	var b bytes.Buffer
-	if code := runInterceptView(f, &b); code != 0 {
-		t.Fatalf("code=%d", code)
-	}
-	if !logRead || !strings.Contains(b.String(), "logged.example") {
-		t.Fatalf("log flows must render: read=%v out=%q", logRead, b.String())
-	}
-}
-
-// A path that is neither socket nor log is reported PLAINLY — never as a bogus "dial unix" against an
-// obvious .jsonl (the confusing error a real run produced).
-//
-// Uses a temp path, NOT the default socket: an earlier version asserted through runInterceptView("") and
-// so depended on /tmp/counterspy-intercept.sock being ABSENT — meaning it failed whenever the daemon it
-// tests was actually running. A test must not break because the product is in use.
-func TestInterceptView_MissingPathReportsPlainly(t *testing.T) {
-	origLog, origSock := interceptReadLog, interceptReadSocket
-	t.Cleanup(func() { interceptReadLog, interceptReadSocket = origLog, origSock })
-	interceptReadLog = func(string, func(model.InterceptedFlow)) error {
-		t.Fatal("a missing path must not be read as a log")
-		return nil
-	}
-	interceptReadSocket = func(string, func(model.InterceptedFlow)) error {
-		t.Fatal("a missing path must not be dialed as a socket")
-		return nil
-	}
-	var b bytes.Buffer
-	missing := filepath.Join(t.TempDir(), "definitely-not-here.jsonl")
-	if code := runInterceptView(missing, &b); code != 1 {
-		t.Fatalf("expected 1, got %d", code)
-	}
-	if !strings.Contains(b.String(), "no intercept socket or log at") || strings.Contains(b.String(), "dial unix") {
-		t.Fatalf("expected a plain not-found message, got:\n%s", b.String())
-	}
-}
-
-// A bare --intercept uses the DEFAULT socket path. Asserted without caring whether that socket happens
-// to exist (a daemon may be running on this machine), so it holds either way.
-func TestInterceptView_BareFlagUsesTheDefaultSocket(t *testing.T) {
-	origSock := interceptReadSocket
-	t.Cleanup(func() { interceptReadSocket = origSock })
-	var dialed string
-	interceptReadSocket = func(p string, _ func(model.InterceptedFlow)) error {
-		dialed = p
-		return errors.New("not connecting in a test")
-	}
-	var b bytes.Buffer
-	runInterceptView("", &b)
-	if dialed != interceptSocketPath && !strings.Contains(b.String(), interceptSocketPath) {
-		t.Fatalf("bare --intercept must use %s; dialed=%q out=%q", interceptSocketPath, dialed, b.String())
-	}
-}
-
-// An unexpanded tilde (zsh does not expand ~ after `=`) is called out specifically, rather than left to
-// read as a plain "not found" — the exact trap a real `--intercept=~/…` run hit.
-func TestInterceptView_UnexpandedTildeHint(t *testing.T) {
-	var b bytes.Buffer
-	if code := runInterceptView("~/.counterspy/flows.jsonl", &b); code != 1 {
-		t.Fatalf("expected 1, got %d", code)
-	}
-	if !strings.Contains(b.String(), "did not expand") {
-		t.Fatalf("expected a tilde hint, got:\n%s", b.String())
 	}
 }
 

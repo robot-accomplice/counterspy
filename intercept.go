@@ -17,9 +17,7 @@ import (
 	"counterspy/internal/intercept"
 	"counterspy/internal/intercept/ca"
 	"counterspy/internal/intercept/publish"
-	"counterspy/internal/model"
 	"counterspy/internal/report"
-	"counterspy/internal/tui"
 )
 
 // interceptProxyPort is the fixed loopback port the decrypt proxy listens on and the system
@@ -49,10 +47,8 @@ var (
 	interceptInstallProxy   = intercept.InstallProxy
 	interceptCALoadOrCreate = ca.LoadOrCreate
 	interceptCALoad         = ca.Load
-	interceptNewSocketSink  = publish.NewSocketSink
-	interceptReadSocket     = publish.ReadSocket
-	interceptReadLog        = publish.ReadLog
-	interceptNewLogSink     = func(path string) (publish.Sink, error) {
+	interceptNewSocketSink = publish.NewSocketSink
+	interceptNewLogSink    = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
 	}
 	interceptListen = func() (net.Listener, error) {
@@ -331,173 +327,6 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "intercept: reverted (system proxy restored, CA trust removed).")
 	return 0
-}
-
-// runInterceptView is `counterspy console --intercept[=path]`: print the intercept daemon's decrypted
-// flows (a plain tail, not the alt-screen TUI — mirrors how console --json/--once are non-TUI exits).
-//
-// It dispatches on what `path` IS, so one flag serves both daemon outputs: a unix SOCKET streams live
-// until it closes or Ctrl-C; a regular FILE reads the rotating --log's existing content once and exits.
-// A path that doesn't exist at all is reported plainly — dialing it as a socket would emit a nonsense
-// "dial unix …/flows.jsonl: connect" for what is obviously a log path.
-func runInterceptView(path string, stdout io.Writer) int {
-	if path == "" {
-		path = interceptSocketPath
-	}
-	if _, err := os.Lstat(path); os.IsNotExist(err) {
-		fmt.Fprintln(stdout, "console: no intercept socket or log at", report.Clean(path))
-		// The shell does NOT expand a tilde after `=` (only a bare ~/path at word start), so
-		// `--intercept=~/x` arrives here literally — say so rather than let it read as "not found".
-		if strings.HasPrefix(path, "~") {
-			fmt.Fprintln(stdout, dim("  the shell did not expand '~' in --intercept=~/… — use $HOME/… or a full path."))
-		} else {
-			fmt.Fprintln(stdout, dim("  is `sudo counterspy intercept` running?"))
-		}
-		return 1
-	}
-	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSocket == 0 {
-		fmt.Fprintln(stdout, dim("counterspy — intercepted flows from the log "+path))
-		if err := interceptReadLog(path, func(fl model.InterceptedFlow) {
-			fmt.Fprint(stdout, formatFlow(fl))
-		}); err != nil {
-			fmt.Fprintln(stdout, "console: cannot read intercept log:", report.Clean(err.Error()))
-			return 1
-		}
-		return 0
-	}
-	// A live socket on a real terminal gets the interactive Intercepted view (console means the TUI);
-	// piped/redirected output falls back to the plain tail so `console --intercept | tee` still works.
-	if isTerminal(os.Stdout) {
-		return runInterceptTUI(path, stdout)
-	}
-	fmt.Fprintln(stdout, dim("counterspy — intercepted flows from "+path+" (Ctrl-C to stop)"))
-	err := interceptReadSocket(path, func(fl model.InterceptedFlow) {
-		fmt.Fprint(stdout, formatFlow(fl))
-	})
-	if err != nil {
-		fmt.Fprintln(stdout, "console: intercept stream ended:", report.Clean(err.Error()))
-		return 1
-	}
-	return 0
-}
-
-// runInterceptTUI opens the alt-screen Intercepted viewer over the live socket. The socket read runs
-// off the UI thread and feeds tui.RunIntercepted through a channel, keeping all I/O out of the
-// decoupled tui package (§12). Mirrors runConsole's screen/fini/signal discipline: the terminal is
-// restored exactly once whether we exit by quit, panic, or an external kill.
-func runInterceptTUI(path string, stdout io.Writer) (code int) {
-	screen, err := newScreen()
-	if err != nil {
-		fmt.Fprintln(stdout, "console: cannot open screen:", report.Clean(err.Error()))
-		return 1
-	}
-	if err := screen.Init(); err != nil {
-		fmt.Fprintln(stdout, "console: cannot init screen:", report.Clean(err.Error()))
-		return 1
-	}
-	screen.SetTitle("CounterSpy — Intercepted")
-	var finiOnce sync.Once
-	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	sigDone := make(chan struct{})
-	defer func() { signal.Stop(sigCh); close(sigDone) }()
-	go func() {
-		select {
-		case <-sigCh:
-			fini()
-			os.Exit(130)
-		case <-sigDone:
-		}
-	}()
-	defer func() {
-		if r := recover(); r != nil {
-			fini()
-			fmt.Fprintln(os.Stderr, "console: internal error:", r)
-			code = 1
-		}
-	}()
-	defer fini()
-
-	flows := make(chan model.InterceptedFlow, 64)
-	var readErr error
-	go func() {
-		defer close(flows)
-		readErr = interceptReadSocket(path, func(fl model.InterceptedFlow) { flows <- fl })
-	}()
-	if err := interceptRunTUI(screen, flows); err != nil {
-		fini()
-		fmt.Fprintln(stdout, "console:", report.Clean(err.Error()))
-		return 1
-	}
-	fini()
-	if readErr != nil {
-		fmt.Fprintln(stdout, "console: intercept stream ended:", report.Clean(readErr.Error()))
-		return 1
-	}
-	return 0
-}
-
-// interceptRunTUI is a seam so the wiring is testable without a real terminal.
-var interceptRunTUI = tui.RunIntercepted
-
-// Display bounds for a decrypted body: at most flowMaxLines lines, each at most flowMaxWidth runes, so a
-// large or single-enormous-line payload can't flood the terminal (the proxy caps captured BYTES; these
-// cap the DISPLAY). report.Clean (which strips control bytes INCLUDING newlines) must run PER LINE,
-// after the raw split — cleaning first would delete the newlines and collapse the body into one line,
-// defeating the line cap (Audit cp-p2g).
-const (
-	flowMaxLines = 6
-	flowMaxWidth = 120
-)
-
-// formatFlow renders one flow: a header line (time, destination, status, byte counts) and — only for a
-// decrypted flow — its masked request/response. A pinned/opaque/error flow shows its status and NO
-// content, so the viewer never implies plaintext it doesn't have. EVERY field that reaches the terminal
-// is report.Clean'd (the socket is untrusted input; even At/Status could carry an escape sequence).
-func formatFlow(fl model.InterceptedFlow) string {
-	name := fl.DestName
-	if name == "" {
-		name = fl.SNI
-	}
-	if name == "" {
-		name = fl.DestIP
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s  %s  ↑%d ↓%d\n", report.Clean(fl.At), report.Clean(name), report.Clean(fl.Status), fl.SentBytes, fl.RecvBytes)
-	if fl.Status == model.FlowDecrypted {
-		b.WriteString(renderFlowBody("→", fl.SentText))
-		b.WriteString(renderFlowBody("←", fl.RecvText))
-	}
-	return b.String()
-}
-
-// renderFlowBody indents a decoded body under its header, splitting on the RAW newlines first, then
-// cleaning + width-capping each line, arrow-marking the first, and capping the line count. Empty → "".
-func renderFlowBody(arrow, raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	lines := strings.Split(raw, "\n")
-	var b strings.Builder
-	for i, ln := range lines {
-		if i >= flowMaxLines {
-			fmt.Fprintf(&b, "     %s\n", dim(fmt.Sprintf("… (%d more lines)", len(lines)-flowMaxLines)))
-			break
-		}
-		ln = report.Clean(ln)
-		if len([]rune(ln)) > flowMaxWidth {
-			ln = string([]rune(ln)[:flowMaxWidth]) + "…"
-		}
-		if i == 0 {
-			fmt.Fprintf(&b, "   %s %s\n", arrow, ln)
-		} else {
-			fmt.Fprintf(&b, "     %s\n", ln)
-		}
-	}
-	return b.String()
 }
 
 // runInstallDaemon installs the persistent LaunchDaemon. Requires root.

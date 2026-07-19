@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -34,14 +35,18 @@ import (
 )
 
 // Proxy is the running interception service: it accepts CONNECT tunnels, intercepts (decrypt → relay →
-// capture), attributes each to the app that opened it, and publishes the flow. Dial and Owner are seams
-// so the accept loop is testable without real upstreams or lsof.
+// capture), attributes each to the app that opened it, and publishes per-message events. Dial and Owner
+// are seams so the accept loop is testable without real upstreams or lsof.
 type Proxy struct {
 	CA   *ca.CA
 	Dial dialFunc // nil → defaultDial (verified upstream)
 	Sink publish.Sink
 	// Owner maps a client's local port to the process that owns it. nil → portOwner (lsof + proc_pidpath on darwin).
 	Owner func(port int) (pid int, name string, path string, ok bool)
+
+	mu         sync.Mutex
+	startEpoch int64
+	connSeq    uint64
 }
 
 // Serve accepts on l until it errors (listener closed), handling each connection in its own goroutine.
@@ -109,12 +114,13 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	// Attribute BEFORE the tunnel runs: the lookup needs the client's socket to still be open, and a
 	// long-lived flow would otherwise be attributed (or not) minutes later, after the app may have exited.
 	pid, app, path := p.owner(conn)
+	connID := p.nextConnID()
 	target, err := readConnect(conn)
 	if err != nil {
-		p.publish(model.InterceptedFlow{
+		p.publish(flowToMessage(model.InterceptedFlow{
 			At: nowRFC3339(), Status: model.FlowError, PID: pid, App: app, Path: path,
 			DestName: "(unresolved: " + firstLine(err.Error()) + ")",
-		})
+		}, connID, 0))
 		conn.Close()
 		return
 	}
@@ -124,7 +130,17 @@ func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	}
 	flow := intercept(conn, target, p.CA, dial) // intercept owns closing conn on the normal path
 	flow.PID, flow.App, flow.Path = pid, app, path
-	p.publish(flow)
+	p.publish(flowToMessage(flow, connID, 1))
+}
+
+func (p *Proxy) nextConnID() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.startEpoch == 0 {
+		p.startEpoch = time.Now().UnixNano()
+	}
+	p.connSeq++
+	return fmt.Sprintf("%d-%d", p.startEpoch, p.connSeq)
 }
 
 // owner attributes a connection to the process that opened it. An unattributable flow is published
@@ -145,10 +161,43 @@ func (p *Proxy) owner(conn net.Conn) (int, string, string) {
 	return pid, name, path
 }
 
-func (p *Proxy) publish(fl model.InterceptedFlow) {
+func (p *Proxy) publish(msg model.InterceptedMessage) {
 	if p.Sink != nil {
-		p.Sink.Publish(fl)
+		p.Sink.Publish(msg)
 	}
+}
+
+// flowToMessage is a TEMPORARY bridge: the old per-flow capture is folded into
+// a single per-connection message so the rest of the proxy still compiles while
+// Task 4 replaces this with real per-message pumping. It will be deleted.
+func flowToMessage(fl model.InterceptedFlow, connID string, seq int) model.InterceptedMessage {
+	msg := model.InterceptedMessage{
+		SchemaVersion: model.InterceptMessageSchemaVersion,
+		ConnID:        connID,
+		Seq:           seq,
+		At:            fl.At,
+		PID:           fl.PID,
+		App:           fl.App,
+		Path:          fl.Path,
+		DestIP:        fl.DestIP,
+		DestName:      fl.DestName,
+		SNI:           fl.SNI,
+		Status:        fl.Status,
+		Bytes:         fl.SentBytes + fl.RecvBytes,
+		Total:         fl.SentBytes + fl.RecvBytes,
+	}
+	switch fl.Status {
+	case model.FlowDecrypted:
+		msg.State = model.StateComplete
+		if fl.SentText != "" && fl.RecvText != "" {
+			msg.Text = fl.SentText + "\n---\n" + fl.RecvText
+		} else {
+			msg.Text = fl.SentText + fl.RecvText
+		}
+	case model.FlowError:
+		msg.Reason = fl.DestName
+	}
+	return msg
 }
 
 // firstLine keeps an error to one displayable line (it reaches the console's flow list).

@@ -12,9 +12,9 @@ import (
 	"counterspy/internal/model"
 )
 
-// logSink appends flows as JSONL to a 0600 file, rotating at maxSize (path.1 … path.keep) and pruning
-// rotated files older than maxAge — the persisted output for after-the-fact console viewing (the
-// --non-interactive logging vision). Content is already masked by the proxy.
+// logSink appends messages as JSONL to a 0600 file, rotating at maxSize (path.1 … path.keep) and
+// pruning rotated files older than maxAge — the persisted output for after-the-fact console viewing.
+// Content is already masked by the proxy.
 type logSink struct {
 	mu      sync.Mutex
 	path    string
@@ -45,8 +45,8 @@ func NewLogSink(path string, maxSize int64, keep int, maxAge time.Duration) (Sin
 	return l, nil
 }
 
-func (l *logSink) Publish(fl model.InterceptedFlow) error {
-	b, err := json.Marshal(fl)
+func (l *logSink) Publish(msg model.InterceptedMessage) error {
+	b, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
@@ -110,13 +110,13 @@ func (l *logSink) Close() error {
 	return l.f.Close()
 }
 
-// ReadLog streams the current log file's flows to fn (for the console). Best-effort: a malformed line
-// is skipped. It reads the existing content once (not a live tail) — the socket is the live path.
-func ReadLog(path string, fn func(model.InterceptedFlow)) error {
+// ReadLog streams the current log file's messages to fn (for the console). Best-effort: a malformed
+// line is skipped. It reads the existing content once (not a live tail) — the socket is the live path.
+func ReadLog(path string, fn func(model.InterceptedMessage)) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return scanFlows(f, fn)
+	return scanMessages(f, fn)
 }

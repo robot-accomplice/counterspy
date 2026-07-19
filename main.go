@@ -94,8 +94,6 @@ Commands:
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
       --json                 print the Exfiltration report as JSON and exit (no live UI)
       --once                 print the Exfiltration report once and exit (no live UI)
-      --intercept[=path]     view decrypted flows (live socket or an intercept --log file); in the
-                             view, '/' tails a single source (app or destination)
   restore <manifest.json>  Undo a quarantine from its manifest
   intercept                Decrypt outbound TLS through a local proxy (installs a trusted CA + sets
                            the system HTTPS proxy; reverts on exit). Requires sudo. View via console.
@@ -422,9 +420,6 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 // screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
 // Exfiltration report (what `egress --json/--once` used to do).
 func runConsole(flags []string, stdout io.Writer) (code int) {
-	if present, path := optFlag(flags, "--intercept"); present {
-		return runInterceptView(path, stdout)
-	}
 	if has(flags, "--json") || has(flags, "--once") {
 		return exfilReport(flags, stdout)
 	}

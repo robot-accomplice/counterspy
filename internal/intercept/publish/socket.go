@@ -16,13 +16,13 @@ const socketWriteTimeout = 10 * time.Second
 // reader is one connected console: a bounded buffered channel + its conn (tracked so Close can
 // force-close it, unblocking a stalled write).
 type reader struct {
-	ch   chan model.InterceptedFlow
+	ch   chan model.InterceptedMessage
 	conn net.Conn
 }
 
-// socketSink serves published flows to connected console readers over a unix socket as JSONL. A slow
+// socketSink serves published messages to connected console readers over a unix socket as JSONL. A slow
 // or absent reader NEVER blocks the proxy: each reader has a bounded channel and a full buffer drops
-// the flow (counted) rather than stalling — the live view is best-effort by design.
+// the message (counted) rather than stalling — the live view is best-effort by design.
 type socketSink struct {
 	ln      net.Listener
 	mu      sync.Mutex
@@ -49,7 +49,7 @@ func (s *socketSink) acceptLoop() {
 		if err != nil {
 			return // listener closed
 		}
-		r := &reader{ch: make(chan model.InterceptedFlow, 256), conn: conn}
+		r := &reader{ch: make(chan model.InterceptedMessage, 256), conn: conn}
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
@@ -70,20 +70,20 @@ func (s *socketSink) serve(r *reader) {
 		r.conn.Close()
 	}()
 	enc := json.NewEncoder(r.conn)
-	for fl := range r.ch {
+	for msg := range r.ch {
 		r.conn.SetWriteDeadline(time.Now().Add(socketWriteTimeout))
-		if err := enc.Encode(fl); err != nil {
+		if err := enc.Encode(msg); err != nil {
 			return // reader went away or stalled past the deadline
 		}
 	}
 }
 
-func (s *socketSink) Publish(fl model.InterceptedFlow) error {
+func (s *socketSink) Publish(msg model.InterceptedMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for r := range s.readers {
 		select {
-		case r.ch <- fl:
+		case r.ch <- msg:
 		default:
 			s.dropped++ // reader too slow — drop, don't block the proxy
 		}
@@ -91,8 +91,8 @@ func (s *socketSink) Publish(fl model.InterceptedFlow) error {
 	return nil
 }
 
-// Dropped is how many flows were dropped for slow readers — surfaced so the drop isn't silent (Rule
-// 14 / Audit cp-p2d F-4); the daemon/console can report it.
+// Dropped is how many messages were dropped for slow readers — surfaced so the drop isn't silent
+// (Rule 14 / Audit cp-p2d F-4); the daemon/console can report it.
 func (s *socketSink) Dropped() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,14 +118,14 @@ func (s *socketSink) Close() error {
 	return err
 }
 
-// ReadSocket connects to a socketSink at path and calls fn for each flow until the connection ends.
+// ReadSocket connects to a socketSink at path and calls fn for each message until the connection ends.
 // Bounded + resilient: each JSONL line is size-capped and a malformed line is skipped, so a giant or
 // garbage record can't OOM or abort the reader (untrusted-input hardening, Audit cp-p2d F-5).
-func ReadSocket(path string, fn func(model.InterceptedFlow)) error {
+func ReadSocket(path string, fn func(model.InterceptedMessage)) error {
 	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	return scanFlows(conn, fn)
+	return scanMessages(conn, fn)
 }

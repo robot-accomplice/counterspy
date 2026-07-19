@@ -184,7 +184,7 @@ func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 	pxLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer pxLn.Close()
 
-	got := make(chan model.InterceptedFlow, 1)
+	got := make(chan model.InterceptedMessage, 1)
 	p := &Proxy{CA: proxyCA, Dial: dialTo(dest, upCA), Sink: chanSink(got)}
 	go p.Serve(pxLn)
 
@@ -198,16 +198,16 @@ func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 	cc.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
 	io.ReadAll(cc)
 	select {
-	case f := <-got:
-		if f.Status != model.FlowDecrypted {
-			t.Fatalf("served flow wrong: %+v", f)
+	case m := <-got:
+		if m.Status != model.FlowDecrypted {
+			t.Fatalf("served message wrong: %+v", m)
 		}
 		// The destination now comes from the CONNECT authority, not an inferred lookup.
-		if f.DestName != "example.com" {
-			t.Fatalf("DestName should be the CONNECT authority host, got %q", f.DestName)
+		if m.DestName != "example.com" {
+			t.Fatalf("DestName should be the CONNECT authority host, got %q", m.DestName)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("Serve did not publish the flow")
+		t.Fatal("Serve did not publish the message")
 	}
 }
 
@@ -227,26 +227,26 @@ func expectEstablished(c net.Conn) error {
 	return nil
 }
 
-type chanSink chan model.InterceptedFlow
+type chanSink chan model.InterceptedMessage
 
-func (c chanSink) Publish(f model.InterceptedFlow) error { c <- f; return nil }
-func (c chanSink) Close() error                          { return nil }
+func (c chanSink) Publish(m model.InterceptedMessage) error { c <- m; return nil }
+func (c chanSink) Close() error                             { return nil }
 
 // A connection we cannot resolve must publish a FlowError, never vanish. The pf-era code closed the
 // conn and returned silently when the destination lookup failed, which is indistinguishable from
 // "nothing arrived" in the console — the exact silent-drop the smoke test surfaced (Rule 13).
 func TestProxy_UnresolvableConnPublishesError(t *testing.T) {
 	proxyCA, _ := ca.NewCA()
-	got := make(chan model.InterceptedFlow, 1)
+	got := make(chan model.InterceptedMessage, 1)
 	p := &Proxy{CA: proxyCA, Sink: chanSink(got)}
 	c1, c2 := net.Pipe()
 	go p.handle(c2, defaultDial)
 	// Speak something that is NOT a CONNECT.
 	go func() { fmt.Fprint(c1, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); c1.Close() }()
 	select {
-	case f := <-got:
-		if f.Status != model.FlowError {
-			t.Fatalf("a non-CONNECT must publish FlowError, got %+v", f)
+	case m := <-got:
+		if m.Status != model.FlowError {
+			t.Fatalf("a non-CONNECT must publish FlowError, got %+v", m)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("a non-CONNECT was dropped SILENTLY — the console would show nothing")
