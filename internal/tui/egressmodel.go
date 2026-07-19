@@ -63,6 +63,12 @@ type EgressModel struct {
 	Reveal     bool           // content pane is revealed (redaction off) for the open inspection
 
 	Zoom *zoomState // group-zoom dashboard is open (nil = closed); rendered under any Inspection
+
+	// Phase 2.5 merge: intercepted per-message events for this app/path.
+	ProxyAddr         string                              // armed proxy endpoint, e.g. "127.0.0.1:62443"
+	Messages          map[string][]model.InterceptedMessage // key = binary Path
+	InterceptedDests  map[string]struct{}                   // canonical DestIP strings seen in stream
+	MessageDropCount  int
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -239,6 +245,32 @@ func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.sampled = true // a real sampler result arrived — even an empty one means we've looked
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
+	}
+	return m
+}
+
+// withMessage ingests one sanitized intercepted event into the per-app buffer, bounded so a
+// noisy app can't unbounded-grow the view.
+func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
+	if m.Messages == nil {
+		m.Messages = make(map[string][]model.InterceptedMessage)
+	}
+	key := msg.Path
+	if key == "" {
+		key = msg.App
+	}
+	const maxPerApp = 500
+	buf := append(m.Messages[key], msg)
+	if len(buf) > maxPerApp {
+		buf = buf[len(buf)-maxPerApp:]
+		m.MessageDropCount += len(buf) - maxPerApp
+	}
+	m.Messages[key] = buf
+	if msg.DestIP != "" {
+		if m.InterceptedDests == nil {
+			m.InterceptedDests = make(map[string]struct{})
+		}
+		m.InterceptedDests[msg.DestIP] = struct{}{}
 	}
 	return m
 }

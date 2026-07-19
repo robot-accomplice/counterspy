@@ -416,6 +416,11 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 	return out
 }
 
+// proxyEndpointForConsole returns the armed intercept proxy endpoint so the Exfiltration view can
+// recognize proxied connections. It is plain data from main's constant — no internal package imports
+// package main (decoupling invariant).
+func proxyEndpointForConsole() string { return fmt.Sprintf("127.0.0.1:%d", interceptProxyPort) }
+
 // runConsole is the unified interactive UI: Findings triage + the Exfiltration monitor in one
 // screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
 // Exfiltration report (what `egress --json/--once` used to do).
@@ -545,7 +550,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	}()
 	// The `i` inspection overlay captures a flow's packets via native /dev/bpf (root); --no-inspect
 	// disables it entirely for locked-down environments (spec §5.3), leaving a nil Inspector.
-	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy)
+	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy, nil, proxyEndpointForConsole())
 	if err != nil {
 		fmt.Fprintln(stdout, "console:", err)
 		return 1

@@ -21,9 +21,16 @@ const (
 // (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
 // happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
 // closes `tick` (or exits) to stop.
-func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error) error {
+// RunConsole hosts both faces in one screen — Findings triage and the Exfiltration monitor —
+// switched with Tab / Shift-Tab. It replaces the separate Run (findings) and RunEgress (egress)
+// loops. The Exfiltration sampler runs LAZILY: the background sample goroutine only calls the
+// (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
+// happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
+// closes `tick` (or exits) to stop.
+func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error, messages <-chan model.InterceptedMessage, proxyAddr string) error {
 	mode := modeFindings
 	em := NewEgress()
+	em.ProxyAddr = proxyAddr
 	var lastManifest string
 
 	var sampling atomic.Bool
@@ -44,6 +51,12 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 			case <-sampleNow:
 				do()
 			}
+		}
+	}()
+	// Feed intercepted per-message events into the same event loop as egress samples.
+	go func() {
+		for msg := range messages {
+			s.PostEvent(tcell.NewEventInterrupt(msg))
 		}
 	}()
 	setSampling := func() { sampling.Store(mode == modeExfil && !em.Paused) }
@@ -124,8 +137,13 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 				}
 			}
 		case *tcell.EventInterrupt:
-			if groups, ok := ev.Data().([]model.EgressGroup); ok && !em.Paused {
-				em = em.withGroups(groups)
+			switch data := ev.Data().(type) {
+			case []model.EgressGroup:
+				if !em.Paused {
+					em = em.withGroups(data)
+				}
+			case model.InterceptedMessage:
+				em = em.withMessage(data)
 			}
 		case nil:
 			return nil // screen finished

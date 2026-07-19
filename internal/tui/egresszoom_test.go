@@ -18,7 +18,7 @@ func TestRunConsole_ZoomAndInspect(t *testing.T) {
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("backuptool", model.Elevated, 900)}}
 	tick := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil) }()
+	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil, nil, "") }()
 	step := func() { time.Sleep(35 * time.Millisecond) }
 
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // → Exfiltration
