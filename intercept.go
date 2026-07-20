@@ -47,8 +47,8 @@ var (
 	interceptInstallProxy   = intercept.InstallProxy
 	interceptCALoadOrCreate = ca.LoadOrCreate
 	interceptCALoad         = ca.Load
-	interceptNewSocketSink = publish.NewSocketSink
-	interceptNewLogSink    = func(path string) (publish.Sink, error) {
+	interceptNewSocketSink  = publish.NewSocketSink
+	interceptNewLogSink     = func(path string) (publish.Sink, error) {
 		return publish.NewLogSink(path, interceptLogMaxSize, interceptLogKeep, interceptLogMaxAge)
 	}
 	interceptListen = func() (net.Listener, error) {

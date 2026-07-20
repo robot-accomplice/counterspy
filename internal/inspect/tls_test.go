@@ -25,7 +25,7 @@ func buildClientHello(sni string, alpn ...string) []byte {
 			list = append(list, byte(len(p)))
 			list = append(list, p...)
 		}
-		alpnBody := append(u16(len(list)), list...)              // protocol_list_len + entries
+		alpnBody := append(u16(len(list)), list...)                  // protocol_list_len + entries
 		alpnExt := append([]byte{0x00, 0x10}, u16(len(alpnBody))...) // ext type 0x10 + ext_len
 		alpnExt = append(alpnExt, alpnBody...)
 		ext = append(ext, alpnExt...)

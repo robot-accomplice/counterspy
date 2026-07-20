@@ -65,10 +65,10 @@ type EgressModel struct {
 	Zoom *zoomState // group-zoom dashboard is open (nil = closed); rendered under any Inspection
 
 	// Phase 2.5 merge: intercepted per-message events for this app/path.
-	ProxyAddr         string                              // armed proxy endpoint, e.g. "127.0.0.1:62443"
-	Messages          map[string][]model.InterceptedMessage // key = binary Path
-	InterceptedDests  map[string]struct{}                   // canonical DestIP strings seen in stream
-	MessageDropCount  int
+	ProxyAddr        string                                // armed proxy endpoint, e.g. "127.0.0.1:62443"
+	Messages         map[string][]model.InterceptedMessage // key = binary Path
+	InterceptedDests map[string]struct{}                   // canonical DestIP strings seen in stream
+	MessageDropCount int
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live

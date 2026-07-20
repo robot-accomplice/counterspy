@@ -18,7 +18,7 @@ import (
 type recSink struct{ log *[]string }
 
 func (r recSink) Publish(model.InterceptedMessage) error { return nil }
-func (r recSink) Close() error                        { *r.log = append(*r.log, "sink-close"); return nil }
+func (r recSink) Close() error                           { *r.log = append(*r.log, "sink-close"); return nil }
 
 // fakeIntercept swaps every intercept seam with a recorder writing into `log`, and restores on cleanup.
 // serveHook lets a test drive the serve phase (return, error, or panic).

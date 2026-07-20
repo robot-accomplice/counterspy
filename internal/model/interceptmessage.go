@@ -18,12 +18,12 @@ type InterceptedMessage struct {
 	DestIP        string `json:"dest_ip"`
 	DestName      string `json:"dest_name,omitempty"`
 	SNI           string `json:"sni,omitempty"`
-	Status        string `json:"status"`              // decrypted | pinned | opaque | error
-	Text          string `json:"text,omitempty"`      // decoded + masked; empty for non-decrypted statuses
-	Bytes         int    `json:"bytes"`               // wire bytes observed for this message AT PUBLISH TIME; 0 on Seq-0 events
-	Total         int    `json:"total"`               // -1 = unknown, 0 = declared zero-length, >0 = Content-Length; 0 on Seq-0 events
-	State         string `json:"state,omitempty"`     // message events only: complete | partial | streaming
-	Reason        string `json:"reason,omitempty"`    // partial / opaque / error / pinned detail
+	Status        string `json:"status"`           // decrypted | pinned | opaque | error
+	Text          string `json:"text,omitempty"`   // decoded + masked; empty for non-decrypted statuses
+	Bytes         int    `json:"bytes"`            // wire bytes observed for this message AT PUBLISH TIME; 0 on Seq-0 events
+	Total         int    `json:"total"`            // -1 = unknown, 0 = declared zero-length, >0 = Content-Length; 0 on Seq-0 events
+	State         string `json:"state,omitempty"`  // message events only: complete | partial | streaming
+	Reason        string `json:"reason,omitempty"` // partial / opaque / error / pinned detail
 }
 
 // InterceptMessageSchemaVersion is the current wire-format version. Old or
