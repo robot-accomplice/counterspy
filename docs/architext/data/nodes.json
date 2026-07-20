@@ -812,27 +812,29 @@
       "id": "mod-intercept",
       "type": "module",
       "name": "internal/intercept (+ intercept command)",
-      "summary": "READ-ONLY TLS-intercepting HTTPS proxy (Phase 2). Registers as the macOS system secure-web proxy (networksetup); clients CONNECT and NAME their destination, the proxy terminates their TLS with a per-SNI leaf minted by a local reversible CA, re-dials the real server (verified against the CONNECT authority using system roots), relays BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext (DecodeCleartext + Redact) into an InterceptedFlow published to a unix socket and/or a rotating 0600 log, viewed in the console's Intercepted TUI. Never modifies traffic. Originally used a pf rdr redirect; a root smoke test proved pf translates only INBOUND packets (27828 Evaluations / 0 Packets against local outbound), so the mechanism was replaced and the DIOCNATLOOK ioctl deleted. VERIFIED end-to-end on macOS.",
+      "summary": "READ-ONLY TLS-intercepting HTTPS proxy (Phase 2). Registers as the macOS system secure-web proxy (networksetup); clients CONNECT and NAME their destination, the proxy terminates their TLS with a per-SNI leaf minted by a local reversible CA, re-dials the real server (verified against the CONNECT authority using system roots), relays BYTE-FOR-BYTE unmodified while a per-message streaming pump tees each direction into HTTP/1.1 framing parsers, correlates each request to its response in strict FIFO order through a single-producer/single-consumer queue, and masks the decrypted plaintext (DecodeCleartext + Redact) into per-message InterceptedMessage events (SchemaVersion 2) published to a unix socket and/or a rotating 0600 log. An ALPN h2-only client is blind-relayed (bypassed) so it keeps working; a client offering http/1.1 is decrypted. Never modifies traffic. Originally used a pf rdr redirect; a root smoke test proved pf translates only INBOUND packets (27828 Evaluations / 0 Packets against local outbound), so the mechanism was replaced and the DIOCNATLOOK ioctl deleted. VERIFIED end-to-end on macOS.",
       "responsibilities": [
         "Mint per-SNI leaves from a local CA; install/uninstall it as a trusted root (consented)",
         "Register as the system secure-web (HTTPS) proxy; restore each service's PRIOR setting on teardown",
         "Terminate client TLS on a CONNECT tunnel, re-dial the verified upstream, relay unmodified, capture + mask",
-        "Publish InterceptedFlow to a live socket and/or a rotating 0600 log; render in the Intercepted TUI",
+        "Stream per-message: tee each direction into HTTP/1.1 framing parsers and correlate request↔response in FIFO order (a response waits for its request rather than racing it)",
+        "Bypass (blind-relay) ALPN h2-only clients; decrypt clients that offer http/1.1",
+        "Publish per-message InterceptedMessage events to a live socket and/or a rotating 0600 log",
         "Arm and ALWAYS reliably disarm (proxy + trust reverted on exit, panic, or signal)"
       ],
       "owner": "Project maintainers",
       "sourcePaths": [
         "intercept.go",
         "internal/intercept/proxy.go",
+        "internal/intercept/pump.go",
+        "internal/intercept/framing.go",
         "internal/intercept/sysproxy_darwin.go",
         "internal/intercept/ca/ca.go",
         "internal/intercept/ca/trust_darwin.go",
         "internal/intercept/ca/persist.go",
         "internal/intercept/publish/socket.go",
         "internal/intercept/publish/logfile.go",
-        "internal/intercept/publish/helpers.go",
-        "internal/tui/interceptmodel.go",
-        "internal/tui/interceptview.go"
+        "internal/intercept/publish/helpers.go"
       ],
       "runtime": "in-process (root daemon; networksetup + System keychain; requires sudo)",
       "interfaces": [

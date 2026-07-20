@@ -1,6 +1,26 @@
 {
   "decisions": [
     {
+      "id": "dec-intercept-correlation-queue",
+      "status": "accepted",
+      "title": "Request↔response correlation uses a blocking single-producer/single-consumer queue",
+      "context": "The per-message pump parses each tunnel direction in its own goroutine (parseRequests, parseResponses) and correlates a response to its request through a shared queue. The first implementation was a mutex-guarded slice: parseResponses read the head, then popped the queue, and treated an empty queue as a protocol violation (markOpaque \"response without matching request\") and aborted the parser. HTTP guarantees the request precedes its response on the wire, but nothing synchronized the two goroutines — copyTee writes to the upstream before teeing to the request parser, and the io.Pipe tee blocks until that parser reads — so under load the response could be parsed and pop the queue before the request goroutine had pushed. Result: a false 'unmatched response', an aborted parser, and every later message in that direction silently dropped. It was intermittent (~1 in 15 under -race) and shipped RED because the prior session verified against cached test results.",
+      "decision": "Model the correlation queue as a buffered channel (cap maxPipelinedRequests) with a single producer (parseRequests) and single consumer (parseResponses). popQueue is a blocking receive, so a response that arrives before its request waits for the push instead of racing it. The request goroutine closes the channel at stream EOF (closeRequests, on every exit path including framing loss); a closed, drained queue is the ONLY condition under which an empty queue means a genuinely unmatched response, at which point popQueue returns ok=false and the flow is marked opaque. This makes the request-before-response happens-before a structural property of the channel rather than an unenforced timing assumption.",
+      "consequences": [
+        "Pipelined and keep-alive responses correlate to the correct request under load; no messages dropped on the parser race",
+        "A genuine unmatched response is detected at request-EOF instead of immediately — strictly fewer false positives, and the relay keeps forwarding bytes meanwhile",
+        "No deadlock: the consumer only ever waits on the producer, which closes the channel on every exit path, so a response waiting on a request that never arrives is always released",
+        "Detection of a real protocol violation is deferred to connection close rather than mid-stream — an accepted latency tradeoff for correctness",
+        "Guarded by deterministic unit tests on the queue contract (pop-before-push blocks then correlates; closed empty queue returns unmatched), since the race itself is not reproducible under the -count=1 CI run"
+      ],
+      "relatedNodes": [
+        "mod-intercept"
+      ],
+      "relatedFlows": [
+        "intercept"
+      ]
+    },
+    {
       "id": "dec-liveness-scoring",
       "status": "accepted",
       "title": "Liveness is derived once in interpret and feeds both scoring and display",
