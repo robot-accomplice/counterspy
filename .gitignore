@@ -5,6 +5,9 @@ counterspy
 /counterspy
 .swarm/bus/
 
+# Coverage profile written by `just test` / checks.yml.
+coverage.out
+
 # Architext generated static builds.
 docs/architext/dist/
 docs/architext/.architext-write.lock/
