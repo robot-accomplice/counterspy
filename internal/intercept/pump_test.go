@@ -67,6 +67,24 @@ func drainMessages(t *testing.T, ch <-chan model.InterceptedMessage, want int) [
 	return out
 }
 
+// splitByDirection partitions published messages into requests and responses, each in per-direction
+// publish order. Ordering *between* the two directions is deliberately not asserted anywhere: the
+// pump parses each direction in its own goroutine (see runRelay), so a response may publish before
+// the request it answers. Connection events (no Direction) land in neither slice, so a test that
+// checks the returned lengths will catch one arriving unexpectedly instead of silently mistaking it
+// for a message.
+func splitByDirection(msgs []model.InterceptedMessage) (reqs, resps []model.InterceptedMessage) {
+	for _, m := range msgs {
+		switch m.Direction {
+		case "request":
+			reqs = append(reqs, m)
+		case "response":
+			resps = append(resps, m)
+		}
+	}
+	return reqs, resps
+}
+
 func TestPump_PublishesRequestAndResponse(t *testing.T) {
 	cc, br, got := runPumpedProxy(t, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
 	cc.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer TOPSECRET\r\n\r\n"))
@@ -76,14 +94,11 @@ func TestPump_PublishesRequestAndResponse(t *testing.T) {
 	cc.Close()
 
 	msgs := drainMessages(t, got, 2)
-	var req, resp model.InterceptedMessage
-	for _, m := range msgs {
-		if m.Direction == "request" {
-			req = m
-		} else {
-			resp = m
-		}
+	reqs, resps := splitByDirection(msgs)
+	if len(reqs) != 1 || len(resps) != 1 {
+		t.Fatalf("want exactly 1 request and 1 response, got %d/%d: %+v", len(reqs), len(resps), msgs)
 	}
+	req, resp := reqs[0], resps[0]
 	if req.Seq == 0 || req.Seq != resp.Seq {
 		t.Fatalf("request/response Seq mismatch: req=%d resp=%d", req.Seq, resp.Seq)
 	}
@@ -129,11 +144,20 @@ func TestPump_100ContinueIgnored(t *testing.T) {
 	cc.Close()
 
 	msgs := drainMessages(t, got, 2)
-	if msgs[0].Direction != "request" {
-		t.Fatalf("first message should be the request, got %q", msgs[0].Direction)
+	reqs, resps := splitByDirection(msgs)
+	if len(reqs) != 1 || len(resps) != 1 {
+		t.Fatalf("want exactly 1 request and 1 response, got %d/%d: %+v", len(reqs), len(resps), msgs)
 	}
-	if msgs[1].Direction != "response" || !strings.Contains(msgs[1].Text, "201 Created") {
-		t.Fatalf("second message should be the final response, got %+v", msgs[1])
+	// The interim 100 Continue must neither publish a message nor consume the queue entry, so the one
+	// response we publish is the final 201 and it still correlates to the request's Seq.
+	if !strings.Contains(resps[0].Text, "201 Created") {
+		t.Fatalf("published response should be the final 201, got %q", resps[0].Text)
+	}
+	if strings.Contains(resps[0].Text, "100 Continue") {
+		t.Fatalf("interim 100 Continue must not be published: %q", resps[0].Text)
+	}
+	if resps[0].Seq != reqs[0].Seq {
+		t.Fatalf("response Seq %d should match request Seq %d", resps[0].Seq, reqs[0].Seq)
 	}
 }
 
@@ -185,11 +209,11 @@ func TestPump_isH2Only_FailOpenForH2WithHttp11(t *testing.T) {
 // noopConn satisfies net.Conn for bufConn tests where the buffered reader already has all bytes.
 type noopConn struct{}
 
-func (noopConn) Read([]byte) (int, error)  { return 0, io.EOF }
-func (noopConn) Write([]byte) (int, error) { return 0, nil }
-func (noopConn) Close() error              { return nil }
-func (noopConn) LocalAddr() net.Addr       { return nil }
-func (noopConn) RemoteAddr() net.Addr      { return nil }
+func (noopConn) Read([]byte) (int, error)         { return 0, io.EOF }
+func (noopConn) Write([]byte) (int, error)        { return 0, nil }
+func (noopConn) Close() error                     { return nil }
+func (noopConn) LocalAddr() net.Addr              { return nil }
+func (noopConn) RemoteAddr() net.Addr             { return nil }
 func (noopConn) SetDeadline(time.Time) error      { return nil }
 func (noopConn) SetReadDeadline(time.Time) error  { return nil }
 func (noopConn) SetWriteDeadline(time.Time) error { return nil }
@@ -202,9 +226,9 @@ func TestPump_ALPNH2OnlyBypasses(t *testing.T) {
 
 	got := make(chan model.InterceptedMessage, 4)
 	p := &Proxy{
-		CA:    proxyCA,
-		Dial:  dialTo(dest, upCA),
-		Sink:  chanSink(got),
+		CA:   proxyCA,
+		Dial: dialTo(dest, upCA),
+		Sink: chanSink(got),
 		DialPlain: func(network, addr string, timeout time.Duration) (net.Conn, error) {
 			return net.DialTimeout(network, dest.String(), timeout)
 		},
@@ -215,10 +239,10 @@ func TestPump_ALPNH2OnlyBypasses(t *testing.T) {
 	defer raw.Close()
 	// h2-only client: the proxy must bypass (blind-relay) so the real upstream cert reaches us.
 	cc := tls.Client(raw, &tls.Config{
-		RootCAs:              poolFor(upCA),
-		ServerName:           "example.com",
-		NextProtos:           []string{"h2"},
-		InsecureSkipVerify:   true,
+		RootCAs:            poolFor(upCA),
+		ServerName:         "example.com",
+		NextProtos:         []string{"h2"},
+		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
 				return fmt.Errorf("no peer certificates")
@@ -263,13 +287,91 @@ func TestPump_PipelinedKeepAlive(t *testing.T) {
 	cc.Close()
 
 	msgs := drainMessages(t, got, 4)
-	var seqs []int
-	for _, m := range msgs {
-		seqs = append(seqs, m.Seq)
+	reqs, resps := splitByDirection(msgs)
+	if len(reqs) != 2 || len(resps) != 2 {
+		t.Fatalf("want 2 requests and 2 responses, got %d/%d: %+v", len(reqs), len(resps), msgs)
 	}
-	// Per-direction events publish when each direction completes: both requests finish before the
-	// first response body arrives, so the order is request-1, request-2, response-1, response-2.
-	if seqs[0] != 1 || seqs[1] != 2 || seqs[2] != 1 || seqs[3] != 2 {
-		t.Fatalf("pipelined Seq order wrong: %v", seqs)
+	// What matters for pipelining is correlation, not arrival order: the two in-flight requests must
+	// come back matched to the right responses — /a ↔ "A" on Seq 1, /b ↔ "B" on Seq 2. Each direction
+	// publishes in order within itself, so Seqs ascend per direction.
+	if reqs[0].Seq != 1 || reqs[1].Seq != 2 {
+		t.Fatalf("request Seqs should ascend 1,2, got %d,%d", reqs[0].Seq, reqs[1].Seq)
+	}
+	if resps[0].Seq != 1 || resps[1].Seq != 2 {
+		t.Fatalf("response Seqs should ascend 1,2, got %d,%d", resps[0].Seq, resps[1].Seq)
+	}
+	if !strings.Contains(reqs[0].Text, "GET /a") || !strings.Contains(reqs[1].Text, "GET /b") {
+		t.Fatalf("requests mis-sequenced: %q / %q", reqs[0].Text, reqs[1].Text)
+	}
+	if !strings.HasSuffix(resps[0].Text, "A") || !strings.HasSuffix(resps[1].Text, "B") {
+		t.Fatalf("responses not correlated to their requests: %q / %q", resps[0].Text, resps[1].Text)
+	}
+}
+
+// newQueuePump returns a pump with an initialized correlation queue, matching how Proxy.pump builds
+// one. The queue is the only field these unit tests exercise.
+func newQueuePump() *pump {
+	return &pump{queue: make(chan queueEntry, maxPipelinedRequests)}
+}
+
+// TestPump_PopWaitsForPush is the deterministic regression guard for the correlation race: a response
+// can reach popQueue before the request goroutine has run pushQueue. popQueue MUST block until the
+// request is enqueued and then correlate to it, never report the response as unmatched. Before the
+// fix the two ran under a plain mutex and popQueue returned ok=false on the empty queue, which dropped
+// the response and aborted the parser. This asserts the happens-before the pump depends on.
+func TestPump_PopWaitsForPush(t *testing.T) {
+	pu := newQueuePump()
+
+	type popResult struct {
+		method string
+		seq    int
+		ok     bool
+	}
+	done := make(chan popResult, 1)
+	go func() {
+		method, seq, ok := pu.popQueue() // called first, on an empty queue
+		done <- popResult{method, seq, ok}
+	}()
+
+	// The pop is now blocked. Give it a moment to be genuinely waiting, then push its request.
+	select {
+	case r := <-done:
+		t.Fatalf("popQueue returned %+v before any push; it must block on an empty queue", r)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if !pu.pushQueue(7, "GET") {
+		t.Fatal("pushQueue reported overflow on an empty queue")
+	}
+	select {
+	case r := <-done:
+		if !r.ok || r.method != "GET" || r.seq != 7 {
+			t.Fatalf("pop after push = %+v, want {GET 7 true}", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("popQueue did not wake after the matching push")
+	}
+}
+
+// TestPump_PopUnblocksOnClose asserts the other half of the contract: an unmatched response must not
+// wait forever. Once the request stream ends (closeRequests) with the queue empty, a blocked popQueue
+// returns ok=false so parseResponses can mark the flow opaque instead of hanging the pump.
+func TestPump_PopUnblocksOnClose(t *testing.T) {
+	pu := newQueuePump()
+
+	done := make(chan bool, 1)
+	go func() {
+		_, _, ok := pu.popQueue()
+		done <- ok
+	}()
+
+	pu.closeRequests() // no request will ever arrive
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("popQueue on a closed empty queue must return ok=false (unmatched response)")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("popQueue did not unblock after closeRequests")
 	}
 }

@@ -22,7 +22,7 @@ import (
 // Per-message pump bounds. These are intentionally constants: the CLI surface is frozen, and the
 // values were chosen to keep memory bounded without materially changing what traffic can be watched.
 const (
-	maxMessageBytes      = 1 << 20 // 1 MiB per message (header + body)
+	maxMessageBytes      = 1 << 20  // 1 MiB per message (header + body)
 	maxHeaderBytes       = 64 << 10 // 64 KiB per header block
 	maxPipelinedRequests = 64       // request→response correlation queue
 	maxLinger            = 30 * time.Second
@@ -31,25 +31,28 @@ const (
 // pump is the per-message streaming relay. It terminates the client's TLS, dials the real target,
 // forwards bytes verbatim, and parses HTTP/1.1 messages out of a copy of each direction.
 type pump struct {
-	ca        *ca.CA
-	dial      dialFunc
-	dialPlain func(network, addr string, timeout time.Duration) (net.Conn, error)
-	publish   func(model.InterceptedMessage)
-	connID    string
-	pid       int
-	app       string
-	path      string
-	target    string
+	ca         *ca.CA
+	dial       dialFunc
+	dialPlain  func(network, addr string, timeout time.Duration) (net.Conn, error)
+	publish    func(model.InterceptedMessage)
+	connID     string
+	pid        int
+	app        string
+	path       string
+	target     string
 	targetHost string
-	sni       string
-	destIP    string
+	sni        string
+	destIP     string
 
-	seq       atomic.Uint64
+	seq        atomic.Uint64
 	opaqueOnce sync.Once
 
-	queueMu  sync.Mutex
-	queue    []queueEntry
-	queueCap int
+	// queue correlates each request to its response in HTTP/1.1 FIFO order. It is a single-producer
+	// (parseRequests) / single-consumer (parseResponses) channel: a blocking receive makes the
+	// response side wait for the matching request to be enqueued instead of racing it. The request
+	// side closes the channel at EOF, which is the only point at which a still-empty queue means a
+	// genuinely unmatched response rather than one the request goroutine has not caught up to yet.
+	queue chan queueEntry
 }
 
 type queueEntry struct {
@@ -65,17 +68,17 @@ func (p *Proxy) pump(client net.Conn, target string, pid int, app, path, connID 
 	}
 
 	pu := &pump{
-		ca:        p.CA,
-		dial:      dial,
-		dialPlain: p.DialPlain,
-		publish:   p.publish,
-		connID:    connID,
-		pid:       pid,
-		app:       app,
-		path:      path,
-		target:    target,
+		ca:         p.CA,
+		dial:       dial,
+		dialPlain:  p.DialPlain,
+		publish:    p.publish,
+		connID:     connID,
+		pid:        pid,
+		app:        app,
+		path:       path,
+		target:     target,
 		targetHost: targetHost,
-		queueCap:  maxPipelinedRequests,
+		queue:      make(chan queueEntry, maxPipelinedRequests),
 	}
 
 	// C4 ALPN-aware bypass: an h2-only client is blind-relayed so it keeps working; browsers that
@@ -203,6 +206,7 @@ func (pu *pump) runRelay(client, upstream net.Conn) {
 	go func() {
 		defer parseWg.Done()
 		pu.parseRequests(reqRd)
+		pu.closeRequests() // release any response waiting on a request that will never arrive
 		reqWr.Close()
 	}()
 	go func() {
@@ -326,25 +330,34 @@ func (pu *pump) parseResponses(r io.Reader) {
 	}
 }
 
+// pushQueue enqueues a parsed request for correlation. It never blocks: a full queue means more than
+// maxPipelinedRequests requests are outstanding, which we treat as overflow (return false) rather
+// than stalling the request parser.
 func (pu *pump) pushQueue(seq int, method string) bool {
-	pu.queueMu.Lock()
-	defer pu.queueMu.Unlock()
-	if len(pu.queue) >= pu.queueCap {
+	select {
+	case pu.queue <- queueEntry{seq: seq, method: method}:
+		return true
+	default:
 		return false
 	}
-	pu.queue = append(pu.queue, queueEntry{seq: seq, method: method})
-	return true
 }
 
+// popQueue blocks until the matching request is enqueued, then returns it. A closed, drained queue
+// (closeRequests ran at request-stream EOF) yields ok=false — the only condition under which a
+// response is genuinely unmatched rather than merely ahead of its request goroutine.
 func (pu *pump) popQueue() (string, int, bool) {
-	pu.queueMu.Lock()
-	defer pu.queueMu.Unlock()
-	if len(pu.queue) == 0 {
+	e, ok := <-pu.queue
+	if !ok {
 		return "", 0, false
 	}
-	e := pu.queue[0]
-	pu.queue = pu.queue[1:]
 	return e.method, e.seq, true
+}
+
+// closeRequests signals that no further requests will be enqueued. Called exactly once, after
+// parseRequests returns on any path (EOF or framing loss), so a response waiting in popQueue for a
+// request that will never arrive is released instead of blocking for the connection's lifetime.
+func (pu *pump) closeRequests() {
+	close(pu.queue)
 }
 
 func (pu *pump) markOpaque(reason string) {
