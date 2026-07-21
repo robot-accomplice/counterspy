@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -384,9 +385,15 @@ func TestPump_PopUnblocksOnClose(t *testing.T) {
 // the response copyTee blocked on the tee pipe, so closeRequests could never run). The tee is now
 // non-blocking, so a parked parser can never stall the relay: runRelay must return once the conns close.
 func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
+	var mu sync.Mutex
+	var published []model.InterceptedMessage
 	pu := &pump{
-		queue:   make(chan queueEntry, maxPipelinedRequests),
-		publish: func(model.InterceptedMessage) {},
+		queue: make(chan queueEntry, maxPipelinedRequests),
+		publish: func(m model.InterceptedMessage) {
+			mu.Lock()
+			published = append(published, m)
+			mu.Unlock()
+		},
 	}
 	clientR, clientW := net.Pipe()
 	upstreamR, upstreamW := net.Pipe()
@@ -416,5 +423,18 @@ func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
 	case <-relayDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("runRelay did not return after the conns closed — F1 deadlock regression (idleTimeout is 5m)")
+	}
+	// F-A: the 300KB unmatched body overflows the tee backlog and detaches teeing, so capture is
+	// incomplete — the relay MUST publish an opaque "tee detached" event, never silently under-report.
+	mu.Lock()
+	defer mu.Unlock()
+	sawDetach := false
+	for _, m := range published {
+		if m.Status == model.FlowOpaque && strings.Contains(m.Reason, "tee detached") {
+			sawDetach = true
+		}
+	}
+	if !sawDetach {
+		t.Fatalf("tee detach must publish an opaque 'capture incomplete' event, got %+v", published)
 	}
 }

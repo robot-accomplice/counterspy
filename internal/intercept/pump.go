@@ -199,7 +199,13 @@ func (pu *pump) runRelay(client, upstream net.Conn) {
 
 	done := make(chan struct{}, 2)
 	cp := func(dst, src, other net.Conn, tee *teeFeeder) {
-		copyTee(dst, src, tee)
+		if copyTee(dst, src, tee) {
+			// The parser fell behind and teeing detached: subsequent bytes on this direction were
+			// forwarded but NOT captured. Mark the connection opaque so the view reports incomplete
+			// capture honestly instead of silently under-reporting or mislabelling a healthy stream
+			// as "connection closed" (ABORT re-run F-A). opaqueOnce keeps it to one event.
+			pu.markOpaque("tee detached — capture incomplete under load")
+		}
 		tee.close() // no more chunks; the feeder flushes buffered bytes then closes the pipe → EOF
 		done <- struct{}{}
 		if other != nil {
@@ -272,8 +278,9 @@ func (t *teeFeeder) close() { close(t.ch) }
 
 // copyTee forwards src→dst and hands a copy of each chunk to the tee. Teeing is best-effort: if the
 // parser falls behind (submit returns false) teeing detaches and forwarding continues, so a slow or
-// stuck parser never affects the relayed connection.
-func copyTee(dst net.Conn, src net.Conn, tee *teeFeeder) {
+// stuck parser never affects the relayed connection. It returns whether teeing ever detached, so the
+// caller can mark the flow's capture incomplete (F-A) rather than under-report silently.
+func copyTee(dst net.Conn, src net.Conn, tee *teeFeeder) (detached bool) {
 	buf := make([]byte, 32*1024)
 	teeing := true
 	for {
@@ -281,14 +288,15 @@ func copyTee(dst net.Conn, src net.Conn, tee *teeFeeder) {
 		n, err := src.Read(buf)
 		if n > 0 {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return
+				return detached
 			}
 			if teeing && !tee.submit(buf[:n]) {
 				teeing = false
+				detached = true
 			}
 		}
 		if err != nil {
-			return
+			return detached
 		}
 	}
 }
