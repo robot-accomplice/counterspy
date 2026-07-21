@@ -137,11 +137,11 @@ func TestRedact_MasksCompoundCredentialNames(t *testing.T) {
 		`{"authToken":"CAMEL-LEAK-4"}`:     "CAMEL-LEAK-4",
 		`refresh_token=RT-FORM-LEAK-5&x=1`: "RT-FORM-LEAK-5",
 		// prefix / interior / plural (ABORT re-run: the credential word is not the suffix)
-		`{"tokenValue":"PRE-LEAK-6"}`:            "PRE-LEAK-6",
-		`{"secretValue":"PRE-LEAK-7"}`:           "PRE-LEAK-7",
-		`{"password_confirmation":"PW-LEAK-8"}`:  "PW-LEAK-8", // Rails default signup field
-		`{"passwordConfirm":"PW-LEAK-9"}`:        "PW-LEAK-9",
-		`{"apiKeyPrimary":"AK-LEAK-10"}`:         "AK-LEAK-10",
+		`{"tokenValue":"PRE-LEAK-6"}`:              "PRE-LEAK-6",
+		`{"secretValue":"PRE-LEAK-7"}`:             "PRE-LEAK-7",
+		`{"password_confirmation":"PW-LEAK-8"}`:    "PW-LEAK-8", // Rails default signup field
+		`{"passwordConfirm":"PW-LEAK-9"}`:          "PW-LEAK-9",
+		`{"apiKeyPrimary":"AK-LEAK-10"}`:           "AK-LEAK-10",
 		`{"tokens":["ARR-LEAK-11","ARR-LEAK-12"]}`: "ARR-LEAK-11", // plural name + array value
 	}
 	for in, leak := range leaks {

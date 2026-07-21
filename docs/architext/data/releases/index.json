@@ -44,6 +44,27 @@
       "file": "initial-architext-buildout.json"
     },
     {
+      "id": "v0-7-0-tls-intercept",
+      "version": "0.7.0",
+      "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
+      "status": "in-progress",
+      "posture": "at-risk",
+      "targetWindow": "NOT ready to cut — pending a clean ABORT re-review of the applied fixes (no PR until fully green)",
+      "lastUpdated": "2026-07-21T00:00:00.000Z",
+      "summary": "Phase 2 + 2.5 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) as per-message InterceptedMessage events streamed to a unix socket and/or a rotating 0600 log, ingested via `console --intercept` into the console's Exfiltration view. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Phase 2 core (CA + pump + teardown) was smoke-test verified 2026-07-16; the Phase 2.5 per-message pump + Exfiltration merge, and the fixes from the 2026-07-20/21 ABORT review (L1 secret leak, F1 relay deadlock, F-A silent-drop, Self1 self-attribution, W1 dead console path) were applied since and are NOT yet independently re-verified. Redact/block is Phase 3; a NetworkExtension transparent proxy is a later phase.",
+      "counts": {
+        "features": 5,
+        "bugFixes": 0,
+        "workstreams": 1,
+        "blockers": 0,
+        "complete": 3,
+        "inProgress": 1,
+        "planned": 0,
+        "stretch": 0
+      },
+      "file": "v0-7-0-tls-intercept.json"
+    },
+    {
       "id": "v0-2-0-tui",
       "version": "0.2.0",
       "name": "Interactive TUI triage face",
@@ -63,27 +84,6 @@
         "stretch": 0
       },
       "file": "v0-2-0-tui.json"
-    },
-    {
-      "id": "v0-7-0-tls-intercept",
-      "version": "0.7.0",
-      "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
-      "status": "complete",
-      "posture": "on-track",
-      "targetWindow": "feature branch verified; ready to cut (feature→develop→main→tag)",
-      "lastUpdated": "2026-07-16T00:00:00.000Z",
-      "summary": "Phase 2 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror, VERIFIED end-to-end on macOS. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) into an InterceptedFlow streamed to a unix socket and/or a rotating 0600 log, rendered in the console's time-ordered Intercepted TUI. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Redact/block is Phase 3; a NetworkExtension transparent proxy (for software that ignores the system proxy) is a later phase.",
-      "counts": {
-        "features": 4,
-        "bugFixes": 0,
-        "workstreams": 1,
-        "blockers": 0,
-        "complete": 3,
-        "inProgress": 0,
-        "planned": 0,
-        "stretch": 0
-      },
-      "file": "v0-7-0-tls-intercept.json"
     },
     {
       "id": "v0-5-3-liveness-hardening",

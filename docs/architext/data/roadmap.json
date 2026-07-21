@@ -29,8 +29,8 @@
       "title": "Phase 2 \u2014 Transparent TLS-intercepting decrypt mirror",
       "kind": "feature",
       "section": "v0.7.0",
-      "status": "planned",
-      "summary": "Pulled forward from Phase 3 (approved in brainstorming, see docs/superpowers/specs/2026-07-15-phase2-tls-interception-design.md): a consented, transparent, READ-ONLY intercepting proxy (local root CA + pf rdr redirect of TCP:443, original dest via /dev/pf DIOCNATLOOK, crypto/tls terminate+re-dial+relay). Decrypts already-running apps' HTTPS broadly \u2014 the 'visibility into all encrypted traffic' goal \u2014 and surfaces the plaintext via DecodeCleartext+Redact. Runs as `counterspy intercept` (background daemon, publishes decrypted flows over a live socket and/or a rotating/expiring log chosen at launch); `counterspy console` is a separate viewer. Honest coverage: pinned apps bypassed-not-broken, QUIC/opaque labeled. No traffic modification this cycle."
+      "status": "in-progress",
+      "summary": "Pulled forward from Phase 3 (approved in brainstorming, see docs/superpowers/specs/2026-07-15-phase2-tls-interception-design.md): a consented, READ-ONLY intercepting proxy (local root CA + crypto/tls terminate+re-dial+relay). The originally planned pf rdr redirect was DISPROVED (pf translates only inbound packets) and replaced with an HTTP CONNECT proxy registered as the system HTTPS proxy. Decrypts proxy-honoring apps' HTTPS broadly \u2014 the 'visibility into all encrypted traffic' goal \u2014 via a per-message streaming pump, surfacing the plaintext (DecodeCleartext+Redact) as per-message events. Runs as `counterspy intercept` (daemon, publishes to a live socket and/or a rotating 0600 log); `console --intercept` ingests that stream into the console's Exfiltration view (merged, not a separate viewer). Honest coverage: pinned apps bypassed-not-broken, h2-only/QUIC/opaque labeled. No traffic modification this cycle. Implemented on feat/tls-intercept (Phase 2 + 2.5); see Release Truth v0.7.0 for status."
     },
     {
       "id": "roadmap-egress-active-controls",

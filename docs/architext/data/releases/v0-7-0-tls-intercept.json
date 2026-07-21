@@ -2,12 +2,12 @@
   "id": "v0-7-0-tls-intercept",
   "version": "0.7.0",
   "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
-  "status": "complete",
-  "posture": "on-track",
-  "summary": "Phase 2 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror, VERIFIED end-to-end on macOS. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) into an InterceptedFlow streamed to a unix socket and/or a rotating 0600 log, rendered in the console's time-ordered Intercepted TUI. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Redact/block is Phase 3; a NetworkExtension transparent proxy (for software that ignores the system proxy) is a later phase.",
-  "targetWindow": "feature branch verified; ready to cut (feature\u2192develop\u2192main\u2192tag)",
-  "lastUpdated": "2026-07-16T00:00:00.000Z",
-  "updateSource": "swarm build cp-p2a..cp-p2j + root smoke test 2026-07-16",
+  "status": "in-progress",
+  "posture": "at-risk",
+  "summary": "Phase 2 + 2.5 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) as per-message InterceptedMessage events streamed to a unix socket and/or a rotating 0600 log, ingested via `console --intercept` into the console's Exfiltration view. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Phase 2 core (CA + pump + teardown) was smoke-test verified 2026-07-16; the Phase 2.5 per-message pump + Exfiltration merge, and the fixes from the 2026-07-20/21 ABORT review (L1 secret leak, F1 relay deadlock, F-A silent-drop, Self1 self-attribution, W1 dead console path) were applied since and are NOT yet independently re-verified. Redact/block is Phase 3; a NetworkExtension transparent proxy is a later phase.",
+  "targetWindow": "NOT ready to cut \u2014 pending a clean ABORT re-review of the applied fixes (no PR until fully green)",
+  "lastUpdated": "2026-07-21T00:00:00.000Z",
+  "updateSource": "swarm build cp-p2a..cp-p2j + smoke test 2026-07-16 + Phase 2.5 + v0.7.0 ABORT review & fixes 2026-07-20/21",
   "scope": {
     "required": [
       {
@@ -27,10 +27,10 @@
       },
       {
         "id": "intercept-command",
-        "title": "intercept daemon + Intercepted TUI (consent + reliable teardown)",
+        "title": "intercept daemon + console --intercept view (consent + reliable teardown)",
         "kind": "feature",
         "status": "complete",
-        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved surface): consent -> arm trust + system proxy with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures and restoring each service's PRIOR proxy setting; --uninstall is non-minting + idempotent. `console --intercept[=path]` opens the time-ordered Intercepted TUI over the live socket (or tails a --log file); the socket is chowned to the invoking user so a NON-root console can read a root daemon's stream.",
+        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved surface): consent -> arm trust + system proxy with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures and restoring each service's PRIOR proxy setting; --uninstall is non-minting + idempotent. `console --intercept[=path]` ingests the live socket (or a --log file) into the console's Exfiltration view, joining decrypted per-message events to apps by PID; the socket is chmod 0600 + chowned to the invoking user so a NON-root console can read a root daemon's stream.",
         "owner": "Project maintainers",
         "workstreamId": "phase2",
         "dependsOn": [
@@ -55,6 +55,24 @@
           "pfctl -a counterspy -s nat -v: Evaluations 27828 / Packets 0",
           "cp-p2i",
           "go test ./... -race"
+        ]
+      },
+      {
+        "id": "intercept-per-message-merge",
+        "title": "Phase 2.5: per-message pump + Exfiltration merge + ABORT-review fixes",
+        "kind": "feature",
+        "status": "in-progress",
+        "summary": "Per-message streaming pump (HTTP/1.1 framing, request↔response FIFO correlation via a channel, ALPN h2-only bypass) publishing InterceptedMessage events; merged into the console's Exfiltration view via `console --intercept`, joined to apps by PID, with honest empty states and a version-mismatch footer. The 2026-07-20/21 ABORT review found and drove fixes for: L1 (credential-name masking missed compound/prefix/plural forms), F1 (relay deadlock from a synchronous tee + blocking correlation), F-A (silent capture drop on tee detach), Self1 (self-attribution excluded the wrong process), W1 (console path was dead — nil channel, path-join mismatch). All fixes applied; a clean ABORT re-review is the gate before cut.",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [
+          "intercept-core",
+          "intercept-command"
+        ],
+        "evidence": [
+          "go test ./... -race + coverage 86.3% green on the feature branch",
+          "docs/releases/v0.7.0-tls-intercept-abort.md (review + re-run closure)",
+          "docs/superpowers/specs/2026-07-21-intercept-view-merge-design.md"
         ]
       }
     ],
@@ -92,14 +110,15 @@
       "id": "phase2",
       "name": "Outbound visibility Phase 2 (TLS intercept)",
       "owner": "Project maintainers",
-      "status": "complete",
-      "posture": "on-track",
-      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, then verified by a root smoke test that disproved the approved pf routing and drove the CONNECT pivot.",
-      "progress": 100,
+      "status": "in-progress",
+      "posture": "at-risk",
+      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, smoke-test verified 2026-07-16 (which disproved the approved pf routing and drove the CONNECT pivot). Phase 2.5 (per-message pump + Exfiltration merge) and the v0.7.0 ABORT-review fixes are applied but await a clean re-review before cut.",
+      "progress": 85,
       "itemIds": [
         "intercept-core",
         "intercept-command",
-        "intercept-routing-pivot"
+        "intercept-routing-pivot",
+        "intercept-per-message-merge"
       ],
       "evidence": [
         "go test ./... -race PASS; darwin + linux build",
