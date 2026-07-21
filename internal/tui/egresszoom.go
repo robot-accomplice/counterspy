@@ -162,8 +162,8 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	drawZoomGraph(s, 0, 0, leftW, topH, g, members, m.Zoom.mode, byDest, emphPID, emphEp)
 	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, selPID, !byDest)
 	botY, botH := topH, h-topH
-	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest)
-	drawZoomMeta(s, leftW, botY, w-leftW, botH, g)
+	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest, m.InterceptedDests)
+	drawZoomMeta(s, leftW, botY, w-leftW, botH, m, g)
 }
 
 func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, mode trendMode, byDest bool, emphPID int, emphEp string) {
@@ -272,7 +272,21 @@ func shareBar(pct, n int) string {
 	return string(b)
 }
 
-func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool) {
+// destDecrypted reports whether an "IP:port" endpoint's IP appears in the decrypted stream
+// (InterceptedDests). Pure so the IP match is unit-tested independent of rendering.
+func destDecrypted(ep string, decrypted map[string]struct{}) bool {
+	if len(decrypted) == 0 {
+		return false
+	}
+	ip := ep
+	if i := strings.LastIndex(ep, ":"); i >= 0 {
+		ip = ep[:i]
+	}
+	_, ok := decrypted[ip]
+	return ok
+}
+
+func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool, decrypted map[string]struct{}) {
 	drawPanel(s, x, y, w, h, "destinations", focused)
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
@@ -301,16 +315,24 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []des
 		// zoom panel. IP:port labels were inert, but resolved names are not (#3).
 		drawText(s, tx, row, st,
 			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(model.Clean(d.label), 24), human(d.rate), share), iw-(tx-ix)))
+		// Mark a destination whose TLS we decrypted (seen in the intercept stream), cross-referencing
+		// the byte-level egress view with the decrypted flows. Drawn at the panel's right edge so it
+		// never disturbs column layout.
+		if destDecrypted(d.ep, decrypted) {
+			s.SetContent(x+w-2, row, '⚿', nil, tcell.StyleDefault.Foreground(colWarn))
+		}
 	}
 }
 
-func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
+func drawZoomMeta(s tcell.Screen, x, y, w, h int, m EgressModel, g model.EgressGroup) {
 	drawPanel(s, x, y, w, h, "this group", false)
 	ix, iy, iw := x+2, y+1, w-4
 	lines := []string{model.Clean(fmt.Sprintf("%s · %s · cadence: %s", g.Trust, bgLabel(g.Background), g.Cadence))}
 	if len(g.Capabilities) > 0 {
 		lines = append(lines, model.Clean("can access  "+strings.Join(g.Capabilities, " · ")))
 	}
+	// Decrypted per-message section (only in `console --intercept` mode); empty-state-aware.
+	lines = append(lines, interceptSummary(m, g.Path, 6)...)
 	for i, ln := range lines {
 		row := iy + i
 		if row >= y+h-1 {
@@ -321,4 +343,59 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
 	// Key hints on the bottom border, like the tree footer.
 	drawText(s, x+2, y+h-1, tcell.StyleDefault.Foreground(colDim),
 		truncate(" i inspect · ↑/↓ pid · t out/in · g pid/dest · z back ", w-4))
+}
+
+// interceptSummary renders the "decrypted flows" section for one app in the zoom meta pane. It is pure
+// so the three honest states are unit-tested: not in intercept mode (nil — the section is absent),
+// intercept on but nothing captured for this app yet, and the recent per-message summaries (newest
+// last, bounded by max). MessageDropCount is surfaced so a bounded buffer never silently hides flows.
+func interceptSummary(m EgressModel, path string, max int) []string {
+	if m.ProxyAddr == "" {
+		return nil // not in intercept mode
+	}
+	out := []string{"── decrypted · " + m.ProxyAddr}
+	msgs := m.Messages[path]
+	if len(msgs) == 0 {
+		return append(out, "  no decrypted flows for this app yet")
+	}
+	start := 0
+	if max > 0 && len(msgs) > max {
+		start = len(msgs) - max
+	}
+	for _, msg := range msgs[start:] {
+		out = append(out, "  "+interceptMsgLine(msg))
+	}
+	if m.MessageDropCount > 0 {
+		out = append(out, fmt.Sprintf("  (+%d older dropped · buffer bound)", m.MessageDropCount))
+	}
+	return out
+}
+
+// interceptMsgLine is a one-line summary of an intercepted message: a direction arrow, the HTTP start
+// line (first line of the already-redacted Text), and the destination. Connection-level events (no
+// direction/text) fall back to their reason.
+func interceptMsgLine(msg model.InterceptedMessage) string {
+	arrow := "·"
+	switch msg.Direction {
+	case "request":
+		arrow = "→"
+	case "response":
+		arrow = "←"
+	}
+	start := msg.Text
+	if i := strings.IndexAny(start, "\r\n"); i >= 0 {
+		start = start[:i]
+	}
+	if start == "" {
+		start = msg.Reason // connection-level events carry a reason, not message text
+	}
+	dest := msg.DestName
+	if dest == "" {
+		dest = msg.DestIP
+	}
+	line := arrow + " " + start
+	if dest != "" {
+		line += "  " + dest
+	}
+	return model.Clean(line)
 }

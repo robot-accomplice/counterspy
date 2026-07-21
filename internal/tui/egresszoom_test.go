@@ -350,3 +350,51 @@ func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
 		t.Fatalf("model.Clean must strip control chars from the label: %q", got)
 	}
 }
+
+// interceptSummary drives the three honest states of the decrypted-flows section (v0.7.0 W1): off
+// (no --intercept → no section at all), on-but-empty for this app, and populated with per-message
+// summaries. The section must never silently show nothing while intercept is active.
+func TestInterceptSummary_HonestStates(t *testing.T) {
+	// 1. Not in intercept mode: no section.
+	if got := interceptSummary(EgressModel{}, "/bin/app", 6); got != nil {
+		t.Fatalf("off mode must produce no section, got %v", got)
+	}
+	// 2. Intercept on, nothing captured for this app yet: honest empty line, not silence.
+	m := EgressModel{ProxyAddr: "127.0.0.1:62443"}
+	empty := interceptSummary(m, "/bin/app", 6)
+	if len(empty) < 2 || !strings.Contains(empty[0], "127.0.0.1:62443") ||
+		!strings.Contains(strings.Join(empty, "\n"), "no decrypted flows for this app yet") {
+		t.Fatalf("on-but-empty must state so honestly, got %v", empty)
+	}
+	// 3. Populated: per-message summaries with direction + start line + dest.
+	m.Messages = map[string][]model.InterceptedMessage{
+		"/bin/app": {
+			{Direction: "request", Text: "GET /v1/data HTTP/1.1\r\nHost: api.example.com", DestName: "api.example.com"},
+			{Direction: "response", Text: "HTTP/1.1 200 OK\r\nContent-Type: application/json", DestName: "api.example.com"},
+		},
+	}
+	got := strings.Join(interceptSummary(m, "/bin/app", 6), "\n")
+	for _, want := range []string{"→ GET /v1/data HTTP/1.1", "← HTTP/1.1 200 OK", "api.example.com"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("populated summary missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "no decrypted flows") {
+		t.Fatalf("populated summary must not show the empty state:\n%s", got)
+	}
+}
+
+// destDecrypted matches an "IP:port" endpoint against the decrypted-destination set (keyed by IP), so
+// the zoom dests pane can flag which destinations were actually MITM'd. (v0.7.0 W1 — InterceptedDests.)
+func TestDestDecrypted(t *testing.T) {
+	set := map[string]struct{}{"198.51.100.7": {}}
+	if !destDecrypted("198.51.100.7:443", set) {
+		t.Fatal("decrypted dest must match on IP, ignoring port")
+	}
+	if destDecrypted("203.0.113.9:443", set) {
+		t.Fatal("non-decrypted dest must not match")
+	}
+	if destDecrypted("198.51.100.7:443", nil) {
+		t.Fatal("empty set must never match")
+	}
+}

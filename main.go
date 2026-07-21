@@ -24,6 +24,7 @@ import (
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/inspect"
+	"counterspy/internal/intercept/publish"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
@@ -92,6 +93,8 @@ Commands:
   console                  Open the interactive UI: Findings triage + the Exfiltration monitor,
                            switched with Tab / Shift-Tab (the visual mode)
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+      --intercept[=path]     show decrypted flows in the Exfiltration view: live from the armed
+                             daemon's socket, or from a captured --log file
       --json                 print the Exfiltration report as JSON and exit (no live UI)
       --once                 print the Exfiltration report once and exit (no live UI)
   restore <manifest.json>  Undo a quarantine from its manifest
@@ -421,6 +424,42 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 // package main (decoupling invariant).
 func proxyEndpointForConsole() string { return fmt.Sprintf("127.0.0.1:%d", interceptProxyPort) }
 
+// interceptSource returns the two forms of `console --intercept[=path]` (an approved Phase 2 flag):
+// bare `--intercept` streams the live unix socket the armed daemon publishes to; `--intercept=path`
+// reads a captured `--log` JSONL file. It parses the forms directly rather than via flagValue, which
+// would grab a following flag (e.g. `--intercept --no-inspect`) as the path.
+func interceptSource(flags []string) (on bool, logPath string) {
+	for _, f := range flags {
+		switch {
+		case f == "--intercept":
+			on = true
+		case strings.HasPrefix(f, "--intercept="):
+			on, logPath = true, strings.TrimPrefix(f, "--intercept=")
+		}
+	}
+	return on, logPath
+}
+
+// interceptMessages streams intercepted per-message events into the console. With no logPath it dials
+// the live socket the armed daemon publishes to; with one it reads that captured JSONL log (one-shot
+// catch-up). Either way it is a single source that publishes each message once, so no dedup is needed.
+// A read error (socket absent because intercept isn't running, missing log) is non-fatal: the channel
+// simply stays empty and the Exfiltration view shows its honest "no intercepted messages" state. The
+// reader ends when the source ends (log EOF, socket close) or the process exits.
+func interceptMessages(logPath string) <-chan model.InterceptedMessage {
+	ch := make(chan model.InterceptedMessage, 64)
+	go func() {
+		defer close(ch)
+		send := func(m model.InterceptedMessage) { ch <- m }
+		if logPath == "" {
+			_ = publish.ReadSocket(interceptSocketPath, send)
+		} else {
+			_ = publish.ReadLog(logPath, send)
+		}
+	}()
+	return ch
+}
+
 // runConsole is the unified interactive UI: Findings triage + the Exfiltration monitor in one
 // screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
 // Exfiltration report (what `egress --json/--once` used to do).
@@ -548,9 +587,18 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 			}
 		}
 	}()
+	// `console --intercept[=path]` (approved Phase 2 flag): stream decrypted per-message events from
+	// the armed daemon's live socket, or from a captured --log file, into the Exfiltration view. Off
+	// by default → nil channel + empty proxyAddr, which the view reads as "not in intercept mode".
+	var messages <-chan model.InterceptedMessage
+	proxyAddr := ""
+	if interceptOn, logPath := interceptSource(flags); interceptOn {
+		messages = interceptMessages(logPath)
+		proxyAddr = proxyEndpointForConsole()
+	}
 	// The `i` inspection overlay captures a flow's packets via native /dev/bpf (root); --no-inspect
 	// disables it entirely for locked-down environments (spec §5.3), leaving a nil Inspector.
-	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy, nil, proxyEndpointForConsole())
+	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy, messages, proxyAddr)
 	if err != nil {
 		fmt.Fprintln(stdout, "console:", err)
 		return 1

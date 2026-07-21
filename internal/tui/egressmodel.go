@@ -262,8 +262,8 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 	const maxPerApp = 500
 	buf := append(m.Messages[key], msg)
 	if len(buf) > maxPerApp {
+		m.MessageDropCount += len(buf) - maxPerApp // count BEFORE reslicing, or it's always 0
 		buf = buf[len(buf)-maxPerApp:]
-		m.MessageDropCount += len(buf) - maxPerApp
 	}
 	m.Messages[key] = buf
 	if msg.DestIP != "" {
