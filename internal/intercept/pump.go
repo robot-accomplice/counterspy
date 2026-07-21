@@ -26,6 +26,10 @@ const (
 	maxHeaderBytes       = 64 << 10 // 64 KiB per header block
 	maxPipelinedRequests = 64       // request→response correlation queue
 	maxLinger            = 30 * time.Second
+	// Backlog for the non-blocking tee into each framing parser; one slot per forward chunk (≤32 KiB).
+	// When a parser falls this far behind, teeing detaches so it can never back-pressure — let alone
+	// deadlock — the relayed connection (cp-p25 ABORT F1).
+	maxTeeBacklogChunks = 8
 )
 
 // pump is the per-message streaming relay. It terminates the client's TLS, dials the real target,
@@ -181,55 +185,97 @@ func (pu *pump) bypass(client net.Conn, target string) {
 	upstream.Close()
 }
 
-// runRelay copies both directions verbatim while teeing a copy into HTTP/1.1 framing parsers.
+// runRelay copies both directions verbatim while teeing a copy into HTTP/1.1 framing parsers. The
+// tee is non-blocking (see teeFeeder): a slow or parked parser can never back-pressure the forward
+// path, so parsing cannot stall or deadlock the relayed connection. Each parser goroutine closes its
+// read end on exit so a feeder blocked writing to an abandoned pipe is always released.
 func (pu *pump) runRelay(client, upstream net.Conn) {
 	reqRd, reqWr := io.Pipe()
 	respRd, respWr := io.Pipe()
 
-	done := make(chan struct{}, 2)
-	var copyWg sync.WaitGroup
-	copyWg.Add(2)
+	var feederWg sync.WaitGroup
+	reqTee := newTeeFeeder(reqWr, &feederWg)
+	respTee := newTeeFeeder(respWr, &feederWg)
 
-	cp := func(dst, src, other net.Conn, pw *io.PipeWriter) {
-		defer copyWg.Done()
-		copyTee(dst, src, pw)
+	done := make(chan struct{}, 2)
+	cp := func(dst, src, other net.Conn, tee *teeFeeder) {
+		copyTee(dst, src, tee)
+		tee.close() // no more chunks; the feeder flushes buffered bytes then closes the pipe → EOF
 		done <- struct{}{}
 		if other != nil {
 			_ = other.SetReadDeadline(time.Now().Add(maxLinger))
 		}
 	}
-	go cp(upstream, client, upstream, reqWr)
-	go cp(client, upstream, client, respWr)
+	go cp(upstream, client, upstream, reqTee)
+	go cp(client, upstream, client, respTee)
 
 	var parseWg sync.WaitGroup
 	parseWg.Add(2)
 	go func() {
 		defer parseWg.Done()
+		defer reqRd.Close() // release the request feeder if the parser abandons the stream
 		pu.parseRequests(reqRd)
-		pu.closeRequests() // release any response waiting on a request that will never arrive
-		reqWr.Close()
+		pu.closeRequests() // request stream ended → release any response waiting on a missing request
 	}()
 	go func() {
 		defer parseWg.Done()
+		defer respRd.Close()
 		pu.parseResponses(respRd)
-		respWr.Close()
 	}()
 
 	<-done
 	<-done
-	copyWg.Wait()
-	reqWr.Close()
-	respWr.Close()
 	parseWg.Wait()
+	feederWg.Wait()
 	client.Close()
 	upstream.Close()
 }
 
-// copyTee forwards src→dst and copies the same bytes into pw. If pw closes (parser desync), it
-// keeps forwarding so the relay stays alive.
-func copyTee(dst net.Conn, src net.Conn, pw *io.PipeWriter) {
+// teeFeeder is a bounded, non-blocking bridge from the relay's forward path to a framing parser.
+// submit never blocks: when the parser has fallen maxTeeBacklogChunks behind (it is slow or parked in
+// popQueue), the chunk is refused and the caller detaches teeing, so forwarding is never
+// back-pressured by parsing — the "never affects traffic" invariant. A feeder goroutine drains the
+// buffer into the pipe the parser reads; close ends the stream so the parser sees EOF.
+type teeFeeder struct {
+	ch chan []byte
+}
+
+func newTeeFeeder(pw *io.PipeWriter, wg *sync.WaitGroup) *teeFeeder {
+	t := &teeFeeder{ch: make(chan []byte, maxTeeBacklogChunks)}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for chunk := range t.ch {
+			if _, err := pw.Write(chunk); err != nil {
+				return // the parser closed its read end; stop — forwarding is unaffected
+			}
+		}
+		pw.Close() // producer finished cleanly → signal EOF to the parser
+	}()
+	return t
+}
+
+// submit hands a copy of chunk to the feeder without blocking, returning false when the backlog is
+// full so the caller stops teeing this connection. The copy is required because the caller reuses buf.
+func (t *teeFeeder) submit(chunk []byte) bool {
+	dup := make([]byte, len(chunk))
+	copy(dup, chunk)
+	select {
+	case t.ch <- dup:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t *teeFeeder) close() { close(t.ch) }
+
+// copyTee forwards src→dst and hands a copy of each chunk to the tee. Teeing is best-effort: if the
+// parser falls behind (submit returns false) teeing detaches and forwarding continues, so a slow or
+// stuck parser never affects the relayed connection.
+func copyTee(dst net.Conn, src net.Conn, tee *teeFeeder) {
 	buf := make([]byte, 32*1024)
-	tee := true
+	teeing := true
 	for {
 		src.SetReadDeadline(time.Now().Add(idleTimeout))
 		n, err := src.Read(buf)
@@ -237,10 +283,8 @@ func copyTee(dst net.Conn, src net.Conn, pw *io.PipeWriter) {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				return
 			}
-			if tee {
-				if _, werr := pw.Write(buf[:n]); werr != nil {
-					tee = false
-				}
+			if teeing && !tee.submit(buf[:n]) {
+				teeing = false
 			}
 		}
 		if err != nil {

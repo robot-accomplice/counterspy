@@ -375,3 +375,46 @@ func TestPump_PopUnblocksOnClose(t *testing.T) {
 		t.Fatal("popQueue did not unblock after closeRequests")
 	}
 }
+
+// TestPump_RelayNoDeadlockOnUnmatchedResponse is the regression guard for ABORT review F1. A server
+// that emits more responses than requests (adversarial or buggy — this tool inspects untrusted
+// traffic) must not wedge the relay. The mutex→channel correlation fix made popQueue block; combined
+// with the old synchronous tee that back-pressured the forward path, an unmatched response deadlocked
+// runRelay permanently — CONFIRMED earlier via goroutine dump (parseResponses parked in popQueue while
+// the response copyTee blocked on the tee pipe, so closeRequests could never run). The tee is now
+// non-blocking, so a parked parser can never stall the relay: runRelay must return once the conns close.
+func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
+	pu := &pump{
+		queue:   make(chan queueEntry, maxPipelinedRequests),
+		publish: func(model.InterceptedMessage) {},
+	}
+	clientR, clientW := net.Pipe()
+	upstreamR, upstreamW := net.Pipe()
+
+	// Drain forwarded bytes so the relay's FORWARD path never blocks on the test side.
+	go io.Copy(io.Discard, upstreamW) // forwarded requests (client→upstream)
+	go io.Copy(io.Discard, clientW)   // forwarded responses (upstream→client)
+
+	relayDone := make(chan struct{})
+	go func() { pu.runRelay(clientR, upstreamR); close(relayDone) }()
+
+	// One request, then a matched response followed by an UNMATCHED response whose body is far larger
+	// than any parser read-ahead or the tee backlog. parseResponses parks in popQueue after the second
+	// head, before reading its body, so with a synchronous tee the copy goroutine wedges mid-body with
+	// bytes the parser will never drain — the confirmed F1 deadlock. With the non-blocking tee, teeing
+	// detaches and the body still forwards, so the relay unwinds once the conns close.
+	body := strings.Repeat("x", 300*1024)
+	go clientW.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
+	go upstreamW.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nA" +
+		"HTTP/1.1 200 OK\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\n\r\n" + body))
+
+	time.Sleep(200 * time.Millisecond) // let the unmatched response park parseResponses in popQueue
+	clientW.Close()                    // both ends hang up; a correct relay now unwinds
+	upstreamW.Close()
+
+	select {
+	case <-relayDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runRelay did not return after the conns closed — F1 deadlock regression (idleTimeout is 5m)")
+	}
+}
