@@ -121,3 +121,28 @@ func TestRedact_DanglingRuleDoesNotSwallowLaterFields(t *testing.T) {
 		}
 	}
 }
+
+// ABORT review L1: the body matcher anchored field names with `\b`, but `_` is a word char, so `\b`
+// never fires inside a compound name — `refresh_token`/`id_token`/`csrf_token` and camelCase
+// `authToken` slipped through and their values were published in cleartext to the 0600 log and the
+// socket. The header path already handled `*-token`; the body path must reach parity. WHY it matters:
+// refresh/id tokens are the highest-value credentials in an OAuth flow and the single most common body
+// field the intercept proxy will ever capture.
+func TestRedact_MasksCompoundCredentialNames(t *testing.T) {
+	leaks := map[string]string{
+		`{"refresh_token":"RT-LEAK-1"}`:    "RT-LEAK-1",
+		`{"id_token":"IDT-LEAK-2"}`:        "IDT-LEAK-2",
+		`{"csrf_token":"CSRF-LEAK-3"}`:     "CSRF-LEAK-3",
+		`{"authToken":"CAMEL-LEAK-4"}`:     "CAMEL-LEAK-4",
+		`refresh_token=RT-FORM-LEAK-5&x=1`: "RT-FORM-LEAK-5",
+	}
+	for in, leak := range leaks {
+		if got := Redact(in); strings.Contains(got, leak) {
+			t.Fatalf("compound credential leaked: %q -> %q", in, got)
+		}
+	}
+	// Must NOT over-mask a benign field that merely ends in a non-credential word (no bare `key`).
+	if got := Redact(`{"primary_key":"pk_0001","monkey":"george"}`); !strings.Contains(got, "pk_0001") || !strings.Contains(got, "george") {
+		t.Fatalf("over-masked a non-credential field: %s", got)
+	}
+}

@@ -62,7 +62,12 @@ var (
 	// `"`), so the whole match FAILS and the partial secret is published in the clear. Same lesson as
 	// rePEMOpen above, which was added for a dangling BEGIN and never generalised to body fields
 	// (cp-p25 Audit F-1 — reproduced against the live pipeline, not hypothetical).
-	reBodySecret = regexp.MustCompile(`(?i)("?\b(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|client[_-]?secret|authorization)"?\s*[:=]\s*)("[^"]*"|"[^"]*$|[^&\s"]+)`)
+	// The field NAME allows a compound prefix (`[a-z0-9_-]*`) before the sensitive suffix, mirroring
+	// reHeaderSecret. A bare `\b` anchor fails here: `_` is a word char, so `\btoken` never matches
+	// inside `refresh_token`/`id_token`/`csrf_token`, and camelCase `authToken` has no boundary at all —
+	// those leaked in cleartext to the socket and 0600 log (cp-p25 ABORT L1). The suffix set stays
+	// pattern-exact (`api[_-]?key`, never bare `key`) so benign names like `primary_key` are not masked.
+	reBodySecret = regexp.MustCompile(`(?i)("?[a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|authorization)"?\s*[:=]\s*)("[^"]*"|"[^"]*$|[^&\s"]+)`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under
