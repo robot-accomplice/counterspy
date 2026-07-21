@@ -62,12 +62,16 @@ var (
 	// `"`), so the whole match FAILS and the partial secret is published in the clear. Same lesson as
 	// rePEMOpen above, which was added for a dangling BEGIN and never generalised to body fields
 	// (cp-p25 Audit F-1 — reproduced against the live pipeline, not hypothetical).
-	// The field NAME allows a compound prefix (`[a-z0-9_-]*`) before the sensitive suffix, mirroring
-	// reHeaderSecret. A bare `\b` anchor fails here: `_` is a word char, so `\btoken` never matches
-	// inside `refresh_token`/`id_token`/`csrf_token`, and camelCase `authToken` has no boundary at all —
-	// those leaked in cleartext to the socket and 0600 log (cp-p25 ABORT L1). The suffix set stays
-	// pattern-exact (`api[_-]?key`, never bare `key`) so benign names like `primary_key` are not masked.
-	reBodySecret = regexp.MustCompile(`(?i)("?[a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|authorization)"?\s*[:=]\s*)("[^"]*"|"[^"]*$|[^&\s"]+)`)
+	// The field NAME may carry the sensitive word in ANY position — prefix, interior, or suffix — so it
+	// is wrapped in `[a-z0-9_-]*` on BOTH sides. A bare `\b` anchor fails (`_` is a word char, so
+	// `\btoken` never matches inside `refresh_token`); a suffix-only prefix still leaks `tokenValue`,
+	// `password_confirmation` (the Rails default), plural `tokens`, and camelCase `authToken`. Both
+	// leak classes were reproduced in cleartext to the socket and 0600 log (cp-p25 ABORT L1 + re-run).
+	// Recall over precision: masking a benign field is harmless; leaking a credential is not. The suffix
+	// set stays pattern-exact (`api[_-]?key`, never bare `key`) so `primary_key`/`monkey` survive. The
+	// value alternation also covers a flat JSON array (`["a","b"]`) so plural credential arrays don't
+	// leak; nested objects/arrays are beyond a regex (fuzzy detection is feature #4).
+	reBodySecret = regexp.MustCompile(`(?i)("?[a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|authorization)[a-z0-9_-]*"?\s*[:=]\s*)("[^"]*"|"[^"]*$|\[[^\]]*\]|[^&\s"]+)`)
 )
 
 // redactMark is the ASCII replacement for a masked secret (ASCII so it renders under

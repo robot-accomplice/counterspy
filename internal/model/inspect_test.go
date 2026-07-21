@@ -130,19 +130,29 @@ func TestRedact_DanglingRuleDoesNotSwallowLaterFields(t *testing.T) {
 // field the intercept proxy will ever capture.
 func TestRedact_MasksCompoundCredentialNames(t *testing.T) {
 	leaks := map[string]string{
+		// suffix / camelCase (original L1)
 		`{"refresh_token":"RT-LEAK-1"}`:    "RT-LEAK-1",
 		`{"id_token":"IDT-LEAK-2"}`:        "IDT-LEAK-2",
 		`{"csrf_token":"CSRF-LEAK-3"}`:     "CSRF-LEAK-3",
 		`{"authToken":"CAMEL-LEAK-4"}`:     "CAMEL-LEAK-4",
 		`refresh_token=RT-FORM-LEAK-5&x=1`: "RT-FORM-LEAK-5",
+		// prefix / interior / plural (ABORT re-run: the credential word is not the suffix)
+		`{"tokenValue":"PRE-LEAK-6"}`:            "PRE-LEAK-6",
+		`{"secretValue":"PRE-LEAK-7"}`:           "PRE-LEAK-7",
+		`{"password_confirmation":"PW-LEAK-8"}`:  "PW-LEAK-8", // Rails default signup field
+		`{"passwordConfirm":"PW-LEAK-9"}`:        "PW-LEAK-9",
+		`{"apiKeyPrimary":"AK-LEAK-10"}`:         "AK-LEAK-10",
+		`{"tokens":["ARR-LEAK-11","ARR-LEAK-12"]}`: "ARR-LEAK-11", // plural name + array value
 	}
 	for in, leak := range leaks {
 		if got := Redact(in); strings.Contains(got, leak) {
-			t.Fatalf("compound credential leaked: %q -> %q", in, got)
+			t.Fatalf("credential leaked: %q -> %q", in, got)
 		}
 	}
-	// Must NOT over-mask a benign field that merely ends in a non-credential word (no bare `key`).
-	if got := Redact(`{"primary_key":"pk_0001","monkey":"george"}`); !strings.Contains(got, "pk_0001") || !strings.Contains(got, "george") {
+	// Must NOT over-mask benign fields, and must not mask a non-credential NAME whose VALUE merely is
+	// the word "password" (grant_type=password is an OAuth grant, not a secret).
+	keep := `{"primary_key":"pk_0001","monkey":"george","grant_type":"password"}`
+	if got := Redact(keep); !strings.Contains(got, "pk_0001") || !strings.Contains(got, "george") || !strings.Contains(got, `"password"`) {
 		t.Fatalf("over-masked a non-credential field: %s", got)
 	}
 }
