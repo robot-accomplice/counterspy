@@ -861,7 +861,7 @@
         "COOPERATIVE: software that ignores the system proxy is NOT intercepted \u2014 an honest gap, visible via the Exfiltration monitor's nettop view; closing it needs a NetworkExtension transparent proxy (later phase)"
       ],
       "observability": [
-        "Intercepted TUI (console --intercept)",
+        "Exfiltration view decrypted section (console --intercept), self-PID excluded",
         "rotating 0600 JSONL log",
         "honest flow status (decrypted / pinned / opaque / error)"
       ],

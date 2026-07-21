@@ -286,7 +286,7 @@
       "id": "intercept",
       "name": "TLS intercept (arm \u2192 system proxy \u2192 CONNECT \u2192 decrypt \u2192 publish \u2192 console \u2192 disarm)",
       "status": "implemented",
-      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA, register as the system HTTPS proxy, terminate each CONNECT tunnel with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into an InterceptedFlow, and stream it to the console's Intercepted TUI \u2014 all reverted on exit. Verified end-to-end on macOS 2026-07-16.",
+      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA, register as the system HTTPS proxy, terminate each CONNECT tunnel with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into per-message InterceptedMessage events, publish them to a live unix socket and/or a rotating 0600 log, and ingest them into the console's Exfiltration view via `console --intercept` \u2014 all reverted on exit. Verified end-to-end on macOS 2026-07-16.",
       "trigger": "operator runs `sudo counterspy intercept` and consents",
       "actors": [
         "operator"
@@ -334,7 +334,7 @@
           "to": "mod-model",
           "action": "decode + mask",
           "kind": "process",
-          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the upstream verified against the CONNECT authority, relay unmodified, and DecodeCleartext + Redact the captured plaintext into an InterceptedFlow.",
+          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the upstream verified against the CONNECT authority, relay unmodified, and DecodeCleartext + Redact the captured plaintext into per-message InterceptedMessage events (request/response correlated in FIFO order).",
           "data": [
             "decrypted-flow"
           ]
@@ -356,7 +356,7 @@
           "to": "counterspy-cli",
           "action": "console --intercept",
           "kind": "process",
-          "summary": "Open the Intercepted TUI as the ordinary user.",
+          "summary": "As the ordinary user, open the console and ingest the decrypted stream (live socket, or a captured --log file) into the Exfiltration view; counterspy's own relay dials are excluded from that view.",
           "data": []
         },
         {
@@ -366,7 +366,7 @@
           "action": "render flows",
           "kind": "return",
           "returnOf": "s7",
-          "summary": "Time-ordered master-detail; decrypted content only for 'decrypted' status \u2014 pinned/opaque/error explain why there is none.",
+          "summary": "Per-app decrypted-message summaries in the Exfiltration zoom, with honest empty states and a marker on destinations whose TLS was decrypted; content only for 'decrypted' status \u2014 pinned/opaque/error explain why there is none.",
           "data": [
             "decrypted-flow"
           ]
@@ -392,7 +392,7 @@
         "Any arming failure rolls back what was installed and fails loud; a revert failure is reported, never silent"
       ],
       "observability": [
-        "Intercepted TUI (console --intercept)",
+        "Exfiltration view decrypted section (console --intercept)",
         "rotating 0600 JSONL log",
         "honest per-flow status (decrypted / pinned / opaque / error)"
       ],

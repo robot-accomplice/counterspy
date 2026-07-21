@@ -52,7 +52,7 @@
       "id": "decrypted-flow",
       "name": "Decrypted TLS flow",
       "sensitivity": "high",
-      "handling": "Plaintext of the user's OWN outbound TLS, decrypted by the consented intercept proxy (Phase 2). Decoded + Redact-masked (bearer/cookie/api-key/PEM + credential body fields) BEFORE it leaves the proxy, then published as an InterceptedFlow to a live unix socket and/or a rotating 0600 JSONL log (capped 50MB x5, pruned after 7 days). Captured bytes per direction are bounded; content never leaves the machine. Only a 'decrypted' flow carries plaintext \u2014 pinned/opaque/error flows carry none. Requires an explicit trusted-CA install + pf redirect, reverted on exit."
+      "handling": "Plaintext of the user's OWN outbound TLS, decrypted by the consented intercept proxy (Phase 2). Decoded + Redact-masked (bearer/cookie/api-key/PEM + credential body fields, including compound & camelCase names) BEFORE it leaves the proxy, then published as per-message InterceptedMessage events to a live unix socket and/or a rotating 0600 JSONL log (capped 50MB x5, pruned after 7 days), and ingested into the console's Exfiltration view via `console --intercept`. Captured bytes per direction are bounded; content never leaves the machine. Only a 'decrypted' message carries plaintext \u2014 pinned/opaque/error carry none. Requires an explicit trusted-CA install + system HTTPS proxy registration (CONNECT proxy; the pf redirect was disproved), reverted on exit."
     }
   ]
 }
