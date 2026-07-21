@@ -47,6 +47,49 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	}
 }
 
+// Self1 (v0.7.0 ABORT review): a security tool must not report on itself. When the intercept proxy is
+// armed it re-dials every upstream under counterspy's OWN pid, which would otherwise dominate the
+// Exfiltration view and attribute the whole internet to counterspy. Sample must drop the excluded
+// (self) pid entirely while leaving every other process visible.
+func TestMonitor_ExcludesSelfPID(t *testing.T) {
+	m := New(2)
+	m.excludePID = 4821 // stands in for os.Getpid()
+	m.runNettop = func() []byte {
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,counterspy.4821,0,900000\n15:04:05.0,app.4822,0,300000\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"counterspy 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n" +
+			"app 4822 root 11u IPv4 0x2 0t0 TCP 10.0.0.2:6->198.51.100.8:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{
+			4821: {PID: 4821, PPID: 1, Cmd: "/usr/local/bin/counterspy intercept"},
+			4822: {PID: 4822, PPID: 1, Cmd: "/Applications/App.app/Contents/MacOS/app"},
+		}
+	}
+	m.exePaths = func() map[int]string {
+		return map[int]string{4821: "/usr/local/bin/counterspy", 4822: "/Applications/App.app/Contents/MacOS/app"}
+	}
+	m.trustOf = func(path string) string { return "signed" }
+	m.capsOf = func(path string) []string { return nil }
+
+	m.Sample()
+	groups := m.Sample()
+	appSeen := false
+	for _, g := range groups {
+		if strings.Contains(g.Path, "counterspy") || g.App == "counterspy" {
+			t.Fatalf("self pid %d must be excluded from the egress view, got %+v", m.excludePID, groups)
+		}
+		if g.App == "app" {
+			appSeen = true
+		}
+	}
+	if !appSeen {
+		t.Fatalf("a non-self app must still appear: %+v", groups)
+	}
+}
+
 // #9: attacker-influenced identity strings (app name / path / ancestry from a crafted argv/exe
 // path) are run through Clean at the source, so an ANSI/newline payload can't reach storage or the
 // terminal — defense-in-depth over the JSON encoder and the TUI's render-time Clean.

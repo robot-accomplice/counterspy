@@ -2,6 +2,7 @@
 package egress
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -35,6 +36,11 @@ type Monitor struct {
 	trustOf   func(path string) string
 	capsOf    func(path string) []string
 	resolve   func(ip string) (name string, ok bool) // passive-DNS name lookup; nil = names unavailable (#3)
+
+	// excludePID is dropped from every sample so counterspy never reports on its own traffic. It
+	// matters most while the intercept proxy is armed, when counterspy re-dials every upstream under
+	// this pid and would otherwise dominate the Exfiltration view (Self1). Set to os.Getpid() in New.
+	excludePID int
 }
 
 // Resolver maps a destination IP to the hostname most recently observed resolving to it (passive
@@ -70,11 +76,12 @@ func New(interval float64) *Monitor {
 			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
-		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
-		procs:    defaultProcs,
-		exePaths: defaultExePaths,
-		trustOf:  defaultTrust,
-		capsOf:   defaultCaps,
+		runLsof:    func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
+		procs:      defaultProcs,
+		exePaths:   defaultExePaths,
+		trustOf:    defaultTrust,
+		capsOf:     defaultCaps,
+		excludePID: os.Getpid(),
 	}
 }
 
@@ -91,6 +98,9 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	cur := ParseNettop(raw)
 	curConn := ParseNettopConns(raw)
 	conns := ParseLsofConns(m.runLsof())
+	// Never report on ourselves: while the intercept proxy is armed, counterspy re-dials every
+	// upstream under this pid; those dials would otherwise dominate the Exfiltration view (Self1).
+	delete(conns, m.excludePID)
 	procs := m.procs()
 	exe := m.exePaths()
 
