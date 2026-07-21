@@ -37,10 +37,13 @@ type Monitor struct {
 	capsOf    func(path string) []string
 	resolve   func(ip string) (name string, ok bool) // passive-DNS name lookup; nil = names unavailable (#3)
 
-	// excludePID is dropped from every sample so counterspy never reports on its own traffic. It
-	// matters most while the intercept proxy is armed, when counterspy re-dials every upstream under
-	// this pid and would otherwise dominate the Exfiltration view (Self1). Set to os.Getpid() in New.
-	excludePID int
+	// excludePath is the console's own canonical executable path. Any sampled process resolving to the
+	// SAME binary is dropped so counterspy never reports on itself — critically the SEPARATE `intercept`
+	// daemon process (same install, different pid), whose relay dials to every upstream would otherwise
+	// dominate the Exfiltration view while armed. A pid-based exclusion was wrong: the daemon is a
+	// different process, so os.Getpid() of the console never matched it (Self1, ABORT re-run). A copy of
+	// the binary at a different path stays visible. Set to the resolved os.Executable() in New.
+	excludePath string
 }
 
 // Resolver maps a destination IP to the hostname most recently observed resolving to it (passive
@@ -76,13 +79,44 @@ func New(interval float64) *Monitor {
 			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
-		runLsof:    func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
-		procs:      defaultProcs,
-		exePaths:   defaultExePaths,
-		trustOf:    defaultTrust,
-		capsOf:     defaultCaps,
-		excludePID: os.Getpid(),
+		runLsof:     func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
+		procs:       defaultProcs,
+		exePaths:    defaultExePaths,
+		trustOf:     defaultTrust,
+		capsOf:      defaultCaps,
+		excludePath: selfExePath(),
 	}
+}
+
+// selfExePath returns the running binary's canonical (symlink-resolved) path, or the best available
+// fallback. Used to drop counterspy's own processes from the egress view.
+func selfExePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		return resolved
+	}
+	return exe
+}
+
+// isSelf reports whether an executable path belongs to counterspy itself. The symlink-resolving
+// comparison only runs when the basename could match, so ordinary processes cost one string compare.
+func (m *Monitor) isSelf(path string) bool {
+	if m.excludePath == "" || path == "" {
+		return false
+	}
+	if path == m.excludePath {
+		return true
+	}
+	if filepath.Base(path) != filepath.Base(m.excludePath) {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved == m.excludePath
+	}
+	return false
 }
 
 // defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
@@ -98,9 +132,6 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	cur := ParseNettop(raw)
 	curConn := ParseNettopConns(raw)
 	conns := ParseLsofConns(m.runLsof())
-	// Never report on ourselves: while the intercept proxy is armed, counterspy re-dials every
-	// upstream under this pid; those dials would otherwise dominate the Exfiltration view (Self1).
-	delete(conns, m.excludePID)
 	procs := m.procs()
 	exe := m.exePaths()
 
@@ -179,6 +210,9 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		path := exe[pid]
 		if path == "" {
 			path = binaryPath(p)
+		}
+		if m.isSelf(path) {
+			continue // never report on counterspy itself (console or the intercept daemon) — Self1
 		}
 		app := appName(path, pid)
 		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than

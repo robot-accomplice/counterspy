@@ -51,9 +51,11 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 // armed it re-dials every upstream under counterspy's OWN pid, which would otherwise dominate the
 // Exfiltration view and attribute the whole internet to counterspy. Sample must drop the excluded
 // (self) pid entirely while leaving every other process visible.
-func TestMonitor_ExcludesSelfPID(t *testing.T) {
+func TestMonitor_ExcludesSelfByPath(t *testing.T) {
 	m := New(2)
-	m.excludePID = 4821 // stands in for os.Getpid()
+	// Exclude by the binary's PATH, not pid: the intercept DAEMON that emits the relay traffic is a
+	// SEPARATE process (pid 4821 here) from the console — a pid-based filter never matched it.
+	m.excludePath = "/usr/local/bin/counterspy"
 	m.runNettop = func() []byte {
 		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,counterspy.4821,0,900000\n15:04:05.0,app.4822,0,300000\n")
 	}
@@ -79,7 +81,7 @@ func TestMonitor_ExcludesSelfPID(t *testing.T) {
 	appSeen := false
 	for _, g := range groups {
 		if strings.Contains(g.Path, "counterspy") || g.App == "counterspy" {
-			t.Fatalf("self pid %d must be excluded from the egress view, got %+v", m.excludePID, groups)
+			t.Fatalf("counterspy's own binary must be excluded from the egress view, got %+v", groups)
 		}
 		if g.App == "app" {
 			appSeen = true

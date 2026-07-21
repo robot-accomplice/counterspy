@@ -64,11 +64,15 @@ type EgressModel struct {
 
 	Zoom *zoomState // group-zoom dashboard is open (nil = closed); rendered under any Inspection
 
-	// Phase 2.5 merge: intercepted per-message events for this app/path.
-	ProxyAddr        string                                // armed proxy endpoint, e.g. "127.0.0.1:62443"
-	Messages         map[string][]model.InterceptedMessage // key = binary Path
-	InterceptedDests map[string]struct{}                   // canonical DestIP strings seen in stream
-	MessageDropCount int
+	// Phase 2.5 merge: decrypted per-message events, joined to apps by the originating PID. PID join is
+	// exact and I/O-free; joining by executable path was a silent miss because egress paths come from
+	// `ps comm` and intercept paths from proc_pidpath, which diverge for symlinked/Homebrew/firmlink
+	// binaries (ABORT re-run). Stream-level notices (version mismatch / malformed) carry no owner and
+	// go to InterceptStatus, a global footer line, rather than a phantom empty-key app.
+	ProxyAddr        string                             // armed proxy endpoint; "" = not in intercept mode
+	Messages         map[int][]model.InterceptedMessage // key = originating PID
+	MessageDropCount map[int]int                        // per-PID overflow drops (bounded buffer)
+	InterceptStatus  string                             // stream-level notice shown in the Exfiltration footer
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -249,29 +253,31 @@ func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	return m
 }
 
-// withMessage ingests one sanitized intercepted event into the per-app buffer, bounded so a
-// noisy app can't unbounded-grow the view.
+// withMessage ingests one sanitized intercepted event, joining it to its app by PID. The per-PID
+// buffer is bounded so a noisy app can't unbounded-grow the view.
 func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
+	// Stream-level notices (version mismatch / malformed record) carry no owner (empty Path AND App);
+	// surface them once, globally, instead of filing them under a phantom empty-key app.
+	if msg.Path == "" && msg.App == "" {
+		if msg.Reason != "" {
+			m.InterceptStatus = msg.Reason
+		}
+		return m
+	}
 	if m.Messages == nil {
-		m.Messages = make(map[string][]model.InterceptedMessage)
+		m.Messages = make(map[int][]model.InterceptedMessage)
 	}
-	key := msg.Path
-	if key == "" {
-		key = msg.App
-	}
+	key := msg.PID
 	const maxPerApp = 500
 	buf := append(m.Messages[key], msg)
 	if len(buf) > maxPerApp {
-		m.MessageDropCount += len(buf) - maxPerApp // count BEFORE reslicing, or it's always 0
+		if m.MessageDropCount == nil {
+			m.MessageDropCount = make(map[int]int)
+		}
+		m.MessageDropCount[key] += len(buf) - maxPerApp // count BEFORE reslicing, or it's always 0
 		buf = buf[len(buf)-maxPerApp:]
 	}
 	m.Messages[key] = buf
-	if msg.DestIP != "" {
-		if m.InterceptedDests == nil {
-			m.InterceptedDests = make(map[string]struct{})
-		}
-		m.InterceptedDests[msg.DestIP] = struct{}{}
-	}
 	return m
 }
 

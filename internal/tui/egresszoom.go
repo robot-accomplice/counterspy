@@ -162,7 +162,7 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	drawZoomGraph(s, 0, 0, leftW, topH, g, members, m.Zoom.mode, byDest, emphPID, emphEp)
 	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, selPID, !byDest)
 	botY, botH := topH, h-topH
-	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest, m.InterceptedDests)
+	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest, m.ProxyAddr)
 	drawZoomMeta(s, leftW, botY, w-leftW, botH, m, g)
 }
 
@@ -272,21 +272,15 @@ func shareBar(pct, n int) string {
 	return string(b)
 }
 
-// destDecrypted reports whether an "IP:port" endpoint's IP appears in the decrypted stream
-// (InterceptedDests). Pure so the IP match is unit-tested independent of rendering.
-func destDecrypted(ep string, decrypted map[string]struct{}) bool {
-	if len(decrypted) == 0 {
-		return false
-	}
-	ip := ep
-	if i := strings.LastIndex(ep, ":"); i >= 0 {
-		ip = ep[:i]
-	}
-	_, ok := decrypted[ip]
-	return ok
+// destProxied reports whether a dest endpoint IS the intercept proxy. While armed, a proxy-honoring
+// app's decrypted traffic flows to this loopback endpoint (its REAL destinations are listed
+// per-message in the decrypted section, not here). Matching external IPs was wrong: while armed the
+// app never talks to them directly, so that marker could never fire (ABORT re-run). Pure → tested.
+func destProxied(ep, proxyAddr string) bool {
+	return proxyAddr != "" && ep == proxyAddr
 }
 
-func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool, decrypted map[string]struct{}) {
+func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool, proxyAddr string) {
 	drawPanel(s, x, y, w, h, "destinations", focused)
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
@@ -315,10 +309,10 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []des
 		// zoom panel. IP:port labels were inert, but resolved names are not (#3).
 		drawText(s, tx, row, st,
 			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(model.Clean(d.label), 24), human(d.rate), share), iw-(tx-ix)))
-		// Mark a destination whose TLS we decrypted (seen in the intercept stream), cross-referencing
-		// the byte-level egress view with the decrypted flows. Drawn at the panel's right edge so it
+		// Mark the intercept proxy endpoint (this app's decrypted egress goes here while armed); the
+		// real destinations appear in the decrypted section. Drawn at the panel's right edge so it
 		// never disturbs column layout.
-		if destDecrypted(d.ep, decrypted) {
+		if destProxied(d.ep, proxyAddr) {
 			s.SetContent(x+w-2, row, '⚿', nil, tcell.StyleDefault.Foreground(colWarn))
 		}
 	}
@@ -332,7 +326,7 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, m EgressModel, g model.EgressG
 		lines = append(lines, model.Clean("can access  "+strings.Join(g.Capabilities, " · ")))
 	}
 	// Decrypted per-message section (only in `console --intercept` mode); empty-state-aware.
-	lines = append(lines, interceptSummary(m, g.Path, 6)...)
+	lines = append(lines, interceptSummary(m, g, 6)...)
 	for i, ln := range lines {
 		row := iy + i
 		if row >= y+h-1 {
@@ -345,16 +339,22 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, m EgressModel, g model.EgressG
 		truncate(" i inspect · ↑/↓ pid · t out/in · g pid/dest · z back ", w-4))
 }
 
-// interceptSummary renders the "decrypted flows" section for one app in the zoom meta pane. It is pure
-// so the three honest states are unit-tested: not in intercept mode (nil — the section is absent),
-// intercept on but nothing captured for this app yet, and the recent per-message summaries (newest
-// last, bounded by max). MessageDropCount is surfaced so a bounded buffer never silently hides flows.
-func interceptSummary(m EgressModel, path string, max int) []string {
+// interceptSummary renders the "decrypted flows" section for one app in the zoom meta pane. It joins
+// messages by PID across the group's member instances (the exact join key), and is pure so the three
+// honest states are unit-tested: not in intercept mode (nil — the section is absent), intercept on but
+// nothing captured for this app yet, and the recent per-message summaries (newest last, bounded by
+// max). Per-PID drops are summed and surfaced so a bounded buffer never silently hides flows.
+func interceptSummary(m EgressModel, g model.EgressGroup, max int) []string {
 	if m.ProxyAddr == "" {
 		return nil // not in intercept mode
 	}
 	out := []string{"── decrypted · " + m.ProxyAddr}
-	msgs := m.Messages[path]
+	var msgs []model.InterceptedMessage
+	dropped := 0
+	for _, mem := range g.Members {
+		msgs = append(msgs, m.Messages[mem.PID]...)
+		dropped += m.MessageDropCount[mem.PID]
+	}
 	if len(msgs) == 0 {
 		return append(out, "  no decrypted flows for this app yet")
 	}
@@ -365,8 +365,8 @@ func interceptSummary(m EgressModel, path string, max int) []string {
 	for _, msg := range msgs[start:] {
 		out = append(out, "  "+interceptMsgLine(msg))
 	}
-	if m.MessageDropCount > 0 {
-		out = append(out, fmt.Sprintf("  (+%d older dropped · buffer bound)", m.MessageDropCount))
+	if dropped > 0 {
+		out = append(out, fmt.Sprintf("  (+%d older dropped · buffer bound)", dropped))
 	}
 	return out
 }

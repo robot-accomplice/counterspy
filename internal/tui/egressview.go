@@ -406,6 +406,9 @@ func egressView(m EgressModel, s tcell.Screen) {
 	}
 	statusLine := fmt.Sprintf("%d app(s) · %s", len(groups), status)
 	statusColor := colDim
+	if m.InterceptStatus != "" { // persistent stream-level notice (version mismatch / malformed record)
+		statusLine, statusColor = "intercept: "+m.InterceptStatus, colWarn
+	}
 	if m.Status != "" { // transient feedback (e.g. copied path) takes over the status slot
 		statusLine, statusColor = m.Status, colAccent
 	}

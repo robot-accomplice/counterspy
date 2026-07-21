@@ -355,25 +355,26 @@ func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
 // (no --intercept → no section at all), on-but-empty for this app, and populated with per-message
 // summaries. The section must never silently show nothing while intercept is active.
 func TestInterceptSummary_HonestStates(t *testing.T) {
+	g := model.EgressGroup{Path: "/bin/app", Members: []model.EgressInstance{{PID: 42}}}
 	// 1. Not in intercept mode: no section.
-	if got := interceptSummary(EgressModel{}, "/bin/app", 6); got != nil {
+	if got := interceptSummary(EgressModel{}, g, 6); got != nil {
 		t.Fatalf("off mode must produce no section, got %v", got)
 	}
 	// 2. Intercept on, nothing captured for this app yet: honest empty line, not silence.
 	m := EgressModel{ProxyAddr: "127.0.0.1:62443"}
-	empty := interceptSummary(m, "/bin/app", 6)
+	empty := interceptSummary(m, g, 6)
 	if len(empty) < 2 || !strings.Contains(empty[0], "127.0.0.1:62443") ||
 		!strings.Contains(strings.Join(empty, "\n"), "no decrypted flows for this app yet") {
 		t.Fatalf("on-but-empty must state so honestly, got %v", empty)
 	}
-	// 3. Populated: per-message summaries with direction + start line + dest.
-	m.Messages = map[string][]model.InterceptedMessage{
-		"/bin/app": {
-			{Direction: "request", Text: "GET /v1/data HTTP/1.1\r\nHost: api.example.com", DestName: "api.example.com"},
-			{Direction: "response", Text: "HTTP/1.1 200 OK\r\nContent-Type: application/json", DestName: "api.example.com"},
+	// 3. Populated: per-message summaries with direction + start line + dest, joined by PID.
+	m.Messages = map[int][]model.InterceptedMessage{
+		42: {
+			{PID: 42, Direction: "request", Text: "GET /v1/data HTTP/1.1\r\nHost: api.example.com", DestName: "api.example.com"},
+			{PID: 42, Direction: "response", Text: "HTTP/1.1 200 OK\r\nContent-Type: application/json", DestName: "api.example.com"},
 		},
 	}
-	got := strings.Join(interceptSummary(m, "/bin/app", 6), "\n")
+	got := strings.Join(interceptSummary(m, g, 6), "\n")
 	for _, want := range []string{"→ GET /v1/data HTTP/1.1", "← HTTP/1.1 200 OK", "api.example.com"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("populated summary missing %q:\n%s", want, got)
@@ -384,17 +385,36 @@ func TestInterceptSummary_HonestStates(t *testing.T) {
 	}
 }
 
-// destDecrypted matches an "IP:port" endpoint against the decrypted-destination set (keyed by IP), so
-// the zoom dests pane can flag which destinations were actually MITM'd. (v0.7.0 W1 — InterceptedDests.)
-func TestDestDecrypted(t *testing.T) {
-	set := map[string]struct{}{"198.51.100.7": {}}
-	if !destDecrypted("198.51.100.7:443", set) {
-		t.Fatal("decrypted dest must match on IP, ignoring port")
+// The join is by PID, NOT path — the regression that motivated the redesign. When the egress group's
+// Path (ps comm) differs from the message's Path (proc_pidpath) but the PID matches, messages MUST
+// still render. A path-keyed join silently showed nothing here.
+func TestInterceptSummary_JoinsByPIDNotPath(t *testing.T) {
+	g := model.EgressGroup{
+		Path:    "/opt/homebrew/bin/curl",           // ps comm (symlink)
+		Members: []model.EgressInstance{{PID: 777}}, // same real pid
 	}
-	if destDecrypted("203.0.113.9:443", set) {
-		t.Fatal("non-decrypted dest must not match")
+	m := EgressModel{
+		ProxyAddr: "127.0.0.1:62443",
+		Messages: map[int][]model.InterceptedMessage{
+			777: {{PID: 777, Direction: "request", Text: "POST /u HTTP/1.1", DestName: "api.example.com"}},
+		},
 	}
-	if destDecrypted("198.51.100.7:443", nil) {
-		t.Fatal("empty set must never match")
+	got := strings.Join(interceptSummary(m, g, 6), "\n")
+	if !strings.Contains(got, "POST /u HTTP/1.1") || strings.Contains(got, "no decrypted flows") {
+		t.Fatalf("PID join must render even when g.Path != msg.Path:\n%s", got)
+	}
+}
+
+// destProxied flags the intercept proxy endpoint itself (where an app's decrypted egress goes while
+// armed), replacing the external-IP match that could never fire in that mode. (v0.7.0 ABORT re-run.)
+func TestDestProxied(t *testing.T) {
+	if !destProxied("127.0.0.1:62443", "127.0.0.1:62443") {
+		t.Fatal("the proxy endpoint must be flagged")
+	}
+	if destProxied("198.51.100.7:443", "127.0.0.1:62443") {
+		t.Fatal("a real external dest must not be flagged as the proxy")
+	}
+	if destProxied("127.0.0.1:62443", "") {
+		t.Fatal("no proxy addr (not armed) must never flag")
 	}
 }
