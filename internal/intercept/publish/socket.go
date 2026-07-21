@@ -3,6 +3,7 @@ package publish
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -32,10 +33,17 @@ type socketSink struct {
 }
 
 // NewSocketSink listens on a unix socket at path (removing a stale one first) and serves readers.
+// The socket carries decrypted plaintext, so it is chmod'd 0600 explicitly rather than trusting the
+// ambient umask (under a permissive umask net.Listen would leave it group/world-connectable); the
+// caller then chowns it to the invoking user. (ABORT Sock1.)
 func NewSocketSink(path string) (Sink, error) {
 	_ = removeIfSocket(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		ln.Close()
 		return nil, err
 	}
 	s := &socketSink{ln: ln, readers: map[*reader]struct{}{}}
