@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/counterspy-dark.svg">
+    <img alt="" width="64" height="64" src="docs/assets/counterspy-light.svg">
+  </picture>
+</p>
+
 # CounterSpy 🕵️
 
 [![CI](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml/badge.svg)](https://github.com/robot-accomplice/counterspy/actions/workflows/ci.yml)
@@ -313,3 +320,9 @@ go test ./... -cover                   # per-package coverage
 
 Kernel/firmware implants, SIP-protected components, or signed supply-chain malware —
 see the [threat model](docs/threat-model.md) for the full scope and non-goals.
+
+## License
+
+Code and documentation are [MIT](LICENSE). The CounterSpy mark
+(`docs/assets/counterspy-*.svg`) is **not** covered by that grant: it is © 2026 Jonathan Machen,
+all rights reserved, and may not be reused, modified, or redistributed without permission.
