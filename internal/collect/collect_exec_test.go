@@ -75,9 +75,9 @@ func TestCollectProcesses_ReturnsListenerEvidence(t *testing.T) {
 
 	execOutput = func(name string, args ...string) ([]byte, error) {
 		switch name {
-		case "ps":
+		case psBin:
 			return []byte(psOut), nil
-		case "lsof":
+		case lsofBin:
 			return []byte(lsofOut), nil
 		default:
 			t.Fatalf("unexpected exec name %q", name)
@@ -108,7 +108,7 @@ func TestCollectProcesses_PsFailurePropagatesError(t *testing.T) {
 	defer func() { execOutput = orig }()
 
 	execOutput = func(name string, args ...string) ([]byte, error) {
-		if name == "ps" {
+		if name == psBin {
 			return nil, errors.New("ps failed")
 		}
 		return []byte(""), nil
@@ -126,7 +126,7 @@ func TestCollectTCC_ReturnsEvidenceFromRows(t *testing.T) {
 
 	rows := "kTCCServiceAccessibility|/Users/me/Library/.hidden/beacon|2\nkTCCServiceScreenCapture|/Applications/Zoom.app|2\n"
 	execOutput = func(name string, args ...string) ([]byte, error) {
-		if name != "sqlite3" {
+		if name != sqlite3Bin {
 			t.Fatalf("unexpected exec name %q", name)
 		}
 		return []byte(rows), nil
@@ -198,7 +198,7 @@ func TestCollectPersistence_ProducesEvidence(t *testing.T) {
 	</dict></plist>`
 
 	execOutput = func(name string, args ...string) ([]byte, error) {
-		if name != "plutil" {
+		if name != plutilBin {
 			t.Fatalf("unexpected exec name %q", name)
 		}
 		return []byte(xmlOut), nil

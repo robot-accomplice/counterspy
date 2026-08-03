@@ -909,9 +909,13 @@ func flagValue(flags []string, name string) string {
 	return ""
 }
 
+// pbcopyBin is absolute because the TUI may be running under sudo: resolving the tool through PATH
+// would let any writable PATH entry substitute it and run with those privileges (go:S4036).
+const pbcopyBin = "/usr/bin/pbcopy"
+
 // pbcopy writes s to the macOS clipboard (the egress TUI's copy-path action).
 func pbcopy(s string) error {
-	c := exec.Command("pbcopy")
+	c := exec.Command(pbcopyBin)
 	c.Stdin = strings.NewReader(s)
 	return c.Run()
 }

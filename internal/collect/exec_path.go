@@ -46,7 +46,7 @@ func ParseRunningPaths(b []byte) map[string]bool {
 // Best-effort: callers treat an error as "nothing known running" (persistence
 // then reads as vestigial rather than crashing).
 func CollectRunningPaths() (map[string]bool, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,args=", "-ww").Output()
+	out, err := exec.Command(psBin, "-axo", "pid=,args=", "-ww").Output()
 	if err != nil {
 		return nil, err
 	}

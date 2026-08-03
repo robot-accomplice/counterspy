@@ -15,6 +15,15 @@ import (
 const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence) — wide enough for
 // the zoom graph; the tree's small sparklines downsample this to their column width.
 
+// The sampling tools are invoked by absolute path, never resolved through PATH: the monitor runs
+// under sudo for full visibility, so a writable directory on PATH would let any of these be
+// substituted and executed with the monitor's privileges (go:S4036).
+const (
+	nettopBin = "/usr/bin/nettop"
+	lsofBin   = "/usr/sbin/lsof"
+	psBin     = "/bin/ps"
+)
+
 // Monitor holds the sampling state (previous cumulative bytes + per-app spark history) and
 // the injectable exec/join seams. Sample() is called once per tick.
 type Monitor struct {
@@ -76,10 +85,10 @@ func New(interval float64) *Monitor {
 			// -n disables DNS/hostname resolution: WITHOUT it nettop blocks ~5s per sample (making
 			// the live view/zoom graph crawl); WITH it a sample returns in ~10ms and endpoints stay
 			// as IPs, which is exactly what the IP-based parser wants.
-			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			b, _ := exec.Command(nettopBin, "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
-		runLsof:     func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
+		runLsof:     func() []byte { b, _ := exec.Command(lsofBin, "-i", "-nP").Output(); return b },
 		procs:       defaultProcs,
 		exePaths:    defaultExePaths,
 		trustOf:     defaultTrust,
@@ -122,7 +131,7 @@ func (m *Monitor) isSelf(path string) bool {
 // defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
 // spaces in the path are unambiguous — fixes the "Application" mislabel).
 func defaultExePaths() map[int]string {
-	b, _ := exec.Command("ps", "-axo", "pid=,comm=").Output()
+	b, _ := exec.Command(psBin, "-axo", "pid=,comm=").Output()
 	return ParsePidPaths(b)
 }
 
@@ -372,7 +381,7 @@ func firstToken(s string) string {
 // defaultProcs/defaultTrust/defaultCaps are the real joins, kept tiny so Sample stays the
 // orchestrator. defaultTrust maps a binary's codesign state; defaultCaps maps TCC grants.
 func defaultProcs() map[int]*collect.Proc {
-	b, _ := exec.Command("ps", "-axo", "pid,ppid,user,command").Output()
+	b, _ := exec.Command(psBin, "-axo", "pid,ppid,user,command").Output()
 	return collect.ParsePs(b)
 }
 

@@ -132,10 +132,10 @@ func firstField(cmd string) string {
 
 // CollectProcesses runs ps + lsof (I/O edge).
 func CollectProcesses() ([]model.Evidence, error) {
-	psb, err := execOutput("ps", "-axo", "pid,ppid,user,command")
+	psb, err := execOutput(psBin, "-axo", "pid,ppid,user,command")
 	if err != nil {
 		return nil, err
 	}
-	lsb, _ := execOutput("lsof", "-i", "-nP") // may be partial without root
+	lsb, _ := execOutput(lsofBin, "-i", "-nP") // may be partial without root
 	return BuildProcessEvidence(ParsePs(psb), ParseLsof(lsb)), nil
 }

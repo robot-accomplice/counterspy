@@ -57,7 +57,7 @@ func CollectTCC() ([]model.Evidence, error) {
 	var errs []error
 	readOK := 0
 	for _, db := range dbs {
-		out, err := execOutput("sqlite3", "-separator", "|", db, q)
+		out, err := execOutput(sqlite3Bin, "-separator", "|", db, q)
 		if err != nil {
 			errs = append(errs, err)
 			continue

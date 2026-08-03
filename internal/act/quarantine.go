@@ -22,6 +22,10 @@ import (
 // a quarantine or restore (ABORT C1).
 const launchctlTimeout = 15 * time.Second
 
+// launchctlBin is absolute because quarantine/restore run under sudo: resolving the tool through
+// PATH would let any writable PATH entry substitute it and act with those privileges (go:S4036).
+const launchctlBin = "/bin/launchctl"
+
 // protectedPrefixes are paths CounterSpy refuses to move, even under sudo. SIP already
 // blocks /System, but we refuse explicitly so a bug can never even attempt it
 // (spec §9 hard refusal; success criterion #5). /Library is intentionally NOT here —
@@ -95,7 +99,7 @@ func safeDest(p string) error {
 var bootout = func(target string) {
 	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "launchctl", "bootout", target).Run()
+	_ = exec.CommandContext(ctx, launchctlBin, "bootout", target).Run()
 }
 
 // Quarantine performs a finding's actions in order: disable launch items, then MOVE

@@ -24,7 +24,7 @@ var rebootstrap = func(plist string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "launchctl", "bootstrap", domain, plist).Run()
+	_ = exec.CommandContext(ctx, launchctlBin, "bootstrap", domain, plist).Run()
 }
 
 // Restore reverses a quarantine from its manifest: every moved artifact goes back
