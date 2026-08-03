@@ -15,6 +15,11 @@ import (
 // an ambient "default keychain" that is undefined for a headless process (Audit cp-p2b F-3).
 const systemKeychain = "/Library/Keychains/System.keychain"
 
+// securityBin is absolute for the same reason the keychain is named explicitly: a root daemon must
+// resolve nothing about its own execution from ambient state. A writable PATH entry would otherwise
+// substitute the tool that installs a trusted root (go:S4036).
+const securityBin = "/usr/bin/security"
+
 // securityTimeout bounds the `security` call so a GUI authorization prompt (e.g. under MDM/TCC policy)
 // can't hang the background daemon forever (Audit cp-p2b F-4).
 const securityTimeout = 20 * time.Second
@@ -26,7 +31,7 @@ const securityTimeout = 20 * time.Second
 var runSecurity = func(args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), securityTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "security", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, securityBin, args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("security %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 	}

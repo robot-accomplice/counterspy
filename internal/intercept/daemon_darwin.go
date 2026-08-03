@@ -44,6 +44,10 @@ const (
 	daemonStdout = daemonLogDir + "/daemon.log"
 	daemonStderr = daemonLogDir + "/daemon.err"
 
+	// launchctlBin is absolute because install/uninstall run as root: resolving the tool through PATH
+	// would let any writable PATH entry substitute it, turning a privileged call into an exec of
+	// attacker-chosen code (go:S4036).
+	launchctlBin     = "/bin/launchctl"
 	launchctlTimeout = 20 * time.Second
 )
 
@@ -52,7 +56,7 @@ const (
 var runLaunchctl = func(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, launchctlBin, args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("launchctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

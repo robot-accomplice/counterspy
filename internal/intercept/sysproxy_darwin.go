@@ -24,6 +24,10 @@ import (
 // honest and visible — the Exfiltration monitor still shows those flows via nettop — and closing it
 // needs a NetworkExtension transparent proxy (a later phase).
 
+// networksetupBin is absolute because arm/disarm runs privileged: resolving the tool through PATH
+// would let any writable PATH entry substitute it (go:S4036).
+const networksetupBin = "/usr/sbin/networksetup"
+
 // networksetupTimeout bounds each networksetup call so a wedged prefs daemon can't hang arm/disarm.
 const networksetupTimeout = 15 * time.Second
 
@@ -32,7 +36,7 @@ const networksetupTimeout = 15 * time.Second
 var runNetworksetup = func(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), networksetupTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "networksetup", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, networksetupBin, args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("networksetup %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

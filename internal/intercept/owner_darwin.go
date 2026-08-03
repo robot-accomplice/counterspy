@@ -56,6 +56,9 @@ const (
 	ownerMinRefresh = 250 * time.Millisecond
 	// lsofTimeout bounds the sweep so a wedged lsof can't stall the proxy's accept path.
 	lsofTimeout = 5 * time.Second
+	// lsofBin is absolute because the proxy sweeps as root: resolving the tool through PATH would let
+	// any writable PATH entry substitute it (go:S4036).
+	lsofBin = "/usr/sbin/lsof"
 )
 
 type ownerEntry struct {
@@ -78,7 +81,7 @@ var runLsof = func() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), lsofTimeout)
 	defer cancel()
 	// lsof exits non-zero when it finds nothing; treat output as authoritative and ignore that.
-	out, _ := exec.CommandContext(ctx, "lsof", "-nP", "-iTCP", "-sTCP:ESTABLISHED", "-Fpcn").Output()
+	out, _ := exec.CommandContext(ctx, lsofBin, "-nP", "-iTCP", "-sTCP:ESTABLISHED", "-Fpcn").Output()
 	return string(out), nil
 }
 
