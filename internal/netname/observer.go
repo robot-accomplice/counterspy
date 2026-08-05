@@ -24,8 +24,8 @@ func NewObserver(cache *Cache, src inspect.PacketSource) *Observer {
 // ends or is closed. Intended to run in its own goroutine. A malformed or non-DNS packet is skipped.
 // It RETURNS the error that stopped it (io.EOF on a clean end/close, else a real read failure) so the
 // caller can log a genuine failure instead of the DNS cache silently going stale (Rule 14 / Audit
-// cp-p1c F-3). TCP DNS is not parsed (rare for a client; needs the 2-byte length prefix + reassembly)
-// — those names are simply missed.
+// cp-p1c F-3). TCP DNS is not parsed (rare for a client; needs the 2-byte length prefix + reassembly).
+// Those names are simply missed.
 func (o *Observer) Run() error {
 	for {
 		pkt, err := o.src.Next()
@@ -35,7 +35,7 @@ func (o *Observer) Run() error {
 		if len(pkt) == 0 {
 			// A source that yields no bytes AND no error violates the PacketSource contract; stop
 			// rather than spin the goroutine at 100% CPU (Antagonist cp-p1c F-1). Real sources never
-			// do this — bpfCapture.Next returns a packet or an error.
+			// do this. bpfCapture.Next returns a packet or an error.
 			return io.EOF
 		}
 		payload, srcPort, _, ok := udpPayload(pkt)

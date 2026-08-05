@@ -60,7 +60,7 @@ func TestInspect_PlaintextFlowShowsPayload(t *testing.T) {
 	}
 }
 
-// Bidirectional: a flow whose live activity is INBOUND (the remote sending to us — e.g. a server
+// Bidirectional: a flow whose live activity is INBOUND (the remote sending to us, e.g. a server
 // streaming a response) must still be surfaced. An established connection is often only active this
 // way; capturing only the outbound direction would wrongly read as "no data".
 func TestInspect_InboundReceivedTraffic(t *testing.T) {
@@ -76,7 +76,7 @@ func TestInspect_InboundReceivedTraffic(t *testing.T) {
 		t.Fatalf("received bytes must be captured, got %q", r.Inbound)
 	}
 	if len(r.Outbound) != 0 {
-		t.Fatal("nothing was sent — Outbound must be empty")
+		t.Fatal("nothing was sent; Outbound must be empty")
 	}
 }
 
@@ -98,7 +98,7 @@ func TestInspect_CaptureFailureSurfaced(t *testing.T) {
 }
 
 // F-4: a ClientHello split across two TCP segments (large/extension-heavy hello) must still yield
-// SNI — tier-0's "always" promise. Best-effort in-order concat of same-remote outbound bytes.
+// SNI, tier-0's "always" promise. Best-effort in-order concat of same-remote outbound bytes.
 func TestInspect_SNIAcrossSplitSegments(t *testing.T) {
 	flow, local := flowTo("93.184.216.34:443")
 	ch := buildClientHello("split.example.com")

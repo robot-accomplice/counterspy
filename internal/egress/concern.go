@@ -6,7 +6,7 @@ import "counterspy/internal/model"
 const sustainedBytesPerSec = 100_000 // ~100 KB/s = a real, sustained upload
 
 // Concern scores an aggregated group: trust + destination + volume-by-nature. Volume is
-// gated on BACKGROUND-ness, not trust — a quiet background daemon uploading is the exfil
+// gated on BACKGROUND-ness, not trust: a quiet background daemon uploading is the exfil
 // case; a foreground app you're using sending data is expected. Trust is one signal among
 // several, never a kill switch that silences the others.
 func Concern(g model.EgressGroup) model.ConcernLevel {
@@ -30,7 +30,7 @@ func concernScore(g model.EgressGroup) int {
 	if uploading {
 		score += 2
 	}
-	// Raw-IP destination concern (#3): a group ALL of whose destinations have no resolved name — the
+	// Raw-IP destination concern (#3): a group ALL of whose destinations have no resolved name: the
 	// app dialed bare IPs, a mild exfil tell. LIGHT TOUCH + CORROBORATED: it nudges only when the app
 	// is ALREADY suspicious on another axis (untrusted trust, or a sustained background upload), never
 	// on its own and never for a trusted/quiet app. Nothing about contacting an IP is inherently
@@ -42,7 +42,7 @@ func concernScore(g model.EgressGroup) int {
 }
 
 // Exfil infers exfiltration risk and candidate data categories from capability × egress. It
-// NEVER reads payloads — candidates are what the capabilities COULD leak. Risk builds on the
+// NEVER reads payloads; candidates are what the capabilities COULD leak. Risk builds on the
 // same concernScore, plus a bump for holding a sensitive capability while actively uploading
 // in the background (the capability could be the source of what is leaving).
 func Exfil(g model.EgressGroup) (model.ConcernLevel, []string) {

@@ -21,7 +21,7 @@ import (
 )
 
 // interceptProxyPort is the fixed loopback port the decrypt proxy listens on and the system
-// secure-web-proxy setting points at. It is intentionally NOT a flag (the CLI surface is frozen — no
+// secure-web-proxy setting points at. It is intentionally NOT a flag (the CLI surface is frozen; no
 // new options without approval); a constant keeps the proxy setting and the listener in lockstep.
 const interceptProxyPort = 62443
 
@@ -35,7 +35,7 @@ const (
 )
 
 // interceptSocketPath is a SHORT unix-socket path. macOS caps sun_path at ~104 bytes, and os.TempDir()
-// on macOS is a long per-user /var/folders/... path that overruns it (T-19) — so the default lives
+// on macOS is a long per-user /var/folders/... path that overruns it (T-19), so the default lives
 // directly under /tmp.
 const interceptSocketPath = "/tmp/counterspy-intercept.sock"
 
@@ -86,19 +86,19 @@ func sudoInvoker() (uid, gid int, ok bool) {
 }
 
 // chownSocketToInvoker gives the live stream socket to the user who ran sudo. `intercept` runs as root,
-// so a socket it creates is root-owned at mode 0755 under the usual umask — and macOS ENFORCES write
+// so a socket it creates is root-owned at mode 0755 under the usual umask, and macOS ENFORCES write
 // permission on unix-socket connect(), so the human's NON-root `console --intercept` would be refused
 // with "permission denied". Handing it to the invoker makes the documented viewer flow work while still
 // denying every OTHER local user (the stream carries decrypted traffic). A no-op when not under sudo.
 func chownSocketToInvoker(path string) error {
 	uid, gid, ok := sudoInvoker()
 	if !ok {
-		return nil // not under sudo — the socket already belongs to the running user
+		return nil // not under sudo; the socket already belongs to the running user
 	}
 	return os.Chown(path, uid, gid)
 }
 
-// interceptDir is where the reusable CA (and default log) live — installed-once trust reused across
+// interceptDir is where the reusable CA (and default log) live: installed-once trust reused across
 // runs. ok is false when the home directory can't be resolved: we must NOT fall back to a relative
 // ".counterspy" (that would create a different CA per working directory and orphan trusted roots).
 func interceptDir() (string, bool) {
@@ -110,7 +110,7 @@ func interceptDir() (string, bool) {
 }
 
 // optFlag reports whether an optional-value flag (--name or --name=value) is present, and its value if
-// given with `=`. Unlike flagValue it never consumes a following positional arg — these flags stand alone.
+// given with `=`. Unlike flagValue it never consumes a following positional arg; these flags stand alone.
 func optFlag(flags []string, name string) (bool, string) {
 	for _, f := range flags {
 		if f == name {
@@ -125,7 +125,7 @@ func optFlag(flags []string, name string) (bool, string) {
 
 // unknownInterceptFlag returns the first arg that isn't one of the frozen intercept flags. `intercept`
 // arms/reverts a MITM, so a typo (e.g. `--uninstal`) must be REJECTED, not silently ignored and treated
-// as an arming run — this command validates its surface strictly (unlike scan/console).
+// as an arming run; this command validates its surface strictly (unlike scan/console).
 func unknownInterceptFlag(flags []string) (string, bool) {
 	for _, f := range flags {
 		switch {
@@ -199,7 +199,7 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 			return 1
 		}
 		// Hand the socket to the invoking user BEFORE arming: root's socket is otherwise unreachable to
-		// the non-root console the flow tells them to run. Fail loud — the stream is the primary output.
+		// the non-root console the flow tells them to run. Fail loud; the stream is the primary output.
 		if err := interceptChownSocket(streamPath); err != nil {
 			s.Close()
 			fmt.Fprintln(stdout, "intercept: cannot hand the stream socket to the invoking user:", report.Clean(err.Error()))
@@ -221,7 +221,7 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 
 	// Teardown reverts whatever has been armed SO FAR (guarded state), in REVERSE order (redirect before
 	// trust, so traffic stops being redirected before the CA loses trust), exactly once, and REPORTS any
-	// revert failure — a MITM that armed must always disarm, loudly if it can't (Rule 13/14).
+	// revert failure: a MITM that armed must always disarm, loudly if it can't (Rule 13/14).
 	var (
 		mu               sync.Mutex
 		trustInstalled   bool
@@ -247,7 +247,7 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 	}
 	// Register the signal handler + teardown defers BEFORE arming: a SIGINT/TERM/HUP arriving in the
 	// arming window (which shells out to security/pfctl, up to ~20s) would otherwise hit the default
-	// disposition and kill the process with NO defer running — leaving a trusted MITM root behind
+	// disposition and kill the process with NO defer running, leaving a trusted MITM root behind
 	// (Audit cp-p2f F-1). Registering first means teardown reverts whatever got installed.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -294,7 +294,7 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 		fmt.Fprintln(stdout, "intercept: cannot listen:", report.Clean(err.Error()))
 		return 1 // deferred teardown reverts trust + redirect
 	}
-	fmt.Fprintf(stdout, "%s\n", dim(fmt.Sprintf("  armed — system HTTPS proxy → 127.0.0.1:%d, decrypting. Ctrl-C to stop and revert.", interceptProxyPort)))
+	fmt.Fprintf(stdout, "%s\n", dim(fmt.Sprintf("  armed: system HTTPS proxy → 127.0.0.1:%d, decrypting. Ctrl-C to stop and revert.", interceptProxyPort)))
 	p := &intercept.Proxy{CA: caObj, Sink: sinks}
 	if err := interceptServe(p, l); err != nil {
 		fmt.Fprintln(stdout, "intercept: serve ended:", report.Clean(err.Error()))
@@ -303,12 +303,12 @@ func runIntercept(flags []string, stdout io.Writer) (code int) {
 }
 
 // runInterceptUninstall reverts a prior arming and self-heals after an unclean exit: restore the system
-// proxy setting, then remove CA trust. It NEVER mints a CA (Audit cp-p2f F-4) — with no CA on disk there is
+// proxy setting, then remove CA trust. It NEVER mints a CA (Audit cp-p2f F-4). With no CA on disk there is
 // nothing to untrust. Idempotent: a trust-removal error (e.g. the cert is already gone on a second run)
 // is surfaced but not fatal, so repeated reverts still succeed (Rule 13/14: loud, not crashing).
 func runInterceptUninstall(dir string, stdout io.Writer) int {
 	// Restore the system proxy regardless of CA state: registering then immediately tearing down puts each
-	// service back to its captured prior setting. Best-effort — it may already be clean.
+	// service back to its captured prior setting. Best-effort; it may already be clean.
 	if td, err := interceptInstallProxy(interceptProxyPort); err == nil {
 		td()
 	}
@@ -318,7 +318,7 @@ func runInterceptUninstall(dir string, stdout io.Writer) int {
 		return 1
 	}
 	if !found {
-		fmt.Fprintln(stdout, "intercept: no local CA on disk — nothing to untrust (system proxy restored).")
+		fmt.Fprintln(stdout, "intercept: no local CA on disk; nothing to untrust (system proxy restored).")
 		return 0
 	}
 	if err := interceptUninstallTrust(caObj.CertPEM()); err != nil {
@@ -349,12 +349,12 @@ func runInstallDaemon(dir string, yes bool, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "intercept: cannot determine home directory")
 		return 1
 	}
-	// A daemon whose program lives in a build tree or home dir breaks when that tree moves — and
+	// A daemon whose program lives in a build tree or home dir breaks when that tree moves, and
 	// counterspy's own scanner treats user-path persistence as a signal, so this is the shape the tool
 	// teaches people to distrust. Warn loudly; don't refuse (it's the user's machine).
 	if intercept.UnstableExePath(exe) {
 		fmt.Fprintln(stdout, "  ⚠", exe)
-		fmt.Fprintln(stdout, dim("    this is not a stable location for a root LaunchDaemon — it breaks if you move or"))
+		fmt.Fprintln(stdout, dim("    this is not a stable location for a root LaunchDaemon; it breaks if you move or"))
 		fmt.Fprintln(stdout, dim("    delete it. Install to /usr/local/bin first, then run --install-daemon from there."))
 	}
 	if !yes && !confirmDaemonConsent(stdout, interceptStdin, exe) {
@@ -366,10 +366,10 @@ func runInstallDaemon(dir string, yes bool, stdout io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "intercept: daemon installed and started.")
-	fmt.Fprintln(stdout, "  definition:", intercept.DaemonPlistPath(), dim("(auditable — read it)"))
+	fmt.Fprintln(stdout, "  definition:", intercept.DaemonPlistPath(), dim("(auditable, read it)"))
 	fmt.Fprintln(stdout, "  flow log:  ", intercept.DaemonFlowLog, dim("(0600; view: sudo counterspy console --intercept="+intercept.DaemonFlowLog+")"))
 	fmt.Fprintln(stdout, dim("  It is armed NOW and will re-arm at every boot until you run --uninstall-daemon."))
-	fmt.Fprintln(stdout, dim("  `counterspy scan` will flag this daemon. That is correct — it is a machine-wide MITM."))
+	fmt.Fprintln(stdout, dim("  `counterspy scan` will flag this daemon. That is correct: it is a machine-wide MITM."))
 	return 0
 }
 
@@ -381,7 +381,7 @@ func runUninstallDaemon(dir string, stdout io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "intercept: daemon removed.")
-	// bootout signals the daemon, whose own teardown reverts trust + proxy — but it may have been
+	// bootout signals the daemon, whose own teardown reverts trust + proxy, but it may have been
 	// killed uncleanly (a crash/power loss can't run teardown), so force the revert regardless.
 	return runInterceptUninstall(dir, stdout)
 }
@@ -394,11 +394,11 @@ func confirmDaemonConsent(w io.Writer, r io.Reader, exe string) bool {
 	fmt.Fprintln(w, "  • it starts NOW and re-arms at EVERY BOOT, without asking again")
 	fmt.Fprintln(w, "  • your local CA stays a trusted root and the system HTTPS proxy stays redirected")
 	fmt.Fprintln(w, "  • it decrypts and LOGS your TLS traffic to", intercept.DaemonFlowLog, "while you are not watching")
-	fmt.Fprintln(w, dim("  This is the point of it — and it is a standing machine-wide MITM, not a session."))
-	fmt.Fprintln(w, dim("  macOS will pop up a system authorization dialog for the keychain change — expect it now."))
+	fmt.Fprintln(w, dim("  This is the point of it, and it is a standing machine-wide MITM, not a session."))
+	fmt.Fprintln(w, dim("  macOS will pop up a system authorization dialog for the keychain change; expect it now."))
 	fmt.Fprintln(w, dim("  NOTE: a boot-time daemon has no desktop session to answer such a dialog. If macOS decides"))
 	fmt.Fprintln(w, dim("  to re-prompt at boot, the daemon cannot arm and will say so in /var/log/counterspy/daemon.err"))
-	fmt.Fprintln(w, dim("  — it will not silently half-arm. Check that log after your first reboot."))
+	fmt.Fprintln(w, dim("  It will not silently half-arm. Check that log after your first reboot."))
 	fmt.Fprintln(w, dim("  Remove it with: counterspy intercept --uninstall-daemon"))
 	fmt.Fprint(w, "Install the persistent daemon? [y/N] ")
 	line, _ := bufio.NewReader(r).ReadString('\n')
@@ -411,13 +411,13 @@ func confirmDaemonConsent(w io.Writer, r io.Reader, exe string) bool {
 }
 
 // confirmConsent prints what arming does and requires an explicit y/yes. A MITM that installs a trusted
-// root and redirects all TLS must be an informed, per-launch decision — default is No.
+// root and redirects all TLS must be an informed, per-launch decision; default is No.
 func confirmConsent(w io.Writer, r io.Reader) bool {
 	fmt.Fprintln(w, "counterspy intercept will:")
 	fmt.Fprintln(w, "  • install a local CA as a trusted root in your System keychain")
 	fmt.Fprintln(w, "  • set this machine's system HTTPS proxy to a local decrypt proxy")
 	fmt.Fprintln(w, "  • DECRYPT and display your TLS traffic (read-only mirror; nothing is modified)")
-	fmt.Fprintln(w, dim("  macOS will pop up a system authorization dialog for the keychain change — that is expected;"))
+	fmt.Fprintln(w, dim("  macOS will pop up a system authorization dialog for the keychain change. That is expected;"))
 	fmt.Fprintln(w, dim("  it is asking you to approve THIS. Arming waits on it, so answer it to continue."))
 	fmt.Fprintln(w, dim("  Everything is reverted on exit (or `counterspy intercept --uninstall`)."))
 	fmt.Fprint(w, "Proceed? [y/N] ")

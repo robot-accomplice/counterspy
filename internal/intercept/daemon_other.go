@@ -12,7 +12,7 @@ func InstallDaemon(string, string) error { return errDaemonUnsupported }
 // UninstallDaemon is macOS-only (launchd).
 func UninstallDaemon() error { return errDaemonUnsupported }
 
-// DaemonInstalled is false off darwin — there is no launchd service to find.
+// DaemonInstalled is false off darwin; there is no launchd service to find.
 func DaemonInstalled() bool { return false }
 
 // DaemonPlistPath has no meaning off darwin.

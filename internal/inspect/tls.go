@@ -2,12 +2,12 @@
 // captures a single selected outbound flow and surfaces what's visible per the tiered
 // interceptor (spec docs/superpowers/specs/2026-07-12-exfil-inspect-interceptor.md).
 // The parsers here are PURE (fixture-tested); packet capture is the injected I/O edge.
-// Observe-only — nothing here changes scoring or verdicts.
+// Observe-only; nothing here changes scoring or verdicts.
 package inspect
 
 import "encoding/binary"
 
-// ClientHelloSNI extracts the Server Name Indication — the plaintext hostname — from a TLS
+// ClientHelloSNI extracts the Server Name Indication (the plaintext hostname) from a TLS
 // ClientHello handshake record. On an otherwise-encrypted flow this is the single most useful
 // field: it names WHICH server the connection is talking to. Returns ("", false) when the bytes
 // are not a ClientHello carrying an SNI extension. Deliberately tolerant of truncation/garbage

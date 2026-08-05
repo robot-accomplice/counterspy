@@ -15,13 +15,13 @@ import (
 // outbound packets (27828 Evaluations, 0 Packets). Instead we register as macOS's system secure-web
 // (HTTPS) proxy, and clients CONNECT to us and name their destination.
 //
-// UNVERIFIED — requires a root smoke test (see the README). What must be confirmed: that a CFNetwork
+// UNVERIFIED: requires a root smoke test (see the README). What must be confirmed: that a CFNetwork
 // app (Safari/Chrome) actually routes through the proxy while armed, and that teardown restores the
 // prior setting exactly. Note `curl` does NOT honor the macOS system proxy (it reads https_proxy), so
-// probe with `curl -x 127.0.0.1:62443` or a real browser — not a bare curl.
+// probe with `curl -x 127.0.0.1:62443` or a real browser, not a bare curl.
 //
 // COOPERATIVE BY CONSTRUCTION: software that ignores the system proxy is not seen here. That gap is
-// honest and visible — the Exfiltration monitor still shows those flows via nettop — and closing it
+// honest and visible (the Exfiltration monitor still shows those flows via nettop), and closing it
 // needs a NetworkExtension transparent proxy (a later phase).
 
 // networksetupBin is absolute because arm/disarm runs privileged: resolving the tool through PATH
@@ -44,7 +44,7 @@ var runNetworksetup = func(args ...string) (string, error) {
 }
 
 // proxyState is one network service's prior secure-web-proxy setting, captured so teardown restores
-// exactly what was there — the user may already run a proxy (Charles/Proxyman/a corporate one) and we
+// exactly what was there; the user may already run a proxy (Charles/Proxyman/a corporate one) and we
 // must not clobber it (the non-destructive lesson from the pf ruleset).
 type proxyState struct {
 	service string
@@ -103,8 +103,8 @@ func getProxyState(service string) (proxyState, error) {
 //
 // When the user HAD a proxy, it is put back exactly. When they had none, turning the state off is not
 // enough: `-setsecurewebproxy` also records the server/port, so a bare state-off leaves 127.0.0.1:62443
-// sitting in their config (disabled). That is a real trap — flipping "Web Proxy" on in System Settings
-// later would point at a dead port — so we also clear the fields back to empty, restoring the config
+// sitting in their config (disabled). That is a real trap (flipping "Web Proxy" on in System Settings
+// later would point at a dead port), so we also clear the fields back to empty, restoring the config
 // they actually had rather than merely a disabled version of ours.
 func (s proxyState) restore() error {
 	if s.enabled && s.server != "" {
@@ -116,7 +116,7 @@ func (s proxyState) restore() error {
 	}
 	// No prior proxy. Restoring the (empty) server/port is COSMETIC and deliberately BEST-EFFORT: the
 	// man page does not define -setsecurewebproxy's behaviour for empty values, and if it errors we must
-	// NOT bail out before the disable below — that would leave the user's traffic pointed at a dead
+	// NOT bail out before the disable below; that would leave the user's traffic pointed at a dead
 	// proxy, turning a cosmetic nit into an outage. The disable is the load-bearing step.
 	//
 	// Order matters: -setsecurewebproxy "Turns proxy on" (its man page), so the state-off MUST come last.
@@ -130,14 +130,14 @@ func (s proxyState) restore() error {
 // Requires root (networksetup writes system config). Replaces the non-viable pf rdr redirect.
 //
 // Signature mirrors the old InstallRedirect so the command's arm/teardown contract is unchanged; the
-// bypass list is gone (a CONNECT proxy has no rule to except — a client either uses us or does not).
+// bypass list is gone (a CONNECT proxy has no rule to except: a client either uses us or does not).
 func InstallProxy(port int) (func() error, error) {
 	svcs, err := networkServices()
 	if err != nil {
 		return nil, err
 	}
 	var prior []proxyState
-	// undo restores whatever we already changed — no partial-arm can escape without a teardown.
+	// undo restores whatever we already changed; no partial-arm can escape without a teardown.
 	undo := func() {
 		for _, st := range prior {
 			st.restore()
@@ -153,7 +153,7 @@ func InstallProxy(port int) (func() error, error) {
 			undo()
 			return nil, err
 		}
-		prior = append(prior, st) // only after the set succeeded — this service now needs restoring
+		prior = append(prior, st) // only after the set succeeded; this service now needs restoring
 	}
 	teardown := func() error {
 		var firstErr error

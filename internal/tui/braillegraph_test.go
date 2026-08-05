@@ -17,7 +17,7 @@ func gridHasBraille(grid [][]graphCell) bool {
 	return false
 }
 
-// topLit returns the topmost row index with a lit cell in a column, or len(grid) if none — a proxy
+// topLit returns the topmost row index with a lit cell in a column, or len(grid) if none: a proxy
 // for "how high the line reaches" in that column.
 func topLit(grid [][]graphCell, col int) int {
 	for r := 0; r < len(grid); r++ {
@@ -28,7 +28,7 @@ func topLit(grid [][]graphCell, col int) int {
 	return len(grid)
 }
 
-// A rising series must reach higher (smaller top-row index) on the right than on the left — the
+// A rising series must reach higher (smaller top-row index) on the right than on the left; the
 // graph's whole job is to make a climbing talker read as climbing.
 func TestPlotSeries_RisingLineClimbs(t *testing.T) {
 	vals := []uint64{0, 1, 2, 3, 4, 5, 6, 7}
@@ -66,7 +66,7 @@ func TestPlotSeries_EmphasizedWinsColor(t *testing.T) {
 	}
 }
 
-// A series shorter than the plot width must still span the full width (the left column is lit) —
+// A series shorter than the plot width must still span the full width (the left column is lit);
 // otherwise the graph can only ever fill a fraction of the panel (observed: ~45% cap).
 func TestPlotSeries_ShortSeriesFillsFullWidth(t *testing.T) {
 	// 3 samples into an 8-column (16 sub-column) plot must reach the leftmost cell.
@@ -88,7 +88,7 @@ func TestPlotSeries_ShortSeriesFillsFullWidth(t *testing.T) {
 }
 
 // A flat mid-height series must render as a thin line at that height, NOT a band filled down to the
-// baseline — this is the line-graph (vs fill) behavior btm uses.
+// baseline; this is the line-graph (vs fill) behavior btm uses.
 func TestPlotSeries_ThinLineNotFilled(t *testing.T) {
 	grid := plotSeries([]graphSeries{{values: []uint64{5, 5, 5, 5}, color: tcell.ColorRed}}, 4, 4, 10)
 	if !gridHasBraille(grid) {

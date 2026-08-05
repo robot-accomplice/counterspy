@@ -163,7 +163,7 @@ func TestWithDone_ClonesNotAliases(t *testing.T) {
 }
 
 // #4: applying ack marks the finding reviewed (map + actor) and unack clears it; an actor error
-// surfaces as a toast and leaves the map unchanged (Rule 13 — the decision isn't silently "recorded").
+// surfaces as a toast and leaves the map unchanged (Rule 13: the decision isn't silently "recorded").
 func TestApplyFindingsCmd_AckFlow(t *testing.T) {
 	a := mk("x", model.RecMonitor, 3)
 	key := a.Subject.Key()

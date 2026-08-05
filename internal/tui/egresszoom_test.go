@@ -14,7 +14,7 @@ import (
 // closing the inspection returns to the zoom (not the tree), and z returns to the tree.
 func TestRunConsole_ZoomAndInspect(t *testing.T) {
 	s := simInit(t)
-	fi := &fakeInspector{view: model.InspectView{Verdict: "plaintext — readable", Coverage: model.InspectPlaintext, Sent: "GET /x"}}
+	fi := &fakeInspector{view: model.InspectView{Verdict: "plaintext, readable", Coverage: model.InspectPlaintext, Sent: "GET /x"}}
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("backuptool", model.Elevated, 900)}}
 	tick := make(chan struct{})
 	done := make(chan error, 1)
@@ -140,10 +140,10 @@ func TestDrawEgressZoom_RendersPanelsAndSelection(t *testing.T) {
 	}
 }
 
-// The non-emphasized lines must NOT change color as the rate-sort reshuffles the table — they plot
+// The non-emphasized lines must NOT change color as the rate-sort reshuffles the table; they plot
 // in a stable PID order, so an overlapping cell's winner is deterministic (the observed "historical
-// points change color" flicker). The emphasized (selected) line is held constant here — a loud PID
-// that always sorts first — so this isolates the overlap-order flicker from the legitimate
+// points change color" flicker). The emphasized (selected) line is held constant here (a loud PID
+// that always sorts first) so this isolates the overlap-order flicker from the legitimate
 // selection change.
 func TestDrawEgressZoom_GraphStableUnderRateReorder(t *testing.T) {
 	// PID 100 is always the loudest (always selected/emphasized). PIDs 200 and 300 share the same
@@ -175,7 +175,7 @@ func TestDrawEgressZoom_GraphStableUnderRateReorder(t *testing.T) {
 			ra, _, sta, _ := a.GetContent(x, y)
 			rb, _, stb, _ := b.GetContent(x, y)
 			if ra != rb || sta != stb {
-				t.Fatalf("graph cell (%d,%d) changed with rate order: %q/%v vs %q/%v — plot order not stable",
+				t.Fatalf("graph cell (%d,%d) changed with rate order: %q/%v vs %q/%v; plot order not stable",
 					x, y, ra, sta, rb, stb)
 			}
 		}
@@ -336,7 +336,7 @@ func TestZoomedMembers_SortedByOutDesc(t *testing.T) {
 }
 
 // cp-p1g self-caught: a crafted destination NAME (from an observed DNS packet) must be Clean-stripped
-// before it reaches the zoom panel — no ANSI/control chars into the terminal.
+// before it reaches the zoom panel: no ANSI/control chars into the terminal.
 func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
 	g := model.EgressGroup{Conns: []model.Conn{
 		{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443, Name: "evil\x1b[31m\r\ninject.example"}, OutRate: 10},
@@ -385,7 +385,7 @@ func TestInterceptSummary_HonestStates(t *testing.T) {
 	}
 }
 
-// The join is by PID, NOT path — the regression that motivated the redesign. When the egress group's
+// The join is by PID, NOT path: the regression that motivated the redesign. When the egress group's
 // Path (ps comm) differs from the message's Path (proc_pidpath) but the PID matches, messages MUST
 // still render. A path-keyed join silently showed nothing here.
 func TestInterceptSummary_JoinsByPIDNotPath(t *testing.T) {

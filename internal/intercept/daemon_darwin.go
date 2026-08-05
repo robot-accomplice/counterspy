@@ -20,24 +20,24 @@ import (
 // disarmed: teardown runs on exit, panic and signal, and consent is taken per launch. A LaunchDaemon is
 // armed across reboots with a one-time consent, so the CA is trusted and the system proxy is redirected
 // indefinitely. That is a deliberate, user-approved trade for the one thing the foreground mode cannot
-// answer — what does this machine send when nobody is watching (at 3am, at boot, lid closed) — and it is
+// answer, what does this machine send when nobody is watching (at 3am, at boot, lid closed), and it is
 // why the install prompt is separate and explicit rather than reusing the session prompt.
 //
 // Honest consequence: `counterspy scan` WILL flag this. A persistent, root, network-touching
 // LaunchDaemon is exactly what the persistence collector hunts, and a machine-wide MITM *should* trip a
 // counter-surveillance tool. That is correct behaviour, not a bug to suppress.
 //
-// UNVERIFIED — requires a root smoke test (install, reboot, uninstall).
+// UNVERIFIED: requires a root smoke test (install, reboot, uninstall).
 
 const (
 	daemonLabel     = "com.counterspy.intercept"
 	daemonPlistPath = "/Library/LaunchDaemons/" + daemonLabel + ".plist"
 
 	// daemonLogDir holds the daemon's artifacts. Explicitly under /var/log rather than the
-	// HOME-derived default: launchd sets no HOME, so the default would land in /var/root/.counterspy —
+	// HOME-derived default: launchd sets no HOME, so the default would land in /var/root/.counterspy,
 	// findable by nobody.
 	daemonLogDir = "/var/log/counterspy"
-	// DaemonFlowLog is the flow log the daemon writes (0600 — it holds decrypted traffic).
+	// DaemonFlowLog is the flow log the daemon writes (0600, it holds decrypted traffic).
 	DaemonFlowLog = daemonLogDir + "/flows.jsonl"
 	// The daemon has no terminal, so its diagnostics must land somewhere durable (Rule 14): without
 	// these, a daemon that fails to arm fails invisibly.
@@ -81,7 +81,7 @@ func xmlEscape(s string) string {
 // daemonPlist renders the LaunchDaemon definition.
 //
 // HOME is pinned to the INSTALLING user's home deliberately: launchd sets no HOME, so the daemon would
-// otherwise resolve ~/.counterspy to /var/root/.counterspy and mint a SECOND CA — one the user's
+// otherwise resolve ~/.counterspy to /var/root/.counterspy and mint a SECOND CA, one the user's
 // `intercept --uninstall` would never revert, because that command resolves HOME to their own. One CA,
 // one trust decision, one thing to remove.
 //
@@ -124,7 +124,7 @@ func DaemonInstalled() bool {
 func DaemonPlistPath() string { return daemonPlistPath }
 
 // UnstableExePath reports whether exe sits somewhere a LaunchDaemon should not point. A daemon whose
-// program lives in a build tree or home directory breaks the moment that tree is moved or deleted — and
+// program lives in a build tree or home directory breaks the moment that tree is moved or deleted, and
 // counterspy's own persistence collector treats user-path persistence as a signal, so pointing root
 // launchd at /Users is precisely the shape this tool teaches people to distrust.
 func UnstableExePath(exe string) bool {
@@ -134,7 +134,7 @@ func UnstableExePath(exe string) bool {
 // InstallDaemon writes the plist and bootstraps it. exe must be an absolute path to the counterspy
 // binary; home is the installing user's home (pinned so the daemon shares their CA). Requires root.
 //
-// A failed bootstrap removes the plist rather than leaving a definition that will load at next boot —
+// A failed bootstrap removes the plist rather than leaving a definition that will load at next boot;
 // a half-install that silently arms on reboot is worse than a clean failure (Rule 13).
 func InstallDaemon(exe, home string) error {
 	if !filepath.IsAbs(exe) {
@@ -156,14 +156,14 @@ func InstallDaemon(exe, home string) error {
 }
 
 // UninstallDaemon boots the service out and removes the plist. Idempotent: a service that is not loaded
-// and a plist that is already gone are both fine — this is also the self-heal path after an unclean
+// and a plist that is already gone are both fine; this is also the self-heal path after an unclean
 // state, so it must never fail just because there is nothing to do.
 //
 // It does NOT revert the CA trust or the system proxy: bootout signals the daemon, whose own teardown
 // does that. The caller force-reverts afterwards in case the daemon never got the chance.
 func UninstallDaemon() error {
 	runLaunchctl("bootout", "system/"+daemonLabel) // not-loaded is not an error
-	// errors.Is (not os.IsNotExist) — the latter does not unwrap %w-wrapped errors, so a wrapped
+	// errors.Is (not os.IsNotExist); the latter does not unwrap %w-wrapped errors, so a wrapped
 	// "not exist" would be treated as a real failure and break idempotency.
 	if err := removePlist(daemonPlistPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("daemon: remove %s: %w", daemonPlistPath, err)

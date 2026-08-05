@@ -13,7 +13,7 @@ import (
 
 // pidPalette is the per-PID line colors, shared between the graph lines and the PID table swatches.
 // Keyed by PID (not row position) so a PID keeps its color even as the rate-sorted order reshuffles
-// between ticks — a row and its line always read as the same PID (cp-zoom Audit F2).
+// between ticks; a row and its line always read as the same PID (cp-zoom Audit F2).
 var pidPalette = []tcell.Color{colInvestigate, colAccent, colQuarantine, colMonitor, colWarn, colText}
 
 func pidLineColor(pid int) tcell.Color {
@@ -46,7 +46,7 @@ func seriesValues(mem model.EgressInstance, mode trendMode) []uint64 {
 	return metricSamples(mem.Spark, mem.InSpark, mode)
 }
 
-// addAligned sums two rate-history slices aligned at their NEWEST (right) end — histories can differ
+// addAligned sums two rate-history slices aligned at their NEWEST (right) end; histories can differ
 // in length (a younger connection has fewer samples), so a left-aligned sum would misattribute time.
 func addAligned(a, b []uint64) []uint64 {
 	n := len(a)
@@ -73,7 +73,7 @@ type destAgg struct {
 
 // destSeriesList aggregates the group's connections by endpoint, summing each endpoint's metric
 // history across the PIDs that talk to it. Ordered by endpoint string for a stable plot order (so
-// overlapping cells don't flicker color as rates reshuffle — same rule as the PID graph).
+// overlapping cells don't flicker color as rates reshuffle, same rule as the PID graph).
 func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
 	agg := map[string]*destAgg{}
 	for _, c := range g.Conns {
@@ -93,7 +93,7 @@ func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
 	return out
 }
 
-// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border — a thin frame
+// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border: a thin frame
 // (unlike the solid-filled modal drawBox), matching the btm reference. A focused panel gets an
 // accent border + title so the user can see which box the arrow keys drive.
 func drawPanel(s tcell.Screen, x, y, w, h int, title string, focused bool) {
@@ -341,7 +341,7 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, m EgressModel, g model.EgressG
 
 // interceptSummary renders the "decrypted flows" section for one app in the zoom meta pane. It joins
 // messages by PID across the group's member instances (the exact join key), and is pure so the three
-// honest states are unit-tested: not in intercept mode (nil — the section is absent), intercept on but
+// honest states are unit-tested: not in intercept mode (nil: the section is absent), intercept on but
 // nothing captured for this app yet, and the recent per-message summaries (newest last, bounded by
 // max). Per-PID drops are summed and surfaced so a bounded buffer never silently hides flows.
 func interceptSummary(m EgressModel, g model.EgressGroup, max int) []string {

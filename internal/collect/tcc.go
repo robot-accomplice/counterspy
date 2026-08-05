@@ -65,7 +65,7 @@ func CollectTCC() ([]model.Evidence, error) {
 		readOK++
 		all = append(all, ParseTCC(out)...)
 	}
-	// §9 fail-loud: if NO TCC database was readable, that's a gap — the most
+	// §9 fail-loud: if NO TCC database was readable, that's a gap; the most
 	// spyware-relevant signal must never read as "clean" (cp-7 Audit F-2).
 	if readOK == 0 {
 		return all, fmt.Errorf("no TCC database readable: %w", errors.Join(errs...))

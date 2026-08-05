@@ -49,7 +49,7 @@ func TestAggregate_CollapsesInstancesAndConns(t *testing.T) {
 	}
 }
 
-// Two distinct binaries that share a process name ("node") must stay SEPARATE groups —
+// Two distinct binaries that share a process name ("node") must stay SEPARATE groups:
 // grouping is by binary path, so a rogue "node" can't hide inside a trusted one's row.
 func TestAggregate_DifferentPathsStaySeparate(t *testing.T) {
 	insts := []Instance{

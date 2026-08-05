@@ -63,7 +63,7 @@ func upstreamServer(t *testing.T, response string) (netip.AddrPort, *ca.CA) {
 }
 
 // dialTo returns a dialFunc that connects to the loopback stand-in `at` while preserving the ServerName
-// the pump asked for — modelling real DNS: the proxy asks for "example.com:443", the packets land on
+// the pump asked for, modelling real DNS: the proxy asks for "example.com:443", the packets land on
 // our test server, and the cert must still verify as example.com.
 func dialTo(at netip.AddrPort, upCA *ca.CA) dialFunc {
 	return func(network, _ string, cfg *tls.Config) (net.Conn, error) {
@@ -168,7 +168,7 @@ func TestIntercept_NonTLSIsOpaqueNotPinned(t *testing.T) {
 	c1, c2 := net.Pipe()
 	flowCh := make(chan model.InterceptedFlow, 1)
 	go func() { flowCh <- intercept(c2, "example.com:443", proxyCA, defaultDial) }()
-	// speak plain HTTP (not TLS) then close — no ClientHello ever arrives.
+	// speak plain HTTP (not TLS) then close; no ClientHello ever arrives.
 	go func() { c1.Write([]byte("GET / HTTP/1.1\r\n\r\n")); c1.Close() }()
 	if flow := <-flowCh; flow.Status != model.FlowOpaque {
 		t.Fatalf("non-TLS input must be opaque, got %q", flow.Status)
@@ -177,7 +177,7 @@ func TestIntercept_NonTLSIsOpaqueNotPinned(t *testing.T) {
 
 // Proxy.Serve wires accept → CONNECT → intercept → publish end-to-end, speaking the SAME protocol a
 // real client does: an HTTP CONNECT tunnel, then TLS inside it. This is the path the system proxy
-// setting drives — no pf, no root, no ioctl.
+// setting drives: no pf, no root, no ioctl.
 func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 	dest, upCA := upstreamServer(t, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
 	proxyCA, _ := ca.NewCA()
@@ -188,7 +188,7 @@ func TestProxy_ServePublishesDecryptedFlow(t *testing.T) {
 	p := &Proxy{CA: proxyCA, Dial: dialTo(dest, upCA), Sink: chanSink(got)}
 	go p.Serve(pxLn)
 
-	// Speak CONNECT, naming the destination — this is what replaces the pf origdest lookup.
+	// Speak CONNECT, naming the destination; this is what replaces the pf origdest lookup.
 	raw := connectTunnel(t, pxLn.Addr().String(), "example.com:443")
 	defer raw.Close()
 	cc := tls.Client(raw, &tls.Config{RootCAs: poolFor(proxyCA), ServerName: "example.com"})
@@ -245,7 +245,7 @@ func (c chanSink) Close() error                             { return nil }
 
 // A connection we cannot resolve must publish a FlowError, never vanish. The pf-era code closed the
 // conn and returned silently when the destination lookup failed, which is indistinguishable from
-// "nothing arrived" in the console — the exact silent-drop the smoke test surfaced (Rule 13).
+// "nothing arrived" in the console, the exact silent-drop the smoke test surfaced (Rule 13).
 func TestProxy_UnresolvableConnPublishesError(t *testing.T) {
 	proxyCA, _ := ca.NewCA()
 	got := make(chan model.InterceptedMessage, 1)
@@ -260,11 +260,11 @@ func TestProxy_UnresolvableConnPublishesError(t *testing.T) {
 			t.Fatalf("a non-CONNECT must publish FlowError, got %+v", m)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("a non-CONNECT was dropped SILENTLY — the console would show nothing")
+		t.Fatal("a non-CONNECT was dropped SILENTLY; the console would show nothing")
 	}
 }
 
-// cp-p2d F-2: a panic inside handle must not leak the conn — the recover closes it. The panic is driven
+// cp-p2d F-2: a panic inside handle must not leak the conn; the recover closes it. The panic is driven
 // through `dial`, which is only reached AFTER a real client TLS handshake, so the test must complete
 // the CONNECT *and* the handshake to get there (an earlier version stalled in Handshake() and "passed"
 // on a timeout instead of exercising the recover).
@@ -303,6 +303,6 @@ func TestProxy_HandlePanicClosesConn(t *testing.T) {
 	}
 	var nerr net.Error
 	if errors.As(err, &nerr) && nerr.Timeout() {
-		t.Fatal("conn still open after a handle panic — the fd leaked")
+		t.Fatal("conn still open after a handle panic; the fd leaked")
 	}
 }

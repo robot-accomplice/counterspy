@@ -13,7 +13,7 @@ import (
 )
 
 // logSink appends messages as JSONL to a 0600 file, rotating at maxSize (path.1 … path.keep) and
-// pruning rotated files older than maxAge — the persisted output for after-the-fact console viewing.
+// pruning rotated files older than maxAge, the persisted output for after-the-fact console viewing.
 // Content is already masked by the proxy.
 type logSink struct {
 	mu      sync.Mutex
@@ -54,7 +54,7 @@ func (l *logSink) Publish(msg model.InterceptedMessage) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f == nil {
-		return errLogClosed // a prior rotate() reopen failed — fail loud, don't write a closed fd
+		return errLogClosed // a prior rotate() reopen failed; fail loud, don't write a closed fd
 	}
 	if l.maxSize > 0 && l.size+int64(len(b)) > l.maxSize {
 		if err := l.rotate(); err != nil {
@@ -111,7 +111,7 @@ func (l *logSink) Close() error {
 }
 
 // ReadLog streams the current log file's messages to fn (for the console). Best-effort: a malformed
-// line is skipped. It reads the existing content once (not a live tail) — the socket is the live path.
+// line is skipped. It reads the existing content once (not a live tail); the socket is the live path.
 func ReadLog(path string, fn func(model.InterceptedMessage)) error {
 	f, err := os.Open(path)
 	if err != nil {

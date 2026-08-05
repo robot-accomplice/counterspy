@@ -27,7 +27,7 @@ func TestLoadOrCreate_RoundTrips(t *testing.T) {
 }
 
 // TestLoadOrCreate_PartialIsFatal: a cert present but key missing must fail loud (Rule 13) rather than
-// silently regenerate — a silent regen would orphan the already-trusted root in the keychain.
+// silently regenerate; a silent regen would orphan the already-trusted root in the keychain.
 func TestLoadOrCreate_PartialIsFatal(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, certFile), []byte("x"), 0o600); err != nil {

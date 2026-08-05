@@ -167,7 +167,7 @@ func TestCollectPersistence_OneDBFailsStillSucceeds(t *testing.T) {
 	orig := execOutput
 	defer func() { execOutput = orig }()
 
-	// One db read fails, the other succeeds — readOK must be > 0, no gap error.
+	// One db read fails, the other succeeds; readOK must be > 0, no gap error.
 	callCount := 0
 	execOutput = func(name string, args ...string) ([]byte, error) {
 		callCount++

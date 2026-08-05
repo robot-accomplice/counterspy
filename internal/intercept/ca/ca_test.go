@@ -15,7 +15,7 @@ func TestNewCA_IsACA(t *testing.T) {
 	}
 }
 
-// A minted leaf must chain to the CA and match the requested host — that's what makes a client
+// A minted leaf must chain to the CA and match the requested host; that's what makes a client
 // trusting the CA accept the proxy's TLS termination.
 func TestCA_MintsVerifiableLeaf(t *testing.T) {
 	ca, _ := NewCA()
@@ -89,7 +89,7 @@ func TestLoadCA_RejectsBadInput(t *testing.T) {
 	}
 }
 
-// Antagonist cp-p2a F-1/F-3: hostile/edge SNI — empty refused; IPv6 zone stripped so the IP SAN is set.
+// Antagonist cp-p2a F-1/F-3: hostile/edge SNI: empty refused; IPv6 zone stripped so the IP SAN is set.
 func TestLeafFor_HostNormalization(t *testing.T) {
 	ca, _ := NewCA()
 	if _, err := ca.LeafFor("   "); err == nil {
@@ -108,7 +108,7 @@ func TestLeafFor_HostNormalization(t *testing.T) {
 	}
 }
 
-// Audit cp-p2a F-1: the leaf cache is bounded — a flood of distinct SNIs evicts oldest, no unbounded growth.
+// Audit cp-p2a F-1: the leaf cache is bounded; a flood of distinct SNIs evicts oldest, no unbounded growth.
 func TestLeafFor_CacheIsBounded(t *testing.T) {
 	ca, _ := NewCA()
 	ca.cap = 4

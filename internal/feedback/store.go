@@ -58,7 +58,7 @@ func (s *Store) save(es []entry) error {
 		return err
 	}
 	// Atomic write: a crash mid-write must not corrupt the store. Write a temp file in the SAME
-	// directory (so the rename is atomic — same filesystem), fsync it, then rename over the target.
+	// directory (so the rename is atomic, same filesystem), fsync it, then rename over the target.
 	// os.CreateTemp already opens the temp at 0600, matching the store's permissions.
 	tmp, err := os.CreateTemp(dir, ".store-*.tmp")
 	if err != nil {

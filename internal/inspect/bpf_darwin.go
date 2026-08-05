@@ -20,7 +20,7 @@ import (
 // ifr_ifru union) as passed to the BIOCSETIF ioctl. Only the name is set here.
 type ifreq struct {
 	name [16]byte
-	_    [16]byte // ifr_ifru union — unused for BIOCSETIF
+	_    [16]byte // ifr_ifru union, unused for BIOCSETIF
 }
 
 // Compile-time guard: a raw ioctl reads the kernel struct by layout, so a silent size/layout drift
@@ -49,7 +49,7 @@ type bpfCapture struct {
 // scoped, bounded) and OpenPortCapture (port-scoped, long-lived) so both use one battle-tested open
 // sequence. Requires root (/dev/bpf). Each step names itself so a failure localizes the exact ioctl
 // + interface (RCA): a bare errno like EFAULT is otherwise ambiguous across six syscalls.
-// BIOCSBLEN/BIOCIMMEDIATE are _IOWR/_IOW over a u_int — the kernel reads the value THROUGH a pointer,
+// BIOCSBLEN/BIOCIMMEDIATE are _IOWR/_IOW over a u_int: the kernel reads the value THROUGH a pointer,
 // so they need IoctlSetPointerInt (IoctlSetInt would pass by value → EFAULT). Non-blocking is what
 // GUARANTEES a silent flow returns EAGAIN instead of hanging (T-11).
 func openBPF(iface string) (fd int, dlt uint32, blen int, err error) {
@@ -93,7 +93,7 @@ func openBPF(iface string) (fd int, dlt uint32, blen int, err error) {
 }
 
 // OpenLiveCapture opens a /dev/bpf capture on iface scoped to the flow's remote host (so the whole
-// interface is NOT copied to userspace — spec §6 least-privilege) and returns a PacketSource of
+// interface is NOT copied to userspace, spec §6 least-privilege) and returns a PacketSource of
 // IP-layer packets. maxWait bounds the total capture window so an idle flow can't hang the caller.
 // Requires root. The flow filter is best-effort: on an unknown datalink or install error the capture
 // falls back to whole-interface (userspace Inspect correlation still yields the flow), never blinded.
@@ -110,8 +110,8 @@ func OpenLiveCapture(iface string, remote netip.AddrPort, maxWait time.Duration)
 	return c, nil
 }
 
-// OpenPortCapture opens a LONG-LIVED (no deadline) capture on iface scoped to UDP/TCP `port` — 53 for
-// the passive DNS observer — so the kernel drops the rest of the interface (esp. high-volume QUIC)
+// OpenPortCapture opens a LONG-LIVED (no deadline) capture on iface scoped to UDP/TCP `port` (53 for
+// the passive DNS observer) so the kernel drops the rest of the interface (esp. high-volume QUIC)
 // before userspace. Requires root. The caller runs Next() in a loop and Close()s to stop it (#3).
 func OpenPortCapture(iface string, port int) (PacketSource, error) {
 	fd, dlt, blen, err := openBPF(iface)
@@ -136,7 +136,7 @@ func installFlowFilter(fd int, dlt uint32, remote netip.AddrPort) {
 }
 
 // installPortFilter assembles and installs (BIOCSETF) a UDP/TCP port filter for the passive DNS
-// capture. Same best-effort contract as installFlowFilter — an unfiltered fallback is safe here too
+// capture. Same best-effort contract as installFlowFilter; an unfiltered fallback is safe here too
 // (the observer re-checks the port + parses DNS in userspace).
 func installPortFilter(fd int, dlt uint32, port int) {
 	hdr, ok := linkHdrLen(dlt)
@@ -159,7 +159,7 @@ func installFilter(fd int, raw []bpf.RawInstruction) {
 	}
 	prog := unix.BpfProgram{Len: uint32(len(insns)), Insns: &insns[0]}
 	unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.BIOCSETF), uintptr(unsafe.Pointer(&prog)))
-	// prog.Insns points into insns, but the syscall machinery only keeps &prog alive — pin insns
+	// prog.Insns points into insns, but the syscall machinery only keeps &prog alive; pin insns
 	// across the call so the GC can't reclaim the instruction buffer mid-copyin (T-13).
 	runtime.KeepAlive(insns)
 }
@@ -182,10 +182,10 @@ func linkHdrLen(dlt uint32) (int, bool) {
 func (c *bpfCapture) Next() ([]byte, error) {
 	for len(c.pend) == 0 {
 		if c.closed.Load() {
-			return nil, io.EOF // Close() was called (T-16) — end cleanly, not as a read failure
+			return nil, io.EOF // Close() was called (T-16); end cleanly, not as a read failure
 		}
 		if !c.deadline.IsZero() && time.Now().After(c.deadline) {
-			return nil, io.EOF // capture window elapsed — a clean end, not a failure
+			return nil, io.EOF // capture window elapsed: a clean end, not a failure
 		}
 		n, err := unix.Read(c.fd, c.buf)
 		if err != nil {
@@ -195,7 +195,7 @@ func (c *bpfCapture) Next() ([]byte, error) {
 			if c.closed.Load() {
 				return nil, io.EOF
 			}
-			if err == unix.EAGAIN { // no packets buffered — sleep briefly, then re-check
+			if err == unix.EAGAIN { // no packets buffered; sleep briefly, then re-check
 				time.Sleep(readPoll)
 				continue
 			}
@@ -212,7 +212,7 @@ func (c *bpfCapture) Next() ([]byte, error) {
 }
 
 // Close marks the capture closed (so a concurrent Next() ends via a clean io.EOF, T-16) and closes
-// the fd. Safe to call from a different goroutine than Next() — the atomic flag turns the resulting
+// the fd. Safe to call from a different goroutine than Next(); the atomic flag turns the resulting
 // close-during-read into a clean stop.
 func (c *bpfCapture) Close() error {
 	c.closed.Store(true)
@@ -221,10 +221,10 @@ func (c *bpfCapture) Close() error {
 
 // parseBPFRecords walks a BPF read buffer (a sequence of bpf_hdr-prefixed, word-aligned frames),
 // strips each frame's link layer, and returns the IP packets plus the total record count walked
-// (records >= len(out); the gap is frames stripLinkLayer rejected — a link-layer/DLT mismatch).
+// (records >= len(out); the gap is frames stripLinkLayer rejected: a link-layer/DLT mismatch).
 // minBpfHdr is the smallest valid bh_hdrlen: the offset just past the last header field we read.
 // The kernel sets bh_hdrlen to the payload offset, which it varies per datalink to align the frame
-// and can be SMALLER than SizeofBpfHdr (that includes trailing struct padding) — macOS writes 18
+// and can be SMALLER than SizeofBpfHdr (that includes trailing struct padding); macOS writes 18
 // for Ethernet, 20 for loopback. Guarding against SizeofBpfHdr wrongly rejected every Ethernet
 // record (read succeeds, zero frames parsed); guard against this field-end minimum instead.
 const minBpfHdr = int(unsafe.Offsetof(unix.BpfHdr{}.Hdrlen)) + 2

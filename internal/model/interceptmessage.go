@@ -7,14 +7,14 @@ package model
 // Redact-masked by the proxy before it reaches any sink, so no sink or viewer
 // sees a raw secret.
 type InterceptedMessage struct {
-	SchemaVersion int    `json:"schema_version"`      // REQUIRED — see §3.1.7
+	SchemaVersion int    `json:"schema_version"`      // REQUIRED: see §3.1.7
 	ConnID        string `json:"conn_id"`             // <proxy-start-epoch>-<seq>
 	Seq           int    `json:"seq"`                 // exchange sequence within the connection; 0 for connection-level events
 	Direction     string `json:"direction,omitempty"` // request | response; empty for connection-level events
 	At            string `json:"at"`                  // RFC3339Nano, when THIS event completed
 	PID           int    `json:"pid,omitempty"`
 	App           string `json:"app,omitempty"`  // display name
-	Path          string `json:"path,omitempty"` // resolved executable path — the join key for Exfiltration
+	Path          string `json:"path,omitempty"` // resolved executable path, the join key for Exfiltration
 	DestIP        string `json:"dest_ip"`
 	DestName      string `json:"dest_name,omitempty"`
 	SNI           string `json:"sni,omitempty"`
@@ -32,13 +32,13 @@ type InterceptedMessage struct {
 const InterceptMessageSchemaVersion = 2
 
 // MessageCaptureBytes bounds how many bytes of a single message direction the
-// proxy keeps for decode/display. The wire is relayed in full regardless —
+// proxy keeps for decode/display. The wire is relayed in full regardless;
 // this bounds only what we KEEP. It lives here because the viewer must also
 // know it, to say when a message's text is a truncated capture rather than the
 // whole thing.
 const MessageCaptureBytes = 8 << 10
 
-// Message state — applies to decrypted message events only (Seq > 0).
+// Message state: applies to decrypted message events only (Seq > 0).
 const (
 	StateComplete  = "complete"
 	StatePartial   = "partial"

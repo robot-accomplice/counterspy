@@ -117,7 +117,7 @@ func TestRender_OmitsMonitorNoiseFromDetail(t *testing.T) {
 }
 
 func TestRenderJSON_RoundTrips(t *testing.T) {
-	b, err := RenderJSON(sample(), []string{"TCC privacy-grant signal unavailable — run with sudo"})
+	b, err := RenderJSON(sample(), []string{"TCC privacy-grant signal unavailable: run with sudo"})
 	if err != nil {
 		t.Fatal(err)
 	}

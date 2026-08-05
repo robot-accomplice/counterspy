@@ -20,10 +20,10 @@ func RateIn(prev, cur Bytes, intervalSec float64) uint64 {
 
 // Cadence classifies an out-rate history (oldest→newest) into a coarse pattern:
 //
-//	one-off  — sent in exactly one sample, silent otherwise
-//	periodic — multiple separated bursts with silent gaps between
-//	bursty   — highly variable, no steady floor
-//	steady   — consistently active with low relative variance
+//	one-off: sent in exactly one sample, silent otherwise
+//	periodic: multiple separated bursts with silent gaps between
+//	bursty: highly variable, no steady floor
+//	steady: consistently active with low relative variance
 func Cadence(history []uint64) string {
 	active := 0
 	var max, sum uint64
@@ -44,7 +44,7 @@ func Cadence(history []uint64) string {
 		prevActive = a
 	}
 	if active == 0 {
-		return "steady" // nothing sent this window; not interesting — treat as calm
+		return "steady" // nothing sent this window; not interesting: treat as calm
 	}
 	if active == 1 {
 		return "one-off"

@@ -14,7 +14,7 @@ func mk(label string, rec model.Recommendation, score int) model.Assessment {
 	}
 }
 
-// Every tier is shown, Monitor included — there is no hide-monitor toggle (we gain nothing by
+// Every tier is shown, Monitor included; there is no hide-monitor toggle (we gain nothing by
 // leaving low-tier items out of the default view).
 func TestVisible_ShowsAllTiersIncludingMonitor(t *testing.T) {
 	m := New([]model.Assessment{

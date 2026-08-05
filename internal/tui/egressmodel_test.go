@@ -212,7 +212,7 @@ func TestEgressUpdate_TrendToggle(t *testing.T) {
 }
 
 // withMessage joins by PID, routes ownerless stream-level notices to a global status line, and counts
-// overflow drops per PID — the v0.7.0 ABORT re-run fixes for the merged intercept view.
+// overflow drops per PID: the v0.7.0 ABORT re-run fixes for the merged intercept view.
 func TestWithMessage_PIDJoinStatusAndDrops(t *testing.T) {
 	var m EgressModel
 
@@ -223,7 +223,7 @@ func TestWithMessage_PIDJoinStatusAndDrops(t *testing.T) {
 	}
 
 	// A version/malformed notice (no owner) goes to the global status line, NOT a phantom app.
-	m = m.withMessage(model.InterceptedMessage{Status: model.FlowError, Reason: "unsupported record version — is the daemon the same build?"})
+	m = m.withMessage(model.InterceptedMessage{Status: model.FlowError, Reason: "unsupported record version. Is the daemon the same build?"})
 	if m.InterceptStatus == "" || len(m.Messages) != 1 {
 		t.Fatalf("ownerless notice must set InterceptStatus and add no app, got status=%q messages=%v", m.InterceptStatus, m.Messages)
 	}

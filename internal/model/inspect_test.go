@@ -12,7 +12,7 @@ func TestRedact_MasksObviousSecrets(t *testing.T) {
 		{"aws", "creds AKIAIOSFODNN7EXAMPLE end", "AKIAIOSFODNN7EXAMPLE"},
 		{"pem", "key=-----BEGIN RSA PRIVATE KEY-----\nMIIabc123\n-----END RSA PRIVATE KEY-----;", "MIIabc123"},
 		// A partial capture that has the BEGIN header but not yet the END must STILL mask the key
-		// material after it — otherwise a segmented/partial flow leaks the secret (cp-insC Audit F-1).
+		// material after it; otherwise a segmented/partial flow leaks the secret (cp-insC Audit F-1).
 		{"pem-partial", "-----BEGIN EC PRIVATE KEY-----\nMIIdanglingKEYbytes", "MIIdanglingKEYbytes"},
 	}
 	for _, c := range cases {
@@ -45,7 +45,7 @@ func TestRedact_Idempotent(t *testing.T) {
 }
 
 // #3: sensitive HTTP header VALUES (Authorization/Cookie/API-key/*-token) are masked just like a
-// bearer token — inspecting a cleartext HTTP flow must not itself spill session credentials.
+// bearer token; inspecting a cleartext HTTP flow must not itself spill session credentials.
 func TestRedact_MasksSensitiveHeaders(t *testing.T) {
 	in := "GET / HTTP/1.1\r\nHost: x\r\nAuthorization: Basic dXNlcjpwYXNz\r\nCookie: session=deadbeef; a=b\r\n" +
 		"X-Auth-Token: t0psecret\r\nContent-Type: application/json\r\n\r\n"
@@ -64,7 +64,7 @@ func TestRedact_MasksSensitiveHeaders(t *testing.T) {
 }
 
 // cp-p2c F-3: common credential FIELDS in a decoded body are masked (form + JSON), pattern-exact on
-// known names — decrypted bodies flow through Redact via the intercept proxy.
+// known names; decrypted bodies flow through Redact via the intercept proxy.
 func TestRedact_MasksBodyCredentialFields(t *testing.T) {
 	for _, in := range []string{
 		"username=alice&password=hunter2&remember=1",
@@ -85,8 +85,8 @@ func TestRedact_MasksBodyCredentialFields(t *testing.T) {
 }
 
 // A BOUNDED capture cuts bodies mid-value, so masking must survive truncation. Before the dangling
-// open-quote alternative, `"api_key":"sk_live_ABC` (no closing quote) matched NEITHER value branch —
-// the quoted one needs a close quote, the unquoted one excludes `"` — so the whole match failed and the
+// open-quote alternative, `"api_key":"sk_live_ABC` (no closing quote) matched NEITHER value branch
+// (the quoted one needs a close quote, the unquoted one excludes `"`) so the whole match failed and the
 // partial secret was published in the clear, to the socket and the 0600 log. This shipped, and the
 // daemon writes exactly these truncated bodies. Reproduced against the live pipeline before the fix.
 func TestRedact_TruncatedQuotedBodySecretIsMasked(t *testing.T) {
@@ -123,7 +123,7 @@ func TestRedact_DanglingRuleDoesNotSwallowLaterFields(t *testing.T) {
 }
 
 // ABORT review L1: the body matcher anchored field names with `\b`, but `_` is a word char, so `\b`
-// never fires inside a compound name — `refresh_token`/`id_token`/`csrf_token` and camelCase
+// never fires inside a compound name: `refresh_token`/`id_token`/`csrf_token` and camelCase
 // `authToken` slipped through and their values were published in cleartext to the 0600 log and the
 // socket. The header path already handled `*-token`; the body path must reach parity. WHY it matters:
 // refresh/id tokens are the highest-value credentials in an OAuth flow and the single most common body

@@ -63,7 +63,7 @@ func TestDecodeCleartext_NonHTTPFallsBack(t *testing.T) {
 }
 
 // Audit cp-p1f F-1/F-2: a body mislabeled with a Content-Encoding it doesn't actually have must NOT
-// vanish — the raw bytes must still be shown (a decoder that drained the reader would lose them).
+// vanish; the raw bytes must still be shown (a decoder that drained the reader would lose them).
 func TestDecodeCleartext_MislabeledEncodingKeepsBody(t *testing.T) {
 	for _, enc := range []string{"gzip", "deflate", "br"} {
 		raw := "HTTP/1.1 200 OK\r\nContent-Encoding: " + enc + "\r\nContent-Length: 5\r\n\r\nhello"
@@ -77,7 +77,7 @@ func TestDecodeCleartext_MislabeledEncodingKeepsBody(t *testing.T) {
 	}
 }
 
-// F-1 bound: a gzip bomb must not blow up memory — the DECOMPRESSED body is capped at maxBodyPreview.
+// F-1 bound: a gzip bomb must not blow up memory; the DECOMPRESSED body is capped at maxBodyPreview.
 func TestDecodeCleartext_GzipBombBounded(t *testing.T) {
 	var gz bytes.Buffer
 	w := gzip.NewWriter(&gz)

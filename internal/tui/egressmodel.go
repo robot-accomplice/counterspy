@@ -54,9 +54,9 @@ type EgressModel struct {
 	sampled     bool            // a sampler result has arrived at least once (gates the empty-state
 	//                             remediation: before the first sample we're "collecting", not empty)
 
-	// Inspection overlay (spec §4): a modal over the tree, driven off the pure update like CopyReq —
+	// Inspection overlay (spec §4): a modal over the tree, driven off the pure update like CopyReq:
 	// egressUpdate only sets the request; RunConsole performs the capture I/O. There is NO consent
-	// gate: pressing `i` on your own machine's own flow IS the intent — the boundary that keeps this
+	// gate: pressing `i` on your own machine's own flow IS the intent; the boundary that keeps this
 	// counter-spy (own-machine-only) is architectural, not a runtime prompt (maintainer decision).
 	InspectReq *inspectTarget // RunConsole should capture+inspect this target, then clear it
 	Inspection *inspection    // result overlay is open (nil = closed)
@@ -91,7 +91,7 @@ func (z *zoomState) withMode(m trendMode) *zoomState { c := *z; c.mode = m; retu
 func (z *zoomState) withByDest(b bool) *zoomState    { c := *z; c.byDest = b; return &c }
 
 // zoomedMembers returns a group's members sorted by out-rate desc (loud talkers first), stable by
-// PID — the shared order for the PID panel and the graph's colored lines.
+// PID: the shared order for the PID panel and the graph's colored lines.
 func zoomedMembers(g model.EgressGroup) []model.EgressInstance {
 	ms := append([]model.EgressInstance(nil), g.Members...)
 	sort.SliceStable(ms, func(i, j int) bool {
@@ -151,7 +151,7 @@ func zoomDests(g model.EgressGroup) []destRate {
 	return ds
 }
 
-// busiestConnTo returns the highest-out-rate connection to an "ip:port" endpoint (across PIDs) —
+// busiestConnTo returns the highest-out-rate connection to an "ip:port" endpoint (across PIDs):
 // the concrete flow `i` inspects when a destination is selected.
 func busiestConnTo(g model.EgressGroup, ep string) *model.Conn {
 	var best *model.Conn
@@ -246,7 +246,7 @@ func NewEgress() EgressModel {
 // are preserved.
 func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.Groups = gs
-	m.sampled = true // a real sampler result arrived — even an empty one means we've looked
+	m.sampled = true // a real sampler result arrived; even an empty one means we've looked
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
 	}
@@ -339,7 +339,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 		case key == tcell.KeyEscape, r == 'i':
 			m.Inspection, m.Reveal = nil, false // back to the tree
 		case r == 'v':
-			m.Reveal = !m.Reveal // toggle secret masking — view/hide the plaintext (§6)
+			m.Reveal = !m.Reveal // toggle secret masking: view/hide the plaintext (§6)
 		case r == 'Q':
 			return m, true
 		}
@@ -349,7 +349,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 	// requests inspection for the SELECTED pid, which then stacks on top.
 	if m.Zoom != nil {
 		g, ok := m.zoomGroup()
-		if !ok { // the group vanished between ticks — fall back to the tree
+		if !ok { // the group vanished between ticks; fall back to the tree
 			m.Zoom = nil
 			return m, false
 		}
@@ -436,7 +436,7 @@ func (m EgressModel) requestInspect(rows []egressRow) EgressModel {
 		m.Status = hint
 		return m
 	}
-	m.InspectReq = target // `i` captures directly — no consent gate (own machine, own data)
+	m.InspectReq = target // `i` captures directly: no consent gate (own machine, own data)
 	return m
 }
 
@@ -449,15 +449,15 @@ func resolveInspectTarget(rows []egressRow, selected int) (*inspectTarget, strin
 	}
 	row := rows[selected]
 	switch {
-	case row.conn != nil: // connection leaf — exact flow
+	case row.conn != nil: // connection leaf: exact flow
 		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *row.conn}, ""
-	case row.member != nil: // instance — inspect its busiest connection
+	case row.member != nil: // instance: inspect its busiest connection
 		c := busiestConn(row.member.Conns)
 		if c == nil {
 			return nil, "no connection on this process to inspect"
 		}
 		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *c}, ""
-	default: // app header — spans multiple pids; ambiguous
+	default: // app header: spans multiple pids; ambiguous
 		return nil, "expand to a process or connection to inspect"
 	}
 }

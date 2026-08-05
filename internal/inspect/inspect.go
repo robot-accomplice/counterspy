@@ -27,7 +27,7 @@ const (
 )
 
 // Result is what the inspection view renders for a flow. Both directions are captured: Outbound
-// (what the app SENDS — the exfil concern) and Inbound (what it RECEIVES — the response). A flow is
+// (what the app SENDS, the exfil concern) and Inbound (what it RECEIVES, the response). A flow is
 // often active in only one direction at a time (an established TLS connection receiving is inbound-
 // heavy; its ClientHello/SNI is already in the past), so showing both is what makes on-demand
 // inspection useful, not just handshake-time.
@@ -41,13 +41,13 @@ type Result struct {
 	Inbound  []byte // application bytes received from the remote (target → client)
 	// Per-direction plaintext flags: a direction's bytes are readable TEXT when set (shown as text);
 	// otherwise the bytes are still shown, as a hexdump. The flag governs text-vs-hex rendering, not
-	// whether content is shown — the wire bytes are always surfaced (§6: never fabricate decryption,
+	// whether content is shown; the wire bytes are always surfaced (§6: never fabricate decryption,
 	// but never hide what actually crossed the wire either).
 	OutboundPlaintext bool
 	InboundPlaintext  bool
 	// Encrypted is true when the flow is CONFIRMED or strongly-presumed TLS: a ClientHello SNI or a
 	// TLS record was seen, or the remote is a well-known TLS port. Distinguishes "ENCRYPTED (TLS)
-	// ciphertext" from "cleartext but binary/opaque" — a :80 flow with a non-text body is NOT TLS.
+	// ciphertext" from "cleartext but binary/opaque"; a :80 flow with a non-text body is NOT TLS.
 	Encrypted bool
 	Err       error // a real capture failure (not clean EOF); surfaced so the view can't hide it (§9)
 }
@@ -69,7 +69,7 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 			break // clean end of the fixture / capture window
 		}
 		if err != nil {
-			r.Err = err // a real read failure — surfaced, never silently swallowed (§9)
+			r.Err = err // a real read failure: surfaced, never silently swallowed (§9)
 			break
 		}
 		seg, ok := ParseIPPacket(pkt)
@@ -78,7 +78,7 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		}
 		seen++
 		if len(seg.Payload) == 0 {
-			continue // ACK / control segment — seen, but no application bytes to accumulate
+			continue // ACK / control segment: seen, but no application bytes to accumulate
 		}
 		switch {
 		case seg.Dst == flow.Remote: // client → target (sent)
@@ -100,7 +100,7 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	r.Outbound, r.Inbound = outbound, inbound
 	r.OutboundPlaintext = looksPlaintext(outbound)
 	r.InboundPlaintext = looksPlaintext(inbound)
-	// TLS only when there's actual evidence — an SNI/handshake or a TLS record — or the remote is a
+	// TLS only when there's actual evidence (an SNI/handshake or a TLS record) or the remote is a
 	// well-known TLS port. Never infer "encrypted" merely from bytes being non-text: a cleartext
 	// download's binary body is opaque but NOT TLS (the reported :80 mislabel).
 	r.Encrypted = r.SNI != "" || looksTLS(outbound) || looksTLS(inbound) ||
@@ -109,7 +109,7 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 	switch {
 	case r.OutboundPlaintext || r.InboundPlaintext:
 		r.Coverage, r.Tier = CoveragePlaintext, "plaintext"
-		r.Verdict = "plaintext — readable (not encrypted)"
+		r.Verdict = "plaintext: readable (not encrypted)"
 	case len(outbound) > 0 || len(inbound) > 0:
 		r.Coverage, r.Tier = CoverageMetadata, "metadata"
 		switch {
@@ -118,7 +118,7 @@ func Inspect(src PacketSource, flow Flow, maxPackets int) Result {
 		case r.Encrypted:
 			r.Verdict = "ENCRYPTED · TLS ciphertext (not decryptable)"
 		default:
-			r.Verdict = "CLEARTEXT · binary / non-text payload (shown as hex — not TLS)"
+			r.Verdict = "CLEARTEXT · binary / non-text payload (shown as hex, not TLS)"
 		}
 	case r.Err != nil:
 		r.Verdict = "capture failed: " + r.Err.Error() // honest failure, not a clean "no data"
@@ -138,7 +138,7 @@ func looksPlaintext(b []byte) bool {
 		return false
 	}
 	// TLS record content types: 0x14 ChangeCipherSpec, 0x15 Alert, 0x16 Handshake,
-	// 0x17 ApplicationData, 0x18 Heartbeat — none of which is readable plaintext.
+	// 0x17 ApplicationData, 0x18 Heartbeat; none of which is readable plaintext.
 	if b[0] >= 0x14 && b[0] <= 0x18 {
 		return false
 	}
@@ -155,8 +155,8 @@ func looksPlaintext(b []byte) bool {
 	return printable*100/n >= 85
 }
 
-// looksTLS reports whether bytes begin with a TLS record header — a content type (0x14–0x18)
-// followed by a plausible protocol version (0x03 0x00–0x04). Positive evidence of TLS, unlike the
+// looksTLS reports whether bytes begin with a TLS record header: a content type (0x14-0x18)
+// followed by a plausible protocol version (0x03 0x00-0x04). Positive evidence of TLS, unlike the
 // weak "not printable" negative in looksPlaintext, so a binary cleartext payload isn't mistaken for
 // ciphertext.
 func looksTLS(b []byte) bool {

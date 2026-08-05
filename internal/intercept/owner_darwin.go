@@ -40,7 +40,7 @@ var procPidPath = func(pid int) (string, bool) {
 // Attribution: which APP made this request?
 //
 // A CONNECT arrives from 127.0.0.1:<ephemeral>. That local port belongs to the client process, so a
-// port→process map answers "who sent this" — the question the whole tool is organised around ("this app
+// port→process map answers "who sent this", the question the whole tool is organised around ("this app
 // is trusted; what is it sending?"). Without it an intercepted flow names a destination but not an
 // originator, and model.InterceptedFlow.PID stays the dead field it has been since cp-p2a.
 //
@@ -93,7 +93,7 @@ var selfPID = os.Getpid()
 //
 // The format is a stream of records: `p<pid>` and `c<command>` set the current process, then each
 // `n<local>-><remote>` line is one of its sockets. We key on the LOCAL side, which for a client
-// connecting to us is its ephemeral port — the value conn.RemoteAddr() reports to the proxy.
+// connecting to us is its ephemeral port, the value conn.RemoteAddr() reports to the proxy.
 func parseLsofPorts(out string, self int) map[int]ownerEntry {
 	m := map[int]ownerEntry{}
 	cur := ownerEntry{}
@@ -138,7 +138,7 @@ func portOf(addr string) (int, bool) {
 	return p, true
 }
 
-// portOwner reports the process owning local TCP port `port`. ok=false when it can't be attributed —
+// portOwner reports the process owning local TCP port `port`. ok=false when it can't be attributed;
 // the caller must show the flow anyway, unattributed, rather than drop it (Rule 13: a flow we can't
 // name is still a flow the user needs to see).
 func portOwner(port int) (pid int, name string, path string, ok bool) {
@@ -150,7 +150,7 @@ func portOwner(port int) (pid int, name string, path string, ok bool) {
 	if e, ok := ownerMap[port]; ok {
 		return e.pid, e.name, e.path, true
 	}
-	// A miss is expected for a connection newer than the snapshot — re-sweep, but throttled so a burst
+	// A miss is expected for a connection newer than the snapshot; re-sweep, but throttled so a burst
 	// of new flows can't fork lsof per flow.
 	if time.Since(ownerLast) > ownerMinRefresh {
 		sweepOwners()

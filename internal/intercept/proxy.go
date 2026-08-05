@@ -1,17 +1,17 @@
 // Package intercept is the READ-ONLY TLS-intercepting HTTPS proxy (Phase 2): a client CONNECTs to it
 // (macOS is pointed here by the system secure-web-proxy setting), it terminates the client's TLS with a
 // leaf minted by the local CA, re-dials the real server (verified normally), relays both directions
-// BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext — decoded and secret-masked — into a
+// BYTE-FOR-BYTE unmodified, and captures the decrypted plaintext, decoded and secret-masked, into a
 // model.InterceptedFlow for the console. It never modifies traffic.
 //
 // ROUTING HISTORY (why CONNECT, not a transparent pf redirect): Phase 2 originally used a pf `rdr`
-// rule to steal :443 transparently. A root smoke test proved that CANNOT work for this use case — pf
+// rule to steal :443 transparently. A root smoke test proved that CANNOT work for this use case; pf
 // translates only INBOUND packets, so a rule as permissive as
 // `rdr pass inet proto tcp from any to any port = 443` logged 27828 Evaluations and 0 Packets against
 // the machine's own outbound curl. Locally-originated traffic never traverses the rdr path (Linux has
 // iptables OUTPUT REDIRECT, FreeBSD has divert-to; macOS pf has neither). So the client now TELLS us
 // the destination via CONNECT, which also removes the DIOCNATLOOK ioctl and gives us the real hostname
-// without inferring it from SNI. Tradeoff: this is COOPERATIVE — apps honoring the system proxy
+// without inferring it from SNI. Tradeoff: this is COOPERATIVE; apps honoring the system proxy
 // (CFNetwork/NSURLSession) are seen; evasive software bypasses it and must be caught by a
 // NetworkExtension transparent proxy (a later phase).
 package intercept
@@ -119,11 +119,11 @@ func (b *bufConn) Read(p []byte) (int, error) {
 const connectEstablished = "HTTP/1.1 200 Connection Established\r\n\r\n"
 
 // handle intercepts one CONNECT tunnel and publishes its flow. Panic-recovered so a single malformed
-// flow can never kill the whole proxy (which is holding the user's traffic) — and the recover ALWAYS
+// flow can never kill the whole proxy (which is holding the user's traffic), and the recover ALWAYS
 // closes the conn, so a panic can't leak the fd (cp-p2d F-2).
 //
 // A connection we cannot resolve publishes a FlowError rather than closing silently: the console must
-// SHOW that something arrived and could not be handled, never imply nothing happened (Rule 13 — the
+// SHOW that something arrived and could not be handled, never imply nothing happened (Rule 13: the
 // silent-drop the smoke test surfaced when OrigDest could fail with no trace).
 func (p *Proxy) handle(conn net.Conn, dial dialFunc) {
 	defer func() {
@@ -159,7 +159,7 @@ func (p *Proxy) nextConnID() string {
 }
 
 // owner attributes a connection to the process that opened it. An unattributable flow is published
-// UNATTRIBUTED rather than dropped — a flow we can't name is still one the user needs to see (Rule 13).
+// UNATTRIBUTED rather than dropped; a flow we can't name is still one the user needs to see (Rule 13).
 func (p *Proxy) owner(conn net.Conn) (int, string, string) {
 	lookup := p.Owner
 	if lookup == nil {
@@ -206,7 +206,7 @@ func firstLine(s string) string {
 }
 
 // maxCapture bounds how many bytes per direction we hold for decode/display (the wire is relayed in
-// full regardless — this only bounds what we KEEP). Defined in model because the viewer must also know
+// full regardless; this only bounds what we KEEP). Defined in model because the viewer must also know
 // it, to say when a flow's text is a truncated capture rather than the whole thing.
 const maxCapture = model.FlowCaptureBytes
 
@@ -231,9 +231,9 @@ func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // intercept handles one CONNECT tunnel: terminate the client TLS with a CA leaf, dial the real target,
 // relay unmodified, and return the captured Flow. `target` is the authority the client named in its
-// CONNECT ("example.com:443") — authoritative, unlike an inferred destination. A client that REJECTS
+// CONNECT ("example.com:443"), authoritative, unlike an inferred destination. A client that REJECTS
 // our leaf (cert pinning) fails the handshake → FlowPinned (bypassed, not decrypted, connection
-// closed). The relayed bytes are never altered — this is a read-only mirror.
+// closed). The relayed bytes are never altered; this is a read-only mirror.
 func intercept(client net.Conn, target string, c *ca.CA, dial dialFunc) model.InterceptedFlow {
 	targetHost, _, err := net.SplitHostPort(target)
 	if err != nil {
@@ -275,7 +275,7 @@ func intercept(client net.Conn, target string, c *ca.CA, dial dialFunc) model.In
 	client.SetDeadline(time.Time{}) // clear the handshake deadline; relay uses per-read idle deadlines
 	flow.SNI = sni
 	// Verify the upstream against the name the CLIENT asked for (the CONNECT authority), not one the
-	// server or a forged SNI could influence — SNI is recorded for display only.
+	// server or a forged SNI could influence; SNI is recorded for display only.
 	upstream, err := dial("tcp", target, &tls.Config{ServerName: targetHost})
 	if err != nil {
 		flow.Status = model.FlowError
@@ -289,7 +289,7 @@ func intercept(client net.Conn, target string, c *ca.CA, dial dialFunc) model.In
 	relay(server, upstream, sent, recv)
 
 	flow.SentBytes, flow.RecvBytes = sent.n, recv.n
-	flow.SentText = decodeMask(sent.b) // masked BEFORE the Flow exists — no sink ever sees a raw secret
+	flow.SentText = decodeMask(sent.b) // masked BEFORE the Flow exists; no sink ever sees a raw secret
 	flow.RecvText = decodeMask(recv.b)
 	flow.Status = model.FlowDecrypted
 	return flow
@@ -300,7 +300,7 @@ func intercept(client net.Conn, target string, c *ca.CA, dial dialFunc) model.In
 // idle deadline reaps a stalled flow (F-1).
 func relay(client, upstream net.Conn, sent, recv *capBuf) {
 	done := make(chan struct{}, 2)
-	// Each copy recovers its own panic and always signals done — a panic in copyIdle/capBuf while
+	// Each copy recovers its own panic and always signals done; a panic in copyIdle/capBuf while
 	// processing attacker-controlled bytes must not crash the whole proxy or deadlock relay (cp-p2d F-3).
 	cp := func(dst, src net.Conn, cap *capBuf) {
 		defer func() { _ = recover(); done <- struct{}{} }()

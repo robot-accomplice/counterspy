@@ -8,7 +8,7 @@ import (
 )
 
 // Real `lsof -Fpcn` shape: p/c set the current process, each n line is one of its sockets. We key on the
-// LOCAL side (before ->) — the client's ephemeral port, which is what conn.RemoteAddr() reports to us.
+// LOCAL side (before ->), the client's ephemeral port, which is what conn.RemoteAddr() reports to us.
 const lsofFixture = `p73722
 cSafari
 n127.0.0.1:54321->127.0.0.1:62443

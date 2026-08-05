@@ -26,7 +26,7 @@ const securityTimeout = 20 * time.Second
 
 // runSecurity is the seam over the macOS `security` CLI, so trust install/uninstall is unit-testable
 // (a fake captures the args) without touching the real keychain. The default captures the tool's
-// diagnostic output into the error so a failure is actionable — and so the self-heal path can tell a
+// diagnostic output into the error so a failure is actionable, and so the self-heal path can tell a
 // "cert not found" removal from a real failure (Audit cp-p2b F-2). Fail loud (Rule 13).
 var runSecurity = func(args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), securityTimeout)
@@ -58,7 +58,7 @@ func writeTempCert(certPEM []byte) (string, func(), error) {
 
 // InstallTrust adds the CA as a trusted root so the host's apps accept the proxy's minted leaves.
 // `-d` targets the admin/System trust domain (root, which `intercept` already holds) for broad
-// coverage — native apps and daemons, not just login-keychain ones. Consent is the caller's job.
+// coverage: native apps and daemons, not just login-keychain ones. Consent is the caller's job.
 // Reversible via UninstallTrust / `intercept --uninstall`.
 func InstallTrust(certPEM []byte) error {
 	path, cleanup, err := writeTempCert(certPEM)
@@ -66,7 +66,7 @@ func InstallTrust(certPEM []byte) error {
 		return err
 	}
 	defer cleanup()
-	// -p ssl restricts trust to TLS ONLY — a local intercept CA must not become a trusted code-signing
+	// -p ssl restricts trust to TLS ONLY; a local intercept CA must not become a trusted code-signing
 	// / S-MIME / IPsec anchor (Audit cp-p2b F-1). -k targets the System keychain explicitly (F-3).
 	if err := runSecurity("add-trusted-cert", "-d", "-r", "trustRoot", "-p", "ssl", "-k", systemKeychain, path); err != nil {
 		return fmt.Errorf("install CA trust: %w", err)

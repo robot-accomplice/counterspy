@@ -10,7 +10,7 @@ import (
 	"counterspy/internal/model"
 )
 
-// Concern (tier) glyphs — carried by BOTH color and glyph, so tier survives a
+// Concern (tier) glyphs: carried by BOTH color and glyph, so tier survives a
 // NO_COLOR / piped terminal.
 const (
 	GlyphQuarantine  = '⚑'
@@ -18,7 +18,7 @@ const (
 	GlyphMonitor     = '·'
 )
 
-// Trust (provenance) glyphs — a filled→hollow→struck gradient of decreasing trust.
+// Trust (provenance) glyphs: a filled→hollow→struck gradient of decreasing trust.
 const (
 	GlyphApple     = '●' // Apple system code
 	GlyphNotarized = '◆' // Developer ID, Gatekeeper-accepted
@@ -30,8 +30,8 @@ const (
 // Liveness glyphs.
 const (
 	GlyphActive    = '▸' // running now (live process, or loaded with a live PID)
-	GlyphArmed     = '◐' // installed/loaded, will fire on a trigger — no live PID (issue #23)
-	GlyphVestigial = '†' // dormant: disabled (.bak) or target missing — cannot execute
+	GlyphArmed     = '◐' // installed/loaded, will fire on a trigger; no live PID (issue #23)
+	GlyphVestigial = '†' // dormant: disabled (.bak) or target missing, cannot execute
 	GlyphSocket    = '↔' // holds a network listener
 )
 
@@ -59,16 +59,16 @@ const (
 	GlyphCleartext = '□'
 )
 
-// Intercept visibility (Phase 2) — an APERTURE that closes: how much of a decrypted-proxy flow we could
+// Intercept visibility (Phase 2). An APERTURE that closes: how much of a decrypted-proxy flow we could
 // actually read. This is a different question from GlyphEncrypted/GlyphCleartext (which is a
 // port heuristic about whether a flow is TLS at all); this axis reports what interception achieved.
 //
-// Only GlyphDecrypted may read as success — the rest say WHY there is no content, and must never look
+// Only GlyphDecrypted may read as success; the rest say WHY there is no content, and must never look
 // like we saw something we didn't. Note ⊘ is NOT reused here: it already means "revoked certificate"
 // (GlyphRevoked), and a pinned flow is not a revoked one.
 const (
 	GlyphDecrypted = '◉' // open: TLS terminated, plaintext captured
-	GlyphPinned    = '⦸' // barred: the app rejected our leaf (cert pinning) — bypassed, not decrypted
+	GlyphPinned    = '⦸' // barred: the app rejected our leaf (cert pinning): bypassed, not decrypted
 	GlyphOpaque    = '◌' // empty: not interceptable (not TLS we could terminate)
 	GlyphFlowError = '⨯' // broken: a capture/relay error; the connection was not tampered with
 )
@@ -83,14 +83,14 @@ const (
 )
 
 // tlsPorts / clearPorts are the well-known ports we classify. STARTTLS ports (587 submission, 5222
-// xmpp) are deliberately absent — they begin in the clear and may or may not upgrade, so claiming
+// xmpp) are deliberately absent; they begin in the clear and may or may not upgrade, so claiming
 // either would be dishonest; they stay EncUnknown.
 var tlsPorts = map[int]bool{443: true, 4433: true, 5228: true, 5061: true, 563: true, 636: true,
 	853: true, 990: true, 992: true, 993: true, 995: true, 6514: true, 8443: true, 9443: true, 465: true}
 var clearPorts = map[int]bool{21: true, 23: true, 25: true, 70: true, 79: true, 80: true, 110: true,
 	119: true, 143: true, 389: true, 3128: true, 8000: true, 8080: true}
 
-// PortEnc classifies a destination port as TLS, cleartext, or unknown — a port-only heuristic, not
+// PortEnc classifies a destination port as TLS, cleartext, or unknown: a port-only heuristic, not
 // a captured fact.
 func PortEnc(port int) EncKind {
 	switch {
@@ -103,7 +103,7 @@ func PortEnc(port int) EncKind {
 	}
 }
 
-// EncGlyph returns the base rune and combining runes to render for an EncKind — (0, nil) for
+// EncGlyph returns the base rune and combining runes to render for an EncKind: (0, nil) for
 // unknown (nothing drawn). Callers render via a screen's combining-aware SetContent.
 func EncGlyph(k EncKind) (rune, []rune) {
 	switch k {
@@ -167,7 +167,7 @@ func Trust(f model.Finding) rune {
 // isAppleAuthority reports whether an spctl-accepted signing authority is Apple's
 // own platform code. A third-party Developer-ID leaf ALWAYS begins with
 // "Developer ID " ("Developer ID Application:" / "Developer ID Installer:"), so we
-// exclude that prefix first — otherwise a legitimately-notarized Developer-ID cert
+// exclude that prefix first; otherwise a legitimately-notarized Developer-ID cert
 // whose company name merely contains "Apple" (e.g. "Developer ID Application: Apple
 // Fan LLC") would forge the ● Apple-system mark. Only after ruling out Developer-ID
 // do we accept Apple's platform authorities. (swarm cp T1 review F-1, crit.)
@@ -202,14 +202,14 @@ func isAppleAuthority(a string) bool {
 // blank slot. RunState and Socket are independent so ▸ active and ↔ live-socket
 // can co-occur.
 type Liveness struct {
-	RunState rune // GlyphActive ▸, GlyphArmed ◐, GlyphVestigial †, or 0 — from Assessment.Liveness
+	RunState rune // GlyphActive ▸, GlyphArmed ◐, GlyphVestigial †, or 0; from Assessment.Liveness
 	Socket   rune // GlyphSocket or 0
 }
 
 // Classify assembles the per-subject display marks (keyed by Subject.Key()):
 //   - RunState = the glyph for the finding's liveness, which interpret already derived and stored on
 //     Assessment.Liveness (▸ active / ◐ armed / † dormant / blank). Sourcing it from that single
-//     value — rather than re-deriving here — is what keeps the scored run-state and the displayed
+//     value (rather than re-deriving here) is what keeps the scored run-state and the displayed
 //     run-state from ever disagreeing (issue #23).
 //   - Socket = ↔ if any evidence reports a LISTEN socket (Facts["listener"]=="true"). Independent of
 //     RunState, so ▸ active and ↔ live-socket can co-occur.
@@ -229,7 +229,7 @@ func Classify(assessments []model.Assessment) map[string]Liveness {
 
 // Gap is the single inter-slot separator; markField is one display cell per slot.
 // Uniform cadence is structural: every slot is one glyph or one blank, joined by
-// exactly one Gap (see spec §3.1 — no width library needed, all glyphs are width-1).
+// exactly one Gap (see spec §3.1: no width library needed, all glyphs are width-1).
 const (
 	Gap       = " "
 	markField = 1
@@ -276,19 +276,19 @@ func Legend() []LegendRow {
 		{GlyphUnsigned, "trust", "unsigned", "unsigned"},
 		{GlyphRevoked, "trust", "revoked certificate", "revoked"},
 		{GlyphActive, "liveness", "active (running now)", "active"},
-		{GlyphArmed, "liveness", "armed (loaded, fires on a trigger — no live PID)", "armed"},
-		{GlyphVestigial, "liveness", "dormant (disabled or target missing — cannot execute)", "dormant"},
+		{GlyphArmed, "liveness", "armed (loaded, fires on a trigger; no live PID)", "armed"},
+		{GlyphVestigial, "liveness", "dormant (disabled or target missing, cannot execute)", "dormant"},
 		{GlyphSocket, "liveness", "live network socket", "socket"},
 		{GlyphEncrypted, "encryption", "TLS-encrypted flow (□ = cleartext)", "encrypted"},
 		{GlyphDecrypted, "intercept", "decrypted (plaintext captured)", "decrypted"},
-		{GlyphPinned, "intercept", "pinned (app rejected our leaf — bypassed, not decrypted)", "pinned"},
+		{GlyphPinned, "intercept", "pinned (app rejected our leaf: bypassed, not decrypted)", "pinned"},
 		{GlyphOpaque, "intercept", "opaque (not interceptable)", "opaque"},
 		{GlyphFlowError, "intercept", "capture/relay error (traffic not tampered with)", "error"},
 	}
 }
 
 // LegendCompact returns the vocabulary grouped into one line per axis (concern,
-// trust, liveness) using Short labels — for the space-tight TUI ? overlay. Derived
+// trust, liveness) using Short labels (for the space-tight TUI ? overlay). Derived
 // from Legend() so it can never drift from the marks the app actually emits.
 func LegendCompact() []string {
 	var axes []string
@@ -309,7 +309,7 @@ func LegendCompact() []string {
 	return lines
 }
 
-// LegendMarkdown renders the Legend as a Markdown table — the single source the
+// LegendMarkdown renders the Legend as a Markdown table: the single source the
 // README key must match (enforced by legend_doc_test.go, so the docs can never
 // drift from the marks the app actually emits).
 func LegendMarkdown() string {

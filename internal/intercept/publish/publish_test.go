@@ -80,7 +80,7 @@ func TestSocketSink_SlowReaderDoesNotBlock(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("Publish blocked on a slow reader — the proxy must never stall")
+		t.Fatal("Publish blocked on a slow reader; the proxy must never stall")
 	}
 }
 
@@ -152,7 +152,7 @@ func (c *countSink) Publish(model.InterceptedMessage) error { c.n++; return nil 
 func (c *countSink) Close() error                           { return nil }
 
 // shortSock returns a socket path short enough for macOS's ~104-char sun_path limit (t.TempDir()
-// embeds the long test name and overflows it — a real constraint the intercept command respects).
+// embeds the long test name and overflows it, a real constraint the intercept command respects).
 func shortSock(t *testing.T) string {
 	d, err := os.MkdirTemp("/tmp", "cs")
 	if err != nil {

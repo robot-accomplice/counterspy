@@ -15,7 +15,7 @@ const (
 //
 // Ticket T-3 / cp-5 F-1: the signing `authority` is recorded as an allowlist-trustable
 // Fact ONLY when Gatekeeper accepted the binary (`accepted` is derived from spctl's
-// EXIT CODE by the caller — unspoofable, unlike matching free text). A valid-but-
+// EXIT CODE by the caller: unspoofable, unlike matching free text). A valid-but-
 // unaccepted signature (e.g. a self-signed cert with a spoofed CN) is not accepted, so
 // its authority is dropped and cannot suppress the subject downstream.
 // "revoked" is checked before "not signed" so the more severe verdict wins when the

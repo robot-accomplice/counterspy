@@ -13,7 +13,7 @@ import (
 )
 
 // collapsedMarker is the tree-disclosure control: '+' can expand, '−' is expanded.
-// A disclosure control, not a liveness state — kept distinct from the ▸ active mark
+// A disclosure control, not a liveness state; kept distinct from the ▸ active mark
 // so the two never collide (cp-T design: egress toggle moved off ▸).
 func collapsedMarker(expanded bool) rune {
 	if expanded {
@@ -56,7 +56,7 @@ func middleEllipsis(s string, max int) string {
 	return string(r[:head]) + "…" + string(base)
 }
 
-const emptyHint = "No outbound traffic observed — run with sudo for full visibility."
+const emptyHint = "No outbound traffic observed. Run with sudo for full visibility."
 
 // collectingHint shows before the first sample returns, so an unsampled view doesn't render as a
 // misconfiguration (the emptyHint's sudo advice only makes sense once we've actually found nothing).
@@ -139,15 +139,15 @@ func sparkline(vals []uint64) string {
 
 // heatStops is the traffic sparkline's thermal ramp: blue (cool/quiet) → cyan → yellow → red
 // (hot/loud). Intensity is ABSOLUTE traffic volume, so busy flows glow red and quiet ones stay
-// blue — the TREND column reads as a heat map for spotting the loud talkers (exfil north-star).
+// blue; the TREND column reads as a heat map for spotting the loud talkers (exfil north-star).
 var heatStops = []struct {
 	at      float64
 	r, g, b int32
 }{
-	{0.00, 60, 130, 246}, // blue — cool / quiet
+	{0.00, 60, 130, 246}, // blue: cool / quiet
 	{0.40, 45, 205, 205}, // cyan
 	{0.72, 240, 205, 70}, // yellow
-	{1.00, 235, 70, 70},  // red — hot / peak
+	{1.00, 235, 70, 70},  // red: hot / peak
 }
 
 // heatColor maps a 0..1 intensity to a color along heatStops (linear RGB interpolation).
@@ -173,7 +173,7 @@ func heatColor(frac float64) tcell.Color {
 }
 
 // tempColor is the volume temperature: a rate's share of the loudest flow in view (peak), mapped
-// blue(cold)→red(hot). Replaces the old absolute log scale — an arbitrary anchor. peak==0 → cold.
+// blue(cold)→red(hot). Replaces the old absolute log scale, an arbitrary anchor. peak==0 → cold.
 func tempColor(rate, peak uint64) tcell.Color {
 	if peak == 0 {
 		return heatColor(0)
@@ -186,9 +186,9 @@ var dirStops = []struct {
 	at      float64
 	r, g, b int32
 }{
-	{0.00, 80, 200, 120}, // green — inbound / download
-	{0.50, 210, 200, 90}, // muted yellow — balanced
-	{1.00, 240, 170, 60}, // amber — outbound / exfil
+	{0.00, 80, 200, 120}, // green: inbound / download
+	{0.50, 210, 200, 90}, // muted yellow: balanced
+	{1.00, 240, 170, 60}, // amber: outbound / exfil
 }
 
 // dirColor maps a 0..1 lean (0 = all in, 1 = all out) to a color along dirStops.
@@ -311,7 +311,7 @@ func rowSpark(row egressRow) (out, in []uint64) {
 	}
 }
 
-// framePeak is the loudest relevant rate across all visible rows this frame — the share-of-peak
+// framePeak is the loudest relevant rate across all visible rows this frame: the share-of-peak
 // denominator for temperature coloring. Combined mode colors by direction, not temperature, so 0.
 func framePeak(rows []egressRow, mode trendMode) uint64 {
 	if mode == trendCombined {
@@ -456,9 +456,9 @@ func egressView(m EgressModel, s tcell.Screen) {
 	}
 
 	if len(rows) == 0 {
-		hint := collectingHint // haven't sampled yet — don't accuse the user of a misconfig
+		hint := collectingHint // haven't sampled yet; don't accuse the user of a misconfig
 		if m.sampled {
-			hint = emptyHint // sampled and genuinely empty — now the sudo remediation is earned
+			hint = emptyHint // sampled and genuinely empty; now the sudo remediation is earned
 		}
 		cy := (tableTop + tableBottom) / 2
 		cx := (w - len([]rune(hint))) / 2
@@ -494,7 +494,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 	drawText(s, marginX, footerY, tcell.StyleDefault.Foreground(colDim), truncate(footerHint, w-marginX-marginR))
 }
 
-// drawHRule draws a thin panel-divider rule across the content columns at row y — a light separator
+// drawHRule draws a thin panel-divider rule across the content columns at row y: a light separator
 // between sections, not a full box (no verticals/corners). Guarded so it never lands on the title
 // row or off-screen.
 func drawHRule(s tcell.Screen, y, w int) {
@@ -508,7 +508,7 @@ func drawHRule(s tcell.Screen, y, w int) {
 	drawText(s, marginX, y, tcell.StyleDefault.Foreground(colDivider), strings.Repeat("─", n))
 }
 
-// drawEncGlyph places the encryption annotation for a destination port at (x,y) — a key (⚿) for a
+// drawEncGlyph places the encryption annotation for a destination port at (x,y): a key (⚿) for a
 // TLS port, a slashed key for cleartext, nothing for an unknown port (a port-only heuristic, no
 // capture). Returns the columns consumed (0 or 2) so the caller can shift following text.
 func drawEncGlyph(s tcell.Screen, x, y int, style tcell.Style, port int) int {
@@ -597,7 +597,7 @@ func detailLines(rows []egressRow, selected, maxW int) []string {
 	row := rows[selected]
 	g := row.group
 	if row.member == nil {
-		lines := []string{model.Clean(fmt.Sprintf("DETAIL — %s · %d instance(s) · %d conn(s)", g.App, g.Instances, len(g.Conns)))}
+		lines := []string{model.Clean(fmt.Sprintf("DETAIL: %s · %d instance(s) · %d conn(s)", g.App, g.Instances, len(g.Conns)))}
 		if g.Path != "" {
 			lines = append(lines, model.Clean(middleEllipsis(g.Path, maxW)))
 		}
@@ -607,7 +607,7 @@ func detailLines(rows []egressRow, selected, maxW int) []string {
 		lines = append(lines, model.Clean(fmt.Sprintf("%s · %s · cadence: %s", g.Trust, bgLabel(g.Background), g.Cadence)))
 		if len(g.Capabilities) > 0 {
 			lines = append(lines, model.Clean("can access  "+strings.Join(g.Capabilities, " · ")))
-			lines = append(lines, model.Clean(fmt.Sprintf("exfil %s — candidate: %s (inferred from capability)",
+			lines = append(lines, model.Clean(fmt.Sprintf("exfil %s, candidate: %s (inferred from capability)",
 				g.ExfilRisk.String(), strings.Join(g.Candidate, ", "))))
 		}
 		return lines
@@ -633,7 +633,7 @@ func shortPath(p string) string {
 
 func topDest(g model.EgressGroup) string {
 	if len(g.Destinations) == 0 {
-		return "—"
+		return "-"
 	}
 	d := g.Destinations[0]
 	extra := ""
@@ -644,7 +644,7 @@ func topDest(g model.EgressGroup) string {
 }
 
 // endpointHost is the display host for a destination: the passively-resolved name if one was
-// observed, else the bare IP (never fabricated) — the visible payoff of the DNS observer (#3).
+// observed, else the bare IP (never fabricated): the visible payoff of the DNS observer (#3).
 func endpointHost(e model.Endpoint) string {
 	if e.Name != "" {
 		return e.Name

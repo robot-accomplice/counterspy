@@ -11,7 +11,7 @@ import (
 )
 
 // The plist MUST pin HOME to the installing user. launchd sets no HOME, so without this the daemon
-// resolves ~/.counterspy to /var/root/.counterspy, mints a SECOND CA, and installs ITS trust — which the
+// resolves ~/.counterspy to /var/root/.counterspy, mints a SECOND CA, and installs ITS trust, which the
 // user's `intercept --uninstall` (resolving HOME to their own) would never revert. One CA, one trust.
 func TestDaemonPlist_PinsHomeSoThereIsOneCA(t *testing.T) {
 	p := daemonPlist("/usr/local/bin/counterspy", "/Users/jmachen")
@@ -20,7 +20,7 @@ func TestDaemonPlist_PinsHomeSoThereIsOneCA(t *testing.T) {
 	}
 }
 
-// The daemon must run non-interactively (no TTY to prompt on) and log where a human can find it — not
+// The daemon must run non-interactively (no TTY to prompt on) and log where a human can find it, not
 // the HOME-derived default, which under launchd would land in /var/root.
 func TestDaemonPlist_RunsNonInteractiveAndLogsFindably(t *testing.T) {
 	p := daemonPlist("/usr/local/bin/counterspy", "/Users/j")
@@ -56,7 +56,7 @@ func TestInstallDaemon_RejectsRelativeExe(t *testing.T) {
 }
 
 // A failed bootstrap must REMOVE the plist. Leaving it would arm the machine at next boot with no
-// running daemon and no consent — a half-install is worse than a clean failure (Rule 13).
+// running daemon and no consent; a half-install is worse than a clean failure (Rule 13).
 func TestInstallDaemon_FailedBootstrapRemovesThePlist(t *testing.T) {
 	var wrote, removed bool
 	origW, origR, origM, origL := writePlist, removePlist, mkdirLogDir, runLaunchctl

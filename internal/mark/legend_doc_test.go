@@ -7,7 +7,7 @@ import (
 )
 
 // TestReadmeKeyMatchesLegend enforces that the README "Reading the marks" key is
-// byte-identical to mark.LegendMarkdown() — so a glyph can never exist in the app
+// byte-identical to mark.LegendMarkdown(); so a glyph can never exist in the app
 // without a documented meaning, nor the docs describe a mark the app doesn't emit.
 func TestReadmeKeyMatchesLegend(t *testing.T) {
 	b, err := os.ReadFile("../../README.md")

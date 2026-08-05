@@ -237,7 +237,7 @@ func TestIntercept_UninstallNoCADoesNotMint(t *testing.T) {
 	}
 }
 
-// --uninstall stays idempotent when trust removal reports an error (cert already gone) — exit 0.
+// --uninstall stays idempotent when trust removal reports an error (cert already gone): exit 0.
 func TestIntercept_UninstallToleratesRemovalError(t *testing.T) {
 	var log []string
 	fakeIntercept(t, &log, nil)
@@ -271,7 +271,7 @@ func TestIntercept_ConsentAcceptArms(t *testing.T) {
 	}
 }
 
-// (d) Usage lists intercept and exactly the four approved flags — no other new option crept in.
+// (d) Usage lists intercept and exactly the four approved flags; no other new option crept in.
 func TestUsage_ListsInterceptAndApprovedFlagsOnly(t *testing.T) {
 	var b bytes.Buffer
 	usage(&b)
@@ -289,7 +289,7 @@ func TestUsage_ListsInterceptAndApprovedFlagsOnly(t *testing.T) {
 	}
 }
 
-// The root daemon must hand the stream socket to the invoking (sudo) user — macOS enforces write
+// The root daemon must hand the stream socket to the invoking (sudo) user; macOS enforces write
 // permission on unix connect(), so a root-owned 0755 socket would refuse the non-root console.
 func TestSudoInvoker_ReadsSudoEnv(t *testing.T) {
 	t.Setenv("SUDO_UID", "501")
@@ -352,7 +352,7 @@ func TestInstallDaemon_ConsentStatesPersistence(t *testing.T) {
 	}
 }
 
-// A consented install passes an ABSOLUTE exe + the invoking user's home (so the daemon shares ONE CA —
+// A consented install passes an ABSOLUTE exe + the invoking user's home (so the daemon shares ONE CA:
 // launchd sets no HOME, so it would otherwise mint a second CA at /var/root that --uninstall never reverts).
 func TestInstallDaemon_PassesAbsoluteExeAndHome(t *testing.T) {
 	var log []string

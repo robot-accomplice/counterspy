@@ -12,7 +12,7 @@ import (
 
 // Inspector captures and inspects a single outbound flow, returning the honest per-flow view
 // (spec §4). It is a seam: the tui defines it (importing only the pure model vocabulary), and a
-// main adapter satisfies it with the native /dev/bpf capture + tier-0/1 engine — so the root I/O
+// main adapter satisfies it with the native /dev/bpf capture + tier-0/1 engine, so the root I/O
 // stays out of the decoupled UI, mirroring the Sampler/Actor seams. A nil Inspector means
 // inspection is disabled (the --no-inspect posture); the overlay says so instead of capturing.
 type Inspector interface {
@@ -21,7 +21,7 @@ type Inspector interface {
 
 // drawInspect renders the full-screen inspection pane for one flow, split into rule-separated
 // sections: the identity header, the honest coverage verdict + metadata (SNI, byte volume), and a
-// content pane — either the plaintext (masked by default, §6) or, when the flow is encrypted, a
+// content pane: either the plaintext (masked by default, §6) or, when the flow is encrypted, a
 // plain explanation of why there is nothing to view. It replaces the tree while open.
 func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	s.Clear()
@@ -50,9 +50,9 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	drawHRule(s, y, w)
 	y++
 
-	// Assessment: the coverage verdict is the honest headline — plaintext leaving in the clear reads
+	// Assessment: the coverage verdict is the honest headline: plaintext leaving in the clear reads
 	// as alarm (red), an encrypted flow we could only fingerprint reads amber ("this is itself a
-	// finding" per §4), a capture failure reads amber, a clean no-data reads dim — plus metadata.
+	// finding" per §4), a capture failure reads amber, a clean no-data reads dim, plus metadata.
 	vcolor := colDim
 	switch {
 	case v.Err != "":
@@ -92,9 +92,9 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 	drawHRule(s, y, w) // separate the assessment from the content
 
 	if hasContent {
-		hint := "masked — v to view"
+		hint := "masked (v to view)"
 		if reveal {
-			hint = "shown — v to hide"
+			hint = "shown (v to hide)"
 		}
 		// When both directions have content, split the region so a long SENT can't swallow the pane
 		// and silently hide RECEIVED (T-15); each pane truncates within its budget.
@@ -113,14 +113,14 @@ func drawInspect(s tcell.Screen, insp *inspection, reveal bool) {
 		return
 	}
 
-	// No plaintext to show — say so, and why, so the byte volume above isn't a silent mystery.
+	// No plaintext to show: say so, and why, so the byte volume above isn't a silent mystery.
 	cy := contentTop
 	if why := noContentReason(v); why != "" {
 		drawWrapped(s, marginX, &cy, def.Foreground(colText), why, inner)
 	}
 }
 
-// noContentReason explains, in plain language, why an inspected flow has no viewable payload — the
+// noContentReason explains, in plain language, why an inspected flow has no viewable payload: the
 // reader's implicit question when they see byte volume but no content. Empty when the verdict itself
 // already carries the reason (a capture error).
 func noContentReason(v model.InspectView) string {
@@ -128,8 +128,8 @@ func noContentReason(v model.InspectView) string {
 	case v.Err != "":
 		return "" // the verdict line already states the capture failure
 	case v.Coverage == model.InspectMetadata && v.Encrypted:
-		return string(mark.GlyphEncrypted) + " Encrypted (TLS): the payload is ciphertext. CounterSpy can measure this flow — " +
-			"how much left and where it went, shown above — but it cannot read the contents, so there is nothing to view."
+		return string(mark.GlyphEncrypted) + " Encrypted (TLS): the payload is ciphertext. CounterSpy can measure this flow (" +
+			"how much left and where it went, shown above) but it cannot read the contents, so there is nothing to view."
 	case v.Coverage == model.InspectMetadata:
 		return "Captured only non-readable bytes for this flow (nothing to render)."
 	default:
@@ -138,7 +138,7 @@ func noContentReason(v model.InspectView) string {
 }
 
 // drawContentPane draws the payload from y up to (but not including) maxY: each source line is
-// cleaned (so a crafted payload can't inject ANSI/newlines — defense in depth over the adapter's
+// cleaned (so a crafted payload can't inject ANSI/newlines, defense in depth over the adapter's
 // sanitize) then word-wrapped to width so nothing runs off the edge. A payload taller than the
 // pane ends in a truncation marker.
 func drawContentPane(s tcell.Screen, x, y, maxY, width int, content string) int {
@@ -162,9 +162,9 @@ func drawDirection(s tcell.Screen, x, y, maxY, width int, label, hint, content s
 	if content == "" {
 		return y
 	}
-	if y >= maxY-1 { // no room for a pane — still tell the user this direction has data (T-15)
+	if y >= maxY-1 { // no room for a pane; still tell the user this direction has data (T-15)
 		if y < maxY {
-			drawText(s, x, y, tcell.StyleDefault.Foreground(colDim), truncate(label+" · hidden — resize", width))
+			drawText(s, x, y, tcell.StyleDefault.Foreground(colDim), truncate(label+" · hidden, resize", width))
 		}
 		return y
 	}
@@ -193,7 +193,7 @@ func wrapText(s string, width int) []string {
 					break
 				}
 			}
-			if cut < 1 { // no interior space — hard-break the token
+			if cut < 1 { // no interior space; hard-break the token
 				out = append(out, string(r[:width]))
 				r = r[width:]
 			} else {

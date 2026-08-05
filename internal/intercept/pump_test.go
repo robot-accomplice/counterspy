@@ -293,7 +293,7 @@ func TestPump_PipelinedKeepAlive(t *testing.T) {
 		t.Fatalf("want 2 requests and 2 responses, got %d/%d: %+v", len(reqs), len(resps), msgs)
 	}
 	// What matters for pipelining is correlation, not arrival order: the two in-flight requests must
-	// come back matched to the right responses — /a ↔ "A" on Seq 1, /b ↔ "B" on Seq 2. Each direction
+	// come back matched to the right responses: /a ↔ "A" on Seq 1, /b ↔ "B" on Seq 2. Each direction
 	// publishes in order within itself, so Seqs ascend per direction.
 	if reqs[0].Seq != 1 || reqs[1].Seq != 2 {
 		t.Fatalf("request Seqs should ascend 1,2, got %d,%d", reqs[0].Seq, reqs[1].Seq)
@@ -378,10 +378,10 @@ func TestPump_PopUnblocksOnClose(t *testing.T) {
 }
 
 // TestPump_RelayNoDeadlockOnUnmatchedResponse is the regression guard for ABORT review F1. A server
-// that emits more responses than requests (adversarial or buggy — this tool inspects untrusted
+// that emits more responses than requests (adversarial or buggy: this tool inspects untrusted
 // traffic) must not wedge the relay. The mutex→channel correlation fix made popQueue block; combined
 // with the old synchronous tee that back-pressured the forward path, an unmatched response deadlocked
-// runRelay permanently — CONFIRMED earlier via goroutine dump (parseResponses parked in popQueue while
+// runRelay permanently; CONFIRMED earlier via goroutine dump (parseResponses parked in popQueue while
 // the response copyTee blocked on the tee pipe, so closeRequests could never run). The tee is now
 // non-blocking, so a parked parser can never stall the relay: runRelay must return once the conns close.
 func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
@@ -408,7 +408,7 @@ func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
 	// One request, then a matched response followed by an UNMATCHED response whose body is far larger
 	// than any parser read-ahead or the tee backlog. parseResponses parks in popQueue after the second
 	// head, before reading its body, so with a synchronous tee the copy goroutine wedges mid-body with
-	// bytes the parser will never drain — the confirmed F1 deadlock. With the non-blocking tee, teeing
+	// bytes the parser will never drain, the confirmed F1 deadlock. With the non-blocking tee, teeing
 	// detaches and the body still forwards, so the relay unwinds once the conns close.
 	body := strings.Repeat("x", 300*1024)
 	go clientW.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
@@ -422,10 +422,10 @@ func TestPump_RelayNoDeadlockOnUnmatchedResponse(t *testing.T) {
 	select {
 	case <-relayDone:
 	case <-time.After(3 * time.Second):
-		t.Fatal("runRelay did not return after the conns closed — F1 deadlock regression (idleTimeout is 5m)")
+		t.Fatal("runRelay did not return after the conns closed: F1 deadlock regression (idleTimeout is 5m)")
 	}
 	// F-A: the 300KB unmatched body overflows the tee backlog and detaches teeing, so capture is
-	// incomplete — the relay MUST publish an opaque "tee detached" event, never silently under-report.
+	// incomplete; the relay MUST publish an opaque "tee detached" event, never silently under-report.
 	mu.Lock()
 	defer mu.Unlock()
 	sawDetach := false

@@ -39,7 +39,7 @@ func Load(dir string) (c *CA, found bool, err error) {
 }
 
 // LoadOrCreate returns the persisted intercept CA under dir, creating (and saving) a fresh one if none
-// exists — so trust is installed ONCE and the same CA is reused across runs (re-generating would orphan
+// exists, so trust is installed ONCE and the same CA is reused across runs (re-generating would orphan
 // the trusted root and re-prompt every launch).
 //
 // Concurrency-safe: the key file is an exclusive create gate (O_EXCL). If two intercepts start at once,
@@ -56,7 +56,7 @@ func LoadOrCreate(dir string) (*CA, error) {
 	kf, err := os.OpenFile(keyPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return loadAfterRace(dir) // another process won the create — use its pair
+			return loadAfterRace(dir) // another process won the create; use its pair
 		}
 		return nil, err
 	}

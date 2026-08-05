@@ -1,6 +1,6 @@
 package score
 
-// Signal weights (points added per observation). Tunable — this is the ONLY
+// Signal weights (points added per observation). Tunable. This is the ONLY
 // place numeric policy lives.
 const (
 	WeightUnsigned        = 3 // binary is unsigned or ad-hoc
@@ -24,12 +24,12 @@ const (
 	CorrelationMinKinds = 2
 	// CorrelationFactorX100 scales the summed weight by 1.5x (x100 to stay
 	// integer-only). Applied as sum*150/100, which TRUNCATES toward zero (floor):
-	// e.g. sum 5 -> 7 (7.5 floored). Rounding down is intentional — the multiplier
+	// e.g. sum 5 -> 7 (7.5 floored). Rounding down is intentional. The multiplier
 	// only ever raises a score, so flooring keeps it conservative.
 	CorrelationFactorX100 = 150
 	ShowThreshold         = 5  // findings at/above this are surfaced (interpret: Investigate)
 	HighTier              = 10 // at/above this a strong-category finding escalates to Quarantine
-	CriticalTier          = 15 // even a "weak"-category unsigned finding Quarantines here —
+	CriticalTier          = 15 // even a "weak"-category unsigned finding Quarantines here:
 	//                            escape hatch so overwhelming accumulated signal isn't capped
 	//                            at Investigate forever (ABORT rc3 C3 false-negative fix)
 )

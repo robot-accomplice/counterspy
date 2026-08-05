@@ -6,7 +6,7 @@ import "sync"
 // from its capture goroutine while the egress sampler reads it each tick, so every access is guarded.
 // It is last-seen-wins (a fresh answer overwrites the name) and LRU-by-write: a re-observed IP is
 // refreshed to newest, and eviction drops the least-recently-observed key. LRU (not FIFO) matters
-// here because the IPs an app keeps connecting to are exactly the ones it keeps re-resolving — FIFO
+// here because the IPs an app keeps connecting to are exactly the ones it keeps re-resolving. FIFO
 // would evict an active destination's name right when a flow to it needs it.
 type Cache struct {
 	mu    sync.Mutex
@@ -46,7 +46,7 @@ func (c *Cache) Put(ip, name string) {
 }
 
 // touch moves an existing key to the newest position. O(n) in the (bounded) key count, called only
-// on re-resolution — negligible at DNS-response rates.
+// on re-resolution, negligible at DNS-response rates.
 func (c *Cache) touch(ip string) {
 	for i, k := range c.order {
 		if k == ip {

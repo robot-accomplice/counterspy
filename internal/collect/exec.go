@@ -22,7 +22,7 @@ const (
 )
 
 // execOutput is a package var (not a func) so tests can override it with a fake keyed on
-// command name — no shelling out in tests. Code-signature checks no longer shell out (they
+// command name; no shelling out in tests. Code-signature checks no longer shell out (they
 // use Security.framework, see codesign_darwin.go); the remaining collectors still exec.
 var execOutput = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)

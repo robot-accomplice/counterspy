@@ -20,7 +20,7 @@ type Config struct {
 	Endpoint string `json:"endpoint"`
 }
 
-// LoadConfig reads the config, failing safe to off/public on any error or unknown value —
+// LoadConfig reads the config, failing safe to off/public on any error or unknown value;
 // a fresh install shares nothing until the user explicitly opts in.
 func LoadConfig(path string) Config {
 	c := Config{Share: ShareOff, Detail: DetailPublic}

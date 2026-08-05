@@ -76,7 +76,7 @@ func TestInstallProxy_RestoresAPriorProxyExactly(t *testing.T) {
 	}
 }
 
-// With no prior proxy, teardown clears our recorded server/port AND disables — and the disable must be
+// With no prior proxy, teardown clears our recorded server/port AND disables, and the disable must be
 // LAST, because -setsecurewebproxy "Turns proxy on" (man networksetup).
 func TestInstallProxy_TeardownClearsThenDisablesInOrder(t *testing.T) {
 	calls := withFakeNetworksetup(t, func(args []string) (string, error) {
@@ -113,7 +113,7 @@ func TestInstallProxy_TeardownClearsThenDisablesInOrder(t *testing.T) {
 }
 
 // The load-bearing guarantee: if clearing the fields FAILS (empty values are undocumented), the DISABLE
-// must still run. Bailing out early would leave the user's traffic pointed at a dead proxy — a cosmetic
+// must still run. Bailing out early would leave the user's traffic pointed at a dead proxy, a cosmetic
 // nit turned into an outage.
 func TestInstallProxy_DisableSurvivesAFailingClear(t *testing.T) {
 	calls := withFakeNetworksetup(t, func(args []string) (string, error) {
@@ -134,7 +134,7 @@ func TestInstallProxy_DisableSurvivesAFailingClear(t *testing.T) {
 	teardown()
 	for _, c := range *calls {
 		if argsHave(c.args, "-setsecurewebproxystate", "Wi-Fi", "off") {
-			return // disabled despite the failing clear — the guarantee holds
+			return // disabled despite the failing clear; the guarantee holds
 		}
 	}
 	t.Fatalf("the proxy MUST be disabled even when clearing the fields fails; calls=%v", *calls)

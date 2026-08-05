@@ -12,7 +12,7 @@ import (
 	"counterspy/internal/model"
 )
 
-const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence) — wide enough for
+const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence), wide enough for
 // the zoom graph; the tree's small sparklines downsample this to their column width.
 
 // The sampling tools are invoked by absolute path, never resolved through PATH: the monitor runs
@@ -29,10 +29,10 @@ const (
 type Monitor struct {
 	interval  float64
 	prev      map[int]Bytes
-	prevConn  map[string]Bytes    // previous cumulative bytes per connKey — for per-conn rates
-	spark     map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
-	sparkPID  map[int][]uint64    // per-PID out-rate history — instance-row sparkline
-	sparkConn map[string][]uint64 // per-connKey out-rate history — connection-row sparkline
+	prevConn  map[string]Bytes    // previous cumulative bytes per connKey, for per-conn rates
+	spark     map[string][]uint64 // per-app (path) out-rate history, app-header sparkline
+	sparkPID  map[int][]uint64    // per-PID out-rate history, instance-row sparkline
+	sparkConn map[string][]uint64 // per-connKey out-rate history, connection-row sparkline
 
 	sparkIn     map[string][]uint64 // per-app in-rate history
 	sparkInPID  map[int][]uint64    // per-PID in-rate history
@@ -47,7 +47,7 @@ type Monitor struct {
 	resolve   func(ip string) (name string, ok bool) // passive-DNS name lookup; nil = names unavailable (#3)
 
 	// excludePath is the console's own canonical executable path. Any sampled process resolving to the
-	// SAME binary is dropped so counterspy never reports on itself — critically the SEPARATE `intercept`
+	// SAME binary is dropped so counterspy never reports on itself: critically the SEPARATE `intercept`
 	// daemon process (same install, different pid), whose relay dials to every upstream would otherwise
 	// dominate the Exfiltration view while armed. A pid-based exclusion was wrong: the daemon is a
 	// different process, so os.Getpid() of the console never matched it (Self1, ABORT re-run). A copy of
@@ -129,7 +129,7 @@ func (m *Monitor) isSelf(path string) bool {
 }
 
 // defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
-// spaces in the path are unambiguous — fixes the "Application" mislabel).
+// spaces in the path are unambiguous; fixes the "Application" mislabel).
 func defaultExePaths() map[int]string {
 	b, _ := exec.Command(psBin, "-axo", "pid=,comm=").Output()
 	return ParsePidPaths(b)
@@ -145,13 +145,13 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	exe := m.exePaths()
 
 	// Enrich each lsof-discovered connection with its per-connection out-rate (from nettop's
-	// per-connection byte counts) and advance its own spark ring — so every connection leaf
+	// per-connection byte counts) and advance its own spark ring, so every connection leaf
 	// row shows a real trend, not a flat line. Prune connKeys gone this tick.
 	liveConn := make(map[string]bool, len(curConn))
 	rateOf := make(map[string]uint64, len(curConn))
 	rateInOf := make(map[string]uint64, len(curConn))
 	// First pass: advance each UNIQUE connKey's ring exactly once (two lsof FDs to the same
-	// remote share a key — advancing per-entry would grow the ring 2x/tick and desync rows).
+	// remote share a key; advancing per-entry would grow the ring 2x/tick and desync rows).
 	for pid, cs := range conns {
 		for i := range cs {
 			k := connKey(pid, cs[i].Endpoint.IP, cs[i].Endpoint.Port)
@@ -221,7 +221,7 @@ func (m *Monitor) Sample() []model.EgressGroup {
 			path = binaryPath(p)
 		}
 		if m.isSelf(path) {
-			continue // never report on counterspy itself (console or the intercept daemon) — Self1
+			continue // never report on counterspy itself (console or the intercept daemon), Self1
 		}
 		app := appName(path, pid)
 		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than

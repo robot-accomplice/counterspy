@@ -1,4 +1,4 @@
-// Package report formats assessments for humans and machines. It does no analysis —
+// Package report formats assessments for humans and machines. It does no analysis;
 // all synthesis lives in interpret; report only presents (spec §8.1, §12 invariant).
 package report
 
@@ -13,7 +13,7 @@ import (
 )
 
 // Snapshot is the machine-readable form of a scan: the tool version, any collector GAPS, and the
-// assessments. Carrying gaps here — not only on stderr — is what lets `console --from <snapshot>`
+// assessments. Carrying gaps here (not only on stderr) is what lets `console --from <snapshot>`
 // surface the same "signal unavailable" notes a live scan shows; without them a snapshot silently
 // reads as a clean bill of health when a collector actually failed (#8, and Rule 13).
 type Snapshot struct {
@@ -24,7 +24,7 @@ type Snapshot struct {
 
 // RenderJSON emits the machine-readable snapshot fed to CI / the ABORT gate / future UIs.
 // It emits ALL assessments, including Monitor-tier. Consumers MUST gate on
-// Recommendation before surfacing Category/Verdict prominently — a Monitor-tier
+// Recommendation before surfacing Category/Verdict prominently; a Monitor-tier
 // item's category (e.g. "permission-grant") is low-signal and must not be shown as an
 // alert (cp-9 Audit F-2; spec §8.1 "present, don't scare").
 func RenderJSON(assessments []model.Assessment, gaps []string) ([]byte, error) {
@@ -139,7 +139,7 @@ type evLine struct {
 	count                         int
 }
 
-// dedupe collapses identical (kind, summary) evidence into one line with a count —
+// dedupe collapses identical (kind, summary) evidence into one line with a count;
 // a subject with two LaunchAgents no longer repeats "user-level LaunchAgent" twice.
 func dedupe(ev []model.Evidence) []evLine {
 	order := []string{}

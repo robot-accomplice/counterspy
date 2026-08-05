@@ -28,8 +28,8 @@ const launchctlBin = "/bin/launchctl"
 
 // protectedPrefixes are paths CounterSpy refuses to move, even under sudo. SIP already
 // blocks /System, but we refuse explicitly so a bug can never even attempt it
-// (spec §9 hard refusal; success criterion #5). /Library is intentionally NOT here —
-// a malicious /Library/LaunchDaemons item is a legitimate quarantine target.
+// (spec §9 hard refusal; success criterion #5). /Library is intentionally NOT here.
+// A malicious /Library/LaunchDaemons item is a legitimate quarantine target.
 var protectedPrefixes = []string{"/system/", "/usr/lib/", "/usr/bin/", "/bin/", "/sbin/"}
 
 // isProtected reports whether a path is off-limits. It canonicalizes first
@@ -48,7 +48,7 @@ func isProtected(p string) bool {
 
 // refuseUnsafe rejects a move source that is protected or whose path is not fully
 // canonical. Requiring the resolved path to equal the cleaned path means NO component
-// (final OR any parent directory) may be a symlink — closing the parent-directory
+// (final OR any parent directory) may be a symlink, closing the parent-directory
 // redirect and shrinking the stat→rename TOCTOU window to near-nothing (ABORT rc3 C1).
 // Residual: a same-user attacker racing a rename between this check and os.Rename is
 // only fully closed by syscall-level renameat/openat, which Go stdlib does not expose.
@@ -62,7 +62,7 @@ func refuseUnsafe(p string) error {
 		return fmt.Errorf("refusing to move %s: cannot canonicalize (%v)", p, err)
 	}
 	if real != p {
-		return fmt.Errorf("refusing to move %s: path has a symlink component (resolves to %s) — possible TOCTOU", p, real)
+		return fmt.Errorf("refusing to move %s: path has a symlink component (resolves to %s); possible TOCTOU", p, real)
 	}
 	if isProtected(real) {
 		return fmt.Errorf("refusing: %s resolves into a protected path (%s)", p, real)
@@ -71,7 +71,7 @@ func refuseUnsafe(p string) error {
 }
 
 // safeDest checks a RESTORE destination: it must not be protected, and its parent
-// directory (if it exists) must be canonical — so a symlinked parent can't redirect
+// directory (if it exists) must be canonical, so a symlinked parent can't redirect
 // the restore rename (ABORT rc3 C1). The final component is expected not to exist yet
 // (the caller already refuses an occupied destination).
 func safeDest(p string) error {
@@ -104,8 +104,8 @@ var bootout = func(target string) {
 
 // Quarantine performs a finding's actions in order: disable launch items, then MOVE
 // each artifact into root under its original path (collision-proof, provenance-
-// preserving), never deleting. It ALWAYS records a manifest for whatever it completed —
-// even on a mid-way failure — so a partial quarantine is never an unrecoverable orphan
+// preserving), never deleting. It ALWAYS records a manifest for whatever it completed
+// (even on a mid-way failure) so a partial quarantine is never an unrecoverable orphan
 // (cp-11 Audit F-3). Refuses allowlisted subjects and protected paths (§9 two-clause
 // refusal). On the first move failure it stops and returns the partial item + error.
 func Quarantine(root, timestamp string, as model.Assessment) (model.ManifestItem, error) {
@@ -145,7 +145,7 @@ func Quarantine(root, timestamp string, as model.Assessment) (model.ManifestItem
 			item.Actions = append(item.Actions, a)
 		case model.ActionBootout:
 			// bootout operates on a launchd label, not a path; refuse Apple system
-			// labels as defense-in-depth (ABORT C1/C2 — the protected-path check can't
+			// labels as defense-in-depth (ABORT C1/C2: the protected-path check can't
 			// apply to a non-path target).
 			if strings.HasPrefix(a.From, "com.apple.") {
 				return item, fmt.Errorf("refusing to bootout an Apple system launch item: %s", a.From)

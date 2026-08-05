@@ -46,7 +46,7 @@ func TestInterceptedMessage_Seq0OmitsMessageFields(t *testing.T) {
 		Seq:           0,
 		At:            "2026-07-17T12:34:56Z",
 		Status:        FlowOpaque,
-		Reason:        "h2-only client — bypassed",
+		Reason:        "h2-only client: bypassed",
 	}
 	b, err := json.Marshal(m)
 	if err != nil {

@@ -23,7 +23,7 @@ type reader struct {
 
 // socketSink serves published messages to connected console readers over a unix socket as JSONL. A slow
 // or absent reader NEVER blocks the proxy: each reader has a bounded channel and a full buffer drops
-// the message (counted) rather than stalling — the live view is best-effort by design.
+// the message (counted) rather than stalling; the live view is best-effort by design.
 type socketSink struct {
 	ln      net.Listener
 	mu      sync.Mutex
@@ -93,13 +93,13 @@ func (s *socketSink) Publish(msg model.InterceptedMessage) error {
 		select {
 		case r.ch <- msg:
 		default:
-			s.dropped++ // reader too slow — drop, don't block the proxy
+			s.dropped++ // reader too slow; drop, don't block the proxy
 		}
 	}
 	return nil
 }
 
-// Dropped is how many messages were dropped for slow readers — surfaced so the drop isn't silent
+// Dropped is how many messages were dropped for slow readers, surfaced so the drop isn't silent
 // (Rule 14 / Audit cp-p2d F-4); the daemon/console can report it.
 func (s *socketSink) Dropped() int {
 	s.mu.Lock()

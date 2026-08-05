@@ -30,7 +30,7 @@ func tierColor(r model.Recommendation) tcell.Color {
 	}
 }
 
-// view draws the whole UI to the screen. tcell I/O only — no state changes.
+// view draws the whole UI to the screen. tcell I/O only, no state changes.
 func view(m Model, s tcell.Screen) {
 	s.Clear()
 	w, h := s.Size()
@@ -40,7 +40,7 @@ func view(m Model, s tcell.Screen) {
 	// Header: name + read-only badge.
 	x := drawText(s, 2, 0, def.Foreground(colAccent).Bold(true), "CounterSpy")
 	if m.ReadOnly {
-		drawText(s, x+2, 0, def.Foreground(colWarn), "TRIAGE ONLY — snapshot, quarantine disabled")
+		drawText(s, x+2, 0, def.Foreground(colWarn), "TRIAGE ONLY: snapshot, quarantine disabled")
 	}
 	// Counts, chained so widths never collide.
 	x = drawText(s, 2, 1, def.Foreground(colQuarantine), fmt.Sprintf("%c %d Quarantine", mark.GlyphQuarantine, q))
@@ -53,12 +53,12 @@ func view(m Model, s tcell.Screen) {
 		row++
 	}
 	if q > 0 && m.doneCount(model.RecQuarantine) >= q {
-		drawText(s, 2, row, def.Foreground(colAccent), "✓ all Quarantine-tier items handled — review Investigate, or rescan")
+		drawText(s, 2, row, def.Foreground(colAccent), "✓ all Quarantine-tier items handled: review Investigate, or rescan")
 		row++
 	}
 
 	if w < 24 {
-		drawText(s, 0, row, def.Foreground(colWarn), truncate("terminal too narrow — resize", w))
+		drawText(s, 0, row, def.Foreground(colWarn), truncate("terminal too narrow: resize", w))
 		return
 	}
 	// Section rules give the view the same pane structure as the exfil view: a rule closes the
@@ -74,7 +74,7 @@ func view(m Model, s tcell.Screen) {
 	listTop := labelRow + 2
 	contentBottom := h - 4
 	if contentBottom < listTop {
-		drawText(s, 2, listTop-1, def.Foreground(colWarn), "terminal too small — resize")
+		drawText(s, 2, listTop-1, def.Foreground(colWarn), "terminal too small: resize")
 		return
 	}
 	drawHRule(s, h-3, w) // content | footer
@@ -96,7 +96,7 @@ func view(m Model, s tcell.Screen) {
 	if len(vis) == 0 {
 		msg := "no findings match"
 		if m.Filter == "" {
-			msg = "nothing to report — the scan surfaced no findings"
+			msg = "nothing to report: the scan surfaced no findings"
 		}
 		drawText(s, 2, listTop, def.Foreground(colDim), msg)
 	} else if m.Selected < len(vis) {
@@ -130,7 +130,7 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 	if a.Recommendation == model.RecMonitor {
 		fg = concernColor(a.Concern)
 	}
-	// A reviewed ("leave it") finding recedes — unless its state changed since review, which re-asserts
+	// A reviewed ("leave it") finding recedes, unless its state changed since review, which re-asserts
 	// it in amber so newly-surfaced concern isn't silently masked (issue #4). Quarantined wins (dim).
 	if acked {
 		fg = colDim
@@ -159,7 +159,7 @@ func drawListRow(s tcell.Screen, y, split int, selected, done bool, a model.Asse
 	case done:
 		name = "✓ " + name // quarantined this session
 	case acked && ackChanged:
-		name = "⟳ " + name // reviewed, but the finding changed — look again
+		name = "⟳ " + name // reviewed, but the finding changed; look again
 	case acked:
 		name = "☑ " + name // reviewed · leave it
 	}
@@ -291,7 +291,7 @@ func drawModal(s tcell.Screen, a model.Assessment) {
 	x0, y0 := (w-bw)/2, (h-bh)/2
 	box := drawBox(s, x0, y0, bw, bh)
 	drawText(s, x0+2, y0+1, box.Bold(true), truncate("Quarantine "+a.Subject.Display()+"?", bw-4))
-	drawText(s, x0+2, y0+2, box.Foreground(colAccent), truncate("↺ reversible — moves, never deletes; undo with restore", bw-4))
+	drawText(s, x0+2, y0+2, box.Foreground(colAccent), truncate("↺ reversible: moves, never deletes; undo with restore", bw-4))
 	drawText(s, x0+2, y0+4, box.Foreground(colDim), "will run:")
 	for i, p := range plan {
 		drawText(s, x0+2, y0+5+i, box.Foreground(tcell.NewRGBColor(159, 217, 194)), truncate(p, bw-4))
@@ -312,7 +312,7 @@ func planLines(a model.Assessment) []string {
 		}
 	}
 	if len(out) == 0 {
-		out = []string{"(no on-disk artifact — nothing to move)"}
+		out = []string{"(no on-disk artifact, nothing to move)"}
 	}
 	return out
 }

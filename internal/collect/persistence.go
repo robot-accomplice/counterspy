@@ -20,7 +20,7 @@ const (
 	wMissingTgt = 2
 	// inline interpreter code in a LaunchAgent is a recognised LOLBin persistence technique
 	// (`osascript -e` / `python3 -c`): the payload never touches disk and argv[0] is an Apple-signed
-	// interpreter, so the entry reads trusted. Weighted to reach ShowThreshold (5) on its own — a
+	// interpreter, so the entry reads trusted. Weighted to reach ShowThreshold (5) on its own: a
 	// stealth inline payload is at least as notable as a plain unsigned binary (wUnsigned=3), and at
 	// 2 the persistence-only "weak" gate (interpret.recommend) would bury the flagship case at
 	// Monitor-tier (cp-t7 Audit F-2). Weak-category cap still prevents auto-Quarantine (T-7).
@@ -42,10 +42,10 @@ var inlineInterpreters = map[string][]string{
 	"php":  {"-r"},
 }
 
-// isTrustedShim reports whether a resolved target is itself an Apple-signed exec shim — an
+// isTrustedShim reports whether a resolved target is itself an Apple-signed exec shim: an
 // interpreter or `env`. When pickTarget resolves to one of these, no real on-disk payload was
 // found, so the shim must NOT become Subject.Path: codesign would attach the shim's trusted Apple
-// authority to attacker-supplied code (the whitewash T-7 closes — for the inline-flag shape AND the
+// authority to attacker-supplied code (the whitewash T-7 closes: for the inline-flag shape AND the
 // relative/no-payload shape, cp-t7 Audit F-1).
 func isTrustedShim(path string) bool {
 	if path == "" {
@@ -77,7 +77,7 @@ func stripEnv(args []string) []string {
 
 // inlineInterpreterPayload reports whether args (after stripping an env wrapper) invoke a known
 // interpreter with its inline-code flag, returning the interpreter basename and the inline source.
-// Persistence scoring treats the source — not the trusted interpreter — as the payload (T-7).
+// Persistence scoring treats the source (not the trusted interpreter) as the payload (T-7).
 func inlineInterpreterPayload(args []string) (interp, src string, ok bool) {
 	args = stripEnv(args)
 	if len(args) == 0 {
@@ -94,7 +94,7 @@ func inlineInterpreterPayload(args []string) (interp, src string, ok bool) {
 				if i+1 < len(args) {
 					return interp, args[i+1], true
 				}
-				return interp, "", true // flag present but no following token — still inline execution
+				return interp, "", true // flag present but no following token; still inline execution
 			}
 		}
 	}
@@ -112,7 +112,7 @@ func ParsePersistencePlist(xmlBytes []byte, path string) ([]model.Evidence, erro
 
 	// Interpreter-wrapped persistence (T-7): argv[0] (or an env wrapper) is an Apple-signed shim, so
 	// keeping it as Subject.Path would let codesign whitewash the entry as trusted. Never let a
-	// trusted shim be the subject — fall back to the plist — whether the shim leaked in via an
+	// trusted shim be the subject (fall back to the plist) whether the shim leaked in via an
 	// inline-code flag OR because pickTarget found no real on-disk payload (isTrustedShim).
 	interp, src, inline := inlineInterpreterPayload(args)
 	if target == "" || inline || isTrustedShim(target) {
@@ -142,7 +142,7 @@ func ParsePersistencePlist(xmlBytes []byte, path string) ([]model.Evidence, erro
 
 // extractLabelAndTarget scans the xml1 dict for Label and the persistence target.
 // It distinguishes <key> from <string> elements (so a string VALUE equal to "Label"
-// cannot poison key detection — cp-5 F-3), and picks the target as the last
+// cannot poison key detection; cp-5 F-3), and picks the target as the last
 // absolute-path ProgramArguments entry so interpreter wrappers like
 // `/usr/bin/env <payload>` resolve to the real payload, not the wrapper (cp-5 F-1).
 func extractLabelAndTarget(b []byte) (label, target string) {
@@ -151,7 +151,7 @@ func extractLabelAndTarget(b []byte) (label, target string) {
 }
 
 // extractLabelAndArgs scans the xml1 dict for the Label and the raw ProgramArguments, so callers
-// can both pick a payload target and inspect the argv (interpreter-awareness — T-7).
+// can both pick a payload target and inspect the argv (interpreter-awareness: T-7).
 func extractLabelAndArgs(b []byte) (label string, args []string) {
 	dec := xml.NewDecoder(strings.NewReader(string(b)))
 	var curElem, pendingKey string
@@ -216,7 +216,7 @@ func statExists(p string) bool {
 }
 
 // CollectPersistence walks the launchd search paths and returns evidence.
-// I/O edge — exercised via integration, not unit tests.
+// I/O edge; exercised via integration, not unit tests.
 func CollectPersistence() ([]model.Evidence, error) {
 	// /System/Library is OBSERVED for visibility (§6); the actor still never ACTS
 	// on it (§9). Observing != acting.
@@ -238,7 +238,7 @@ func CollectPersistence() ([]model.Evidence, error) {
 		for _, e := range entries {
 			p := filepath.Join(d, e.Name())
 			xmlBytes, err := execOutput(plutilBin, "-convert", "xml1", "-o", "-", p)
-			if err != nil || len(xmlBytes) > 2<<20 { // cap at 2 MiB — skip plist bombs (ABORT C1)
+			if err != nil || len(xmlBytes) > 2<<20 { // cap at 2 MiB: skip plist bombs (ABORT C1)
 				continue
 			}
 			ev, _ := ParsePersistencePlist(xmlBytes, p)

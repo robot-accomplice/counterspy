@@ -1,6 +1,6 @@
 // Package ca is the local, single-purpose, reversible Certificate Authority the TLS-intercept proxy
 // uses to mint per-SNI leaf certs on the fly (Phase 2). It is all stdlib crypto and has no OS
-// dependency — installing the CA as trusted (the invasive, consented step) lives in trust_*.go.
+// dependency; installing the CA as trusted (the invasive, consented step) lives in trust_*.go.
 package ca
 
 import (
@@ -20,7 +20,7 @@ import (
 )
 
 // defaultLeafCap bounds the minted-leaf cache. The SNI is attacker/app-controlled, so an unbounded
-// cache is a memory-DoS vector for a long-running proxy (a flood of distinct SNIs) — evict oldest.
+// cache is a memory-DoS vector for a long-running proxy (a flood of distinct SNIs); evict oldest.
 const defaultLeafCap = 1024
 
 // leafRenewBefore re-mints a cached leaf this long before it expires, so a leaf minted early in a
@@ -121,7 +121,7 @@ func (c *CA) PEM() (certPEM, keyPEM []byte, err error) {
 	return c.certPEM, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd}), nil
 }
 
-// normalizeHost trims the host and strips an IPv6 zone id (so net.ParseIP recognizes the address —
+// normalizeHost trims the host and strips an IPv6 zone id (so net.ParseIP recognizes the address;
 // otherwise "fe80::1%en0" would fall through to a DNS SAN and never match the real IP). ok is false
 // for an empty/whitespace host, which is not something we should mint a (useless) cert for.
 func normalizeHost(host string) (string, bool) {
@@ -137,7 +137,7 @@ func normalizeHost(host string) (string, bool) {
 	return h, true
 }
 
-// LeafFor mints (and caches) a server leaf for host — a DNS name or a bare IP — signed by the CA, so
+// LeafFor mints (and caches) a server leaf for host (a DNS name or a bare IP) signed by the CA, so
 // the proxy can present it to a client terminating TLS to that destination. The presented chain is
 // [leaf, CA] so a client trusting the CA validates it. The cache is bounded (oldest-evicted) and
 // expiry-aware (a near-expired leaf is re-minted). Keygen happens OUTSIDE the lock so concurrent

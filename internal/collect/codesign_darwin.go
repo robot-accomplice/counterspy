@@ -38,7 +38,7 @@ static int native_sig(const char* path, char* auth, int authLen, int* notarized)
 		SecRequirementRef notReq = NULL;
 		if (SecRequirementCreateWithString(CFSTR("notarized"), kSecCSDefaultFlags, &notReq) == errSecSuccess && notReq) {
 			// kSecCSNoNetworkAccess forbids any network fetch, so this only accepts a
-			// STAPLED ticket — enforcing "offline" by construction (an un-stapled binary
+			// STAPLED ticket, enforcing "offline" by construction (an un-stapled binary
 			// reads not-notarized → ◇, never a slow online lookup). Keeps #25's perf goal.
 			if (SecStaticCodeCheckValidityWithErrors(code, kSecCSDoNotValidateResources | kSecCSNoNetworkAccess, notReq, NULL) == errSecSuccess) {
 				*notarized = 1;
@@ -88,7 +88,7 @@ func init() { sigProbe = nativeSig }
 
 // nativeSig implements sigProbe via Security.framework. It returns the verify-error string /
 // accepted / authority in the exact shape ParseCodesign consumes, so the downstream evidence
-// is identical to the old codesign/spctl shell-out — just in-process and ~1000× faster.
+// is identical to the old codesign/spctl shell-out; just in-process and ~1000× faster.
 func nativeSig(path string) (verifyErr string, accepted bool, authority string, notarized bool) {
 	cp := C.CString(path)
 	defer C.free(unsafe.Pointer(cp))
@@ -100,7 +100,7 @@ func nativeSig(path string) (verifyErr string, accepted bool, authority string, 
 	case 2:
 		return "certificate revoked", false, "", false
 	case 3:
-		return "", false, "", false // signed but invalid (tampered/expired) — signed, no trusted authority
+		return "", false, "", false // signed but invalid (tampered/expired): signed, no trusted authority
 	case 1, -1:
 		return "code object is not signed at all", false, "", false
 	default:

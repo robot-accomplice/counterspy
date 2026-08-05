@@ -14,7 +14,7 @@ type Cmd struct {
 
 // update is the pure state transition: a key event → new Model + effects. No I/O.
 func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
-	// Ctrl-C quits from ANY mode — checked first so a focus overlay can't trap it
+	// Ctrl-C quits from ANY mode; checked first so a focus overlay can't trap it
 	// (cp-tui-1 QA F-1).
 	if key == tcell.KeyCtrlC {
 		return m, []Cmd{{Op: "quit"}}
@@ -54,7 +54,7 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 		return m, nil
 	}
 
-	v := m.visible() // computed once per event (was 2–3× per keystroke)
+	v := m.visible() // computed once per event (was 2-3× per keystroke)
 	n := len(v)
 	switch key {
 	case tcell.KeyDown:
@@ -79,7 +79,7 @@ func update(m Model, key tcell.Key, r rune) (Model, []Cmd) {
 				break
 			}
 			if m.ReadOnly {
-				m.Toast = "quarantine disabled for --from snapshots — run a live scan to act"
+				m.Toast = "quarantine disabled for --from snapshots. Run a live scan to act"
 				break
 			}
 			m.Pending = v[m.Selected]

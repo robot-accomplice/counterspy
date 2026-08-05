@@ -15,7 +15,7 @@ const (
 	maxFieldLen = 64 << 10 // cap decrypted text fields from an untrusted source before display/re-publish
 )
 
-// removeIfSocket removes path only if it is a stale unix socket — never a regular file (so we don't
+// removeIfSocket removes path only if it is a stale unix socket, never a regular file (so we don't
 // clobber something at a mistyped path).
 func removeIfSocket(path string) error {
 	fi, err := os.Lstat(path)
@@ -30,7 +30,7 @@ func removeIfSocket(path string) error {
 
 // scanMessages reads newline-delimited JSON messages from r, size-bounding each line (no OOM on a
 // giant record) and skipping a malformed one, calling fn with each sanitized message. Shared by the
-// socket and log readers — both consume untrusted input (anyone who can write the socket/log).
+// socket and log readers; both consume untrusted input (anyone who can write the socket/log).
 func scanMessages(r io.Reader, fn func(model.InterceptedMessage)) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxFlowLine)
@@ -51,13 +51,13 @@ func scanMessages(r io.Reader, fn func(model.InterceptedMessage)) error {
 			mismatches++
 			if !mismatchNoticed {
 				mismatchNoticed = true
-				fn(synthesizeVersionError(fmt.Sprintf("unsupported record version (got %d, want %d) — is the daemon the same build?", msg.SchemaVersion, model.InterceptMessageSchemaVersion)))
+				fn(synthesizeVersionError(fmt.Sprintf("unsupported record version (got %d, want %d): is the daemon the same build?", msg.SchemaVersion, model.InterceptMessageSchemaVersion)))
 			}
 			continue
 		}
 		fn(sanitizeMessage(msg))
 	}
-	return sc.Err() // bufio.ErrTooLong if a line exceeded the cap — bounded, not an OOM
+	return sc.Err() // bufio.ErrTooLong if a line exceeded the cap, bounded, not an OOM
 }
 
 // synthesizeVersionError creates a single stream-level error event for the first malformed or

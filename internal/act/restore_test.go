@@ -63,7 +63,7 @@ func TestSafeDest_RejectsProtectedRestoreDestination(t *testing.T) {
 }
 
 // safeDest must allow a restore whose original parent directory no longer
-// exists (e.g. it was cleaned up after quarantine) — MkdirAll recreates it
+// exists (e.g. it was cleaned up after quarantine). MkdirAll recreates it
 // fresh rather than the restore being refused.
 func TestRestore_RecreatesRemovedParentDir(t *testing.T) {
 	tmp := tmpDir(t)
@@ -90,7 +90,7 @@ func TestRestore_RecreatesRemovedParentDir(t *testing.T) {
 }
 
 // safeDest must refuse a restore whose original parent directory has been
-// replaced by a symlink since quarantine time — the same TOCTOU concern as the
+// replaced by a symlink since quarantine time, the same TOCTOU concern as the
 // quarantine-side symlinked-parent check, but for the restore path.
 func TestSafeDest_RejectsSymlinkedRestoreParent(t *testing.T) {
 	tmp := tmpDir(t)

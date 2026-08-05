@@ -19,7 +19,7 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	m.procs = func() map[int]*collect.Proc {
 		return map[int]*collect.Proc{4821: {PID: 4821, PPID: 1, Cmd: "/Users/jon/.hidden/daemon serve"}}
 	}
-	// exePaths resolves the REAL executable path (spaces intact) — the fix for the
+	// exePaths resolves the REAL executable path (spaces intact), the fix for the
 	// "Application" mislabel. A spaced path must yield its true base name, not "Application".
 	m.exePaths = func() map[int]string {
 		return map[int]string{4821: "/Users/jon/Library/Application Support/Foo/foo"}
@@ -28,7 +28,7 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 	m.capsOf = func(path string) []string { return []string{"screen", "keystrokes"} }
 
 	m.Sample()           // first tick: establishes the baseline, rate 0
-	groups := m.Sample() // second tick: cur==prev cumulative here, so rate 0 — assert structure
+	groups := m.Sample() // second tick: cur==prev cumulative here, so rate 0; assert structure
 	if len(groups) != 1 || groups[0].App != "foo" {
 		t.Fatalf("expected one group named 'foo' (spaced path resolved), got %+v", groups)
 	}
@@ -54,7 +54,7 @@ func TestMonitor_SampleAggregatesAndScores(t *testing.T) {
 func TestMonitor_ExcludesSelfByPath(t *testing.T) {
 	m := New(2)
 	// Exclude by the binary's PATH, not pid: the intercept DAEMON that emits the relay traffic is a
-	// SEPARATE process (pid 4821 here) from the console — a pid-based filter never matched it.
+	// SEPARATE process (pid 4821 here) from the console; a pid-based filter never matched it.
 	m.excludePath = "/usr/local/bin/counterspy"
 	m.runNettop = func() []byte {
 		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,counterspy.4821,0,900000\n15:04:05.0,app.4822,0,300000\n")
@@ -94,7 +94,7 @@ func TestMonitor_ExcludesSelfByPath(t *testing.T) {
 
 // #9: attacker-influenced identity strings (app name / path / ancestry from a crafted argv/exe
 // path) are run through Clean at the source, so an ANSI/newline payload can't reach storage or the
-// terminal — defense-in-depth over the JSON encoder and the TUI's render-time Clean.
+// terminal, defense-in-depth over the JSON encoder and the TUI's render-time Clean.
 func TestMonitor_CleansAttackerIdentityStrings(t *testing.T) {
 	m := New(2)
 	m.runNettop = func() []byte {
@@ -428,7 +428,7 @@ func TestMonitor_InRingsPruneDeadKeys(t *testing.T) {
 }
 
 // The app-level spark maps must be bounded like the per-PID/conn rings: an app gone this tick is
-// pruned from both m.spark and m.sparkIn (T-14 — otherwise they grow per distinct app-path ever seen).
+// pruned from both m.spark and m.sparkIn (T-14: otherwise they grow per distinct app-path ever seen).
 func TestMonitor_AppSparkPrunesDeadApps(t *testing.T) {
 	m := New(1)
 	present := true

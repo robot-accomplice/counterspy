@@ -14,7 +14,7 @@ import (
 
 // Assess annotates each finding with a category, verdict, and recommendation.
 // `running` is the set of filesystem paths referenced by live processes (from
-// collect.CollectRunningPaths); it feeds liveness only — Assess itself does no I/O,
+// collect.CollectRunningPaths); it feeds liveness only. Assess itself does no I/O,
 // so verdicts stay reproducible from (findings, running) alone (Rule 6). Pass nil
 // when the run-state is unknown; findings then read as armed/blank, never active.
 func Assess(findings []model.Finding, running map[string]bool) []model.Assessment {
@@ -35,17 +35,17 @@ func Assess(findings []model.Finding, running map[string]bool) []model.Assessmen
 	return out
 }
 
-// livenessState derives the finding's run-state (issue #23). It is the single source of liveness —
-// both scoring (recommend) and display (mark.Classify) read the value it stores on the Assessment,
+// livenessState derives the finding's run-state (issue #23). It is the single source of liveness.
+// Both scoring (recommend) and display (mark.Classify) read the value it stores on the Assessment,
 // so the two can never disagree. Precedence:
-//   - dormant — a persistence remnant that CANNOT execute: its target is missing/renamed, or its
+//   - dormant. A persistence remnant that CANNOT execute: its target is missing/renamed, or its
 //     plist is a disabled ".bak" variant (the com.ironclad.agent case). Caps scoring at Monitor.
-//   - active — a live process, or a persistence target found in `running`.
-//   - armed  — a persistence target that exists (extracted, not missing) but isn't running: loaded,
-//     will fire on its trigger. NOT dormant — it can still execute.
-//   - ""     — no process/persistence run-state (e.g. a bare file or lone TCC grant), OR a
+//   - active. A live process, or a persistence target found in `running`.
+//   - armed. A persistence target that exists (extracted, not missing) but isn't running: loaded,
+//     will fire on its trigger. NOT dormant. It can still execute.
+//   - "". No process/persistence run-state (e.g. a bare file or lone TCC grant), OR a
 //     persistence finding whose target couldn't be extracted (an unknown target must not read as a
-//     misleading dormant/armed — swarm cp-T2 F-1).
+//     misleading dormant/armed; swarm cp-T2 F-1).
 func livenessState(f model.Finding, running map[string]bool) string {
 	var hasProc, targetKnown, targetRunning bool
 	for _, e := range f.Evidence {
@@ -75,9 +75,9 @@ func livenessState(f model.Finding, running map[string]bool) string {
 }
 
 // concernOf derives the coarse concern band (issue #4) from trust × location × behavior. It exists to
-// make the Findings view legible — NOT to change scoring — so the large tail of Apple-signed system
+// make the Findings view legible (NOT to change scoring) so the large tail of Apple-signed system
 // code (~300 Monitor rows) recedes to Minimal and the few non-Apple/unsigned/actively-networking items
-// stand out. Apple-namespace code is the floor (Minimal) unless it is somehow unsigned (defensive —
+// stand out. Apple-namespace code is the floor (Minimal) unless it is somehow unsigned (defensive:
 // real Apple code never is). Everything else accrues a small additive score, banded like egress concern.
 func concernOf(f model.Finding, s signals) model.ConcernLevel {
 	if isAppleNamespace(f) && !s.unsigned {
@@ -125,7 +125,7 @@ func concernBand(score int) model.ConcernLevel {
 	}
 }
 
-// isAppleNamespace reports whether a finding is first-party Apple code — a com.apple.* bundle label,
+// isAppleNamespace reports whether a finding is first-party Apple code: a com.apple.* bundle label,
 // a /System path, or a codesign authority Gatekeeper accepted as Apple's. This is the recede-to-floor
 // signal; it is deliberately Apple-only (a NOTARIZED third party is trusted but not floored, since
 // notarized spyware exists).
@@ -221,7 +221,7 @@ func signalsOf(f model.Finding) signals {
 func categorize(s signals) string {
 	permissive := s.screen || s.fullDisk || s.inputMon || s.accessibility
 	// A lone permission grant on otherwise-quiet (often legitimately-signed) software
-	// is NOT spyware — only call it that when corroborated by another signal, else it
+	// is NOT spyware. Only call it that when corroborated by another signal, else it
 	// reads as a scary false positive and erodes trust (cp-9 Audit F-1).
 	corroborated := s.unsigned || s.persistence || s.listener || s.connection || len(dedupeGrants(s.tccGrants)) >= 2
 	switch {
@@ -267,8 +267,8 @@ func verdict(f model.Finding, s signals) string {
 // recommend maps a finding to an action. C3 hardening (ABORT v0.1.0-rc2):
 //   - a tripwire always Quarantines (and tripwires require unsigned evidence, so signed
 //     software never reaches Quarantine through this path);
-//   - Gatekeeper-accepted signed software is never auto-Quarantined — capped at
-//     Investigate — so the tool can't be weaponized to disable legit signed apps/EDR;
+//   - Gatekeeper-accepted signed software is never auto-Quarantined (capped at
+//     Investigate) so the tool can't be weaponized to disable legit signed apps/EDR;
 //   - "weak" categories (persistence-only / permission-grant / unknown) never
 //     auto-Quarantine without a tripwire, softening the score-only escalation that
 //     flagged benign unsigned dev tools.
@@ -276,7 +276,7 @@ func recommend(f model.Finding, s signals, cat string, liveness string) model.Re
 	if f.Tripwire != "" {
 		return model.RecQuarantine
 	}
-	// A dormant remnant (disabled .bak or missing target) cannot execute — cap it at Monitor so a
+	// A dormant remnant (disabled .bak or missing target) cannot execute. Cap it at Monitor so a
 	// dead artifact never reads as urgently as a live, loaded one (issue #23). A tripwire still wins.
 	if liveness == model.LivenessDormant {
 		return model.RecMonitor
@@ -290,7 +290,7 @@ func recommend(f model.Finding, s signals, cat string, liveness string) model.Re
 	}
 	if weak {
 		// Escape hatch: overwhelming accumulated signal on an UNSIGNED weak-category
-		// subject still Quarantines — otherwise a high-scoring unsigned persistent
+		// subject still Quarantines. Otherwise a high-scoring unsigned persistent
 		// infostealer would be capped at Investigate forever (ABORT rc3 C3 false-neg).
 		if f.Score >= score.CriticalTier {
 			return model.RecQuarantine

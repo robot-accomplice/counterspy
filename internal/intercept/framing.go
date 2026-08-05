@@ -273,7 +273,7 @@ func (f *framingReader) readChunkedBody() ([]byte, bool, string, error) {
 			return body, true, "connection closed", err
 		}
 		// Count the chunk size line bytes (the newline was consumed by readLine; add 1 or 2
-		// for the terminator — approximate is fine for maxMessage).
+		// for the terminator: approximate is fine for maxMessage).
 		f.consumed += len(line) + 1
 
 		// Chunk size is before the first ';'. RFC 7230 §4.1.

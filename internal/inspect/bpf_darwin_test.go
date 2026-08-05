@@ -13,7 +13,7 @@ import (
 )
 
 // bpfRecord frames one captured frame as the kernel would: a bpf_hdr (Hdrlen/Caplen set) followed
-// by the frame bytes, padded to the next BPF_ALIGNMENT boundary. Layout-agnostic — it writes the
+// by the frame bytes, padded to the next BPF_ALIGNMENT boundary. Layout-agnostic; it writes the
 // real unix.BpfHdr so the test doesn't hardcode darwin offsets.
 func bpfRecord(frame []byte) []byte {
 	hdrlen := int(unix.SizeofBpfHdr)
@@ -27,7 +27,7 @@ func bpfRecord(frame []byte) []byte {
 }
 
 // bpfRecordHdrlen frames a record with an explicit bh_hdrlen (the data offset), mirroring how
-// macOS varies it per datalink to align the payload — 18 for Ethernet, not the struct's padded 20.
+// macOS varies it per datalink to align the payload: 18 for Ethernet, not the struct's padded 20.
 func bpfRecordHdrlen(frame []byte, hdrlen int) []byte {
 	buf := make([]byte, bpfWordAlign(hdrlen+len(frame)))
 	h := (*unix.BpfHdr)(unsafe.Pointer(&buf[0]))
@@ -39,7 +39,7 @@ func bpfRecordHdrlen(frame []byte, hdrlen int) []byte {
 }
 
 // macOS writes bh_hdrlen=18 for Ethernet (payload-aligned), which is LESS than SizeofBpfHdr (20).
-// The walk must accept it, not reject it as "too small" — the live-capture EFAULT-free-but-empty bug.
+// The walk must accept it, not reject it as "too small": the live-capture EFAULT-free-but-empty bug.
 func TestParseBPFRecords_EthernetHdrlen18(t *testing.T) {
 	ip := ipv4TCP(netip.MustParseAddrPort("10.0.0.2:5"), netip.MustParseAddrPort("3.3.3.3:443"), []byte("x"))
 	buf := bpfRecordHdrlen(ethFrame(0x0800, ip), 18) // en0's real header length
@@ -80,7 +80,7 @@ func TestParseBPFRecords_EthernetStripAndDropNonIP(t *testing.T) {
 	}
 }
 
-// Hostile header fields must terminate the walk safely — no panic, no over-read.
+// Hostile header fields must terminate the walk safely: no panic, no over-read.
 func TestParseBPFRecords_HostileHeadersDontPanic(t *testing.T) {
 	hdrlen := int(unix.SizeofBpfHdr)
 

@@ -1,5 +1,5 @@
 // Package publish carries decrypted message events from the `intercept` proxy to the
-// `console` viewer, over a live unix socket and/or a rotating log file — the output(s) chosen
+// `console` viewer, over a live unix socket and/or a rotating log file, the output(s) chosen
 // at launch. A message's content is already decoded + Redact-masked by the proxy before it
 // reaches any sink here.
 package publish

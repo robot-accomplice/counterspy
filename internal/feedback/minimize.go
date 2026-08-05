@@ -11,7 +11,7 @@ import (
 )
 
 // Minimize scrubs an Assessment into an anonymous fingerprint + label. It leaves Nonce
-// empty and Extra nil — Capture fills those. Deterministic; no I/O.
+// empty and Extra nil; Capture fills those. Deterministic; no I/O.
 func Minimize(a model.Assessment, label string) model.FeedbackRecord {
 	return model.FeedbackRecord{
 		Schema:         model.FeedbackSchema,
@@ -115,7 +115,7 @@ func codesignClass(a model.Assessment) string {
 
 // publicIdentity returns the app identity ONLY when it is recognizably public:
 // an Apple-namespace bundle ID, or a Gatekeeper-accepted binary (signed AND authority fact present).
-// Everything else returns "" — a private identifier is never published without consent.
+// Everything else returns ""; a private identifier is never published without consent.
 func publicIdentity(a model.Assessment) string {
 	label := a.Subject.Label
 	if label == "" {

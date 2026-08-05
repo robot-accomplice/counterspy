@@ -26,7 +26,7 @@ import (
 )
 
 // The usual ways a user asks for help must all work and exit 0 (help is success), and the
-// help must actually advertise the tool, its version, and every command — including how to
+// help must actually advertise the tool, its version, and every command, including how to
 // reach the interactive UI (tui) vs the plain CLI (scan).
 func TestRun_HelpFlags(t *testing.T) {
 	for _, arg := range []string{"help", "-h", "--help", "-?"} {
@@ -94,7 +94,7 @@ func TestRun_ScanJSONDryEmitsSnapshot(t *testing.T) {
 	}
 }
 
-// A PID-only process finding has no on-disk artifact — no quarantine action (matches
+// A PID-only process finding has no on-disk artifact, no quarantine action (matches
 // the actor: nothing to move, and we never offer an irreversible kill).
 // fakeEgressSampler stands in for egress.Monitor in tests so the report/JSON path never
 // shells out to nettop/lsof (those require sudo and aren't present in CI).
@@ -165,7 +165,7 @@ func TestLoadSnapshot_WrappedCarriesGaps(t *testing.T) {
 	p := filepath.Join(dir, "snap.json")
 	b, err := report.RenderJSON(
 		[]model.Assessment{{Finding: model.Finding{Subject: model.Subject{Label: "x"}}, Recommendation: model.RecMonitor}},
-		[]string{"TCC privacy-grant signal unavailable — run with sudo to include it"})
+		[]string{"TCC privacy-grant signal unavailable: run with sudo to include it"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestQuarantineLoop_MonitorRecommendationSkippedSilently(t *testing.T) {
 }
 
 func TestQuarantineLoop_NoActionsSkipped(t *testing.T) {
-	// A bare process finding (no label, no path) plans no actions — nothing to prompt for.
+	// A bare process finding (no label, no path) plans no actions; nothing to prompt for.
 	as := []model.Assessment{{Finding: model.Finding{Subject: model.Subject{PID: 123}}, Recommendation: model.RecQuarantine}}
 	fq := &fakeQuarantiner{}
 	var out bytes.Buffer
@@ -648,7 +648,7 @@ func TestRun_ScanDispatch(t *testing.T) {
 }
 
 func TestRunScan_InteractiveDryEmptyAssessments(t *testing.T) {
-	// --dry means no evidence is collected, so quarantineLoop iterates zero assessments —
+	// --dry means no evidence is collected, so quarantineLoop iterates zero assessments;
 	// this exercises the runScan -> quarantineLoop wiring without touching stdin.
 	var buf bytes.Buffer
 	if code := run([]string{"scan", "--dry", "--interactive"}, &buf); code != 0 {
@@ -702,7 +702,7 @@ func TestRunFeedback_SubmitAsksAndSends(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// runFeedback submit always asks via os.Stdin — feed it a "y" through a real pipe
+	// runFeedback submit always asks via os.Stdin; feed it a "y" through a real pipe
 	// (os.Stdin is just a package var, safe to swap for the duration of the test).
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -728,7 +728,7 @@ func TestRunFeedback_SubmitAsksAndSends(t *testing.T) {
 // --- runTUI / runEgressTUI: screen seam (newScreen) + isTerminal seam --------
 
 // keyInjectingScreen wraps a real tcell.SimulationScreen so its Init() injects a key
-// event immediately after the real Init sets up the event channel — avoiding a race
+// event immediately after the real Init sets up the event channel, avoiding a race
 // against production code's own screen.Init() call (which would otherwise discard any
 // event injected beforehand, since Init() replaces the event channel).
 type keyInjectingScreen struct {
@@ -770,7 +770,7 @@ func TestRunTUI_NonTerminalRefuses(t *testing.T) {
 	isTerminal = func(*os.File) bool { return false }
 
 	// --from a snapshot: the terminal check runs after evidence is gathered, and a live
-	// scan would shell out to the real collectors — use the snapshot path to stay hermetic.
+	// scan would shell out to the real collectors; use the snapshot path to stay hermetic.
 	var buf bytes.Buffer
 	if code := runConsole([]string{"--from", "testdata/tui_snapshot.json"}, &buf); code != 2 {
 		t.Fatalf("exit %d, want 2", code)
@@ -859,7 +859,7 @@ func TestScanSpinner_NoColorDropsTint(t *testing.T) {
 	}
 }
 
-// collectWithSpinner runs the collectors (mocked here — no shelling out), surfaces gaps, and
+// collectWithSpinner runs the collectors (mocked here, no shelling out), surfaces gaps, and
 // works on both the tty (spinner) and non-tty paths.
 func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
 	origCol := evidenceCollectors
@@ -889,7 +889,7 @@ func TestCollectWithSpinner_MockedCollectors(t *testing.T) {
 }
 
 // Task 6 / cp-T5 + #23: interpret derives run-state (against the live-process set) and livenessFor
-// maps it to a glyph. A persistence target NOT in the running set is armed ◐ (loaded, will fire —
+// maps it to a glyph. A persistence target NOT in the running set is armed ◐ (loaded, will fire,
 // not dormant); the same target running is active ▸.
 func TestLivenessForMapsRunState(t *testing.T) {
 	const target = "/opt/agent-xyz"
@@ -926,12 +926,12 @@ func TestStartNameResolver_Gating(t *testing.T) {
 	mon := egress.New(0.3)
 	stop := startNameResolver(mon)
 	// A group built from a conn to a named IP resolves once the observer cached it; here we assert the
-	// resolver is INSTALLED by feeding the cache indirectly is out of scope — the wiring + no-panic +
+	// resolver is INSTALLED by feeding the cache indirectly is out of scope; the wiring + no-panic +
 	// clean stop is the gating contract. (Resolution itself: netname + egress unit tests.)
 	stop()
 }
 
-// eofSource is a PacketSource that yields no packets — the observer's Run returns io.EOF immediately.
+// eofSource is a PacketSource that yields no packets; the observer's Run returns io.EOF immediately.
 type eofSource struct{}
 
 func (eofSource) Next() ([]byte, error) { return nil, io.EOF }

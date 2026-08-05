@@ -36,7 +36,7 @@ func TestTrust(t *testing.T) {
 		// A valid Developer-ID signature that is NOT notarized reads ◇, not ◆.
 		{"signed-not-notarized", map[string]string{"signed": "true", "authority": "Developer ID Application: Acme (TEAM1)"}, GlyphSigned},
 		// SECURITY (cp T1 review F-1): a Developer-ID cert whose company name contains
-		// "Apple" must NOT forge ● Apple-system — it stays ◆ (notarized) / ◇ (not).
+		// "Apple" must NOT forge ● Apple-system; it stays ◆ (notarized) / ◇ (not).
 		{"devid-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Application: Apple Fan LLC (TEAM9)", "notarized": "true"}, GlyphNotarized},
 		{"devid-installer-apple-spoof", map[string]string{"signed": "true", "authority": "Developer ID Installer: Apple Lovers Inc (TEAM8)"}, GlyphSigned},
 		{"signed-not-accepted", map[string]string{"signed": "true"}, GlyphSigned},
@@ -95,20 +95,20 @@ func TestPortEnc(t *testing.T) {
 
 // TestGlyphVocabularyIsUnique is the systemic guard for the whole point of this package: it is the
 // SINGLE source of the glyph vocabulary, so no two meanings may share a glyph. A collision is not
-// cosmetic — a reader decodes a glyph by its legend entry, so a duplicate silently tells them the wrong
+// cosmetic; a reader decodes a glyph by its legend entry, so a duplicate silently tells them the wrong
 // thing. This test exists because the Intercept view first shipped ⊘ for "pinned" while ⊘ already meant
-// "revoked certificate" — two cert-related meanings on one mark, in a view about certificates.
+// "revoked certificate": two cert-related meanings on one mark, in a view about certificates.
 func TestGlyphVocabularyIsUnique(t *testing.T) {
 	seen := map[rune]string{}
 	for _, r := range Legend() {
 		if prev, dup := seen[r.Glyph]; dup {
-			t.Fatalf("glyph %q means both %q and %q — the vocabulary must be unambiguous", r.Glyph, prev, r.Meaning)
+			t.Fatalf("glyph %q means both %q and %q; the vocabulary must be unambiguous", r.Glyph, prev, r.Meaning)
 		}
 		seen[r.Glyph] = r.Meaning
 	}
 }
 
-// Every glyph the intercept axis emits must be IN the legend — an unregistered glyph is undecodable.
+// Every glyph the intercept axis emits must be IN the legend; an unregistered glyph is undecodable.
 func TestInterceptGlyphsAreInTheLegend(t *testing.T) {
 	want := map[rune]bool{GlyphDecrypted: false, GlyphPinned: false, GlyphOpaque: false, GlyphFlowError: false}
 	for _, r := range Legend() {

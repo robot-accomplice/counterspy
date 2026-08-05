@@ -32,7 +32,7 @@ func ParsePs(b []byte) map[int]*Proc {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		// Reconstruct the command from the 4th field onward — robust against a
+		// Reconstruct the command from the 4th field onward; robust against a
 		// username that recurs elsewhere in the line (cp-7 F-3/F-2).
 		cmd := strings.Join(fields[3:], " ")
 		out[pid] = &Proc{PID: pid, PPID: ppid, User: fields[2], Cmd: cmd}

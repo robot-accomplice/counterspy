@@ -27,8 +27,8 @@ const (
 	maxPipelinedRequests = 64       // request→response correlation queue
 	maxLinger            = 30 * time.Second
 	// Backlog for the non-blocking tee into each framing parser; one slot per forward chunk (≤32 KiB).
-	// When a parser falls this far behind, teeing detaches so it can never back-pressure — let alone
-	// deadlock — the relayed connection (cp-p25 ABORT F1).
+	// When a parser falls this far behind, teeing detaches so it can never back-pressure, let alone
+	// deadlock, the relayed connection (cp-p25 ABORT F1).
 	maxTeeBacklogChunks = 8
 )
 
@@ -88,7 +88,7 @@ func (p *Proxy) pump(client net.Conn, target string, pid int, app, path, connID 
 	// C4 ALPN-aware bypass: an h2-only client is blind-relayed so it keeps working; browsers that
 	// offer both are still MITM'd and downgraded to HTTP/1.1. Any peek ambiguity fail-opens to MITM.
 	if isH2Only(client, time.Now().Add(handshakeTimeout)) {
-		pu.publish(connEvent(connID, pid, app, path, model.FlowOpaque, "h2-only client — bypassed"))
+		pu.publish(connEvent(connID, pid, app, path, model.FlowOpaque, "h2-only client: bypassed"))
 		pu.bypass(client, target)
 		return
 	}
@@ -204,7 +204,7 @@ func (pu *pump) runRelay(client, upstream net.Conn) {
 			// forwarded but NOT captured. Mark the connection opaque so the view reports incomplete
 			// capture honestly instead of silently under-reporting or mislabelling a healthy stream
 			// as "connection closed" (ABORT re-run F-A). opaqueOnce keeps it to one event.
-			pu.markOpaque("tee detached — capture incomplete under load")
+			pu.markOpaque("tee detached: capture incomplete under load")
 		}
 		tee.close() // no more chunks; the feeder flushes buffered bytes then closes the pipe → EOF
 		done <- struct{}{}
@@ -240,7 +240,7 @@ func (pu *pump) runRelay(client, upstream net.Conn) {
 // teeFeeder is a bounded, non-blocking bridge from the relay's forward path to a framing parser.
 // submit never blocks: when the parser has fallen maxTeeBacklogChunks behind (it is slow or parked in
 // popQueue), the chunk is refused and the caller detaches teeing, so forwarding is never
-// back-pressured by parsing — the "never affects traffic" invariant. A feeder goroutine drains the
+// back-pressured by parsing, the "never affects traffic" invariant. A feeder goroutine drains the
 // buffer into the pipe the parser reads; close ends the stream so the parser sees EOF.
 type teeFeeder struct {
 	ch chan []byte
@@ -253,7 +253,7 @@ func newTeeFeeder(pw *io.PipeWriter, wg *sync.WaitGroup) *teeFeeder {
 		defer wg.Done()
 		for chunk := range t.ch {
 			if _, err := pw.Write(chunk); err != nil {
-				return // the parser closed its read end; stop — forwarding is unaffected
+				return // the parser closed its read end; stop, forwarding is unaffected
 			}
 		}
 		pw.Close() // producer finished cleanly → signal EOF to the parser
@@ -395,7 +395,7 @@ func (pu *pump) pushQueue(seq int, method string) bool {
 }
 
 // popQueue blocks until the matching request is enqueued, then returns it. A closed, drained queue
-// (closeRequests ran at request-stream EOF) yields ok=false — the only condition under which a
+// (closeRequests ran at request-stream EOF) yields ok=false, the only condition under which a
 // response is genuinely unmatched rather than merely ahead of its request goroutine.
 func (pu *pump) popQueue() (string, int, bool) {
 	e, ok := <-pu.queue
