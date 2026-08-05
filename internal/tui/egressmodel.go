@@ -268,9 +268,13 @@ const (
 // caps the number of tracked PIDs by freezing (not evicting) so a long session stays bounded while no
 // captured flow is ever silently dropped.
 func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
-	// Stream-level notices (version mismatch / malformed record) carry no owner (empty Path AND App);
-	// surface them once, globally, instead of filing them under a phantom empty-key app.
-	if msg.Path == "" && msg.App == "" {
+	// A GENUINE stream-level notice (version mismatch / malformed record) is fully ownerless AND
+	// connectionless AND carries no content; surface its reason globally instead of a phantom app.
+	// Anything with a PID, an owner, a connection (ConnID), or captured content is a REAL flow and must
+	// be retained even when attribution missed (PID 0, no name): the proxy publishes unattributable
+	// flows deliberately (Rule 13, "a flow we can't name is still one the user needs to see"), so
+	// dropping one here would silently lose decrypted exfil.
+	if msg.PID == 0 && msg.App == "" && msg.Path == "" && msg.ConnID == "" && msg.Text == "" {
 		if msg.Reason != "" {
 			m.InterceptStatus = msg.Reason
 		}
@@ -305,14 +309,22 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 		buf = buf[len(buf)-maxPerApp:]
 	}
 	m.Messages[key] = buf
+	if msg.PID == 0 {
+		// A fully unattributed flow can't join any app row (no PID to match), so it is retained but
+		// would otherwise be unseen; disclose that captured-but-unattributed exfil exists (Rule 13).
+		m.InterceptStatus = "unattributed decrypted flow(s) captured (no owner); see the intercept log"
+	}
 	return m
 }
 
 // sameProc reports whether two intercepted messages came from the same process, by their intercept-side
-// identity (Path, else App). Unknown identity can't be disproved, so it's treated as the same process:
-// favor retaining captured data over a recycle guess (dropping a live process's flows is the worse
-// failure). A narrow residual remains, a basename collision when proc_pidpath raced to an empty Path,
-// documented as an accepted limitation.
+// identity. It compares the exact executable Path when both carry one (so a basename collision like
+// system vs brew python is distinguished), else the App name. Disjoint partial identity (one side
+// Path-only, the other App-only) shares no comparable field and only arises from a crafted untrusted
+// record, so it is treated as DIFFERENT (drop the stale buffer) rather than silently merged. A side
+// with no identity at all can't be disproved, so it favors retaining data (dropping a live process's
+// flows is the worse failure). Residual: two runs of the same-named binary that both raced proc_pidpath
+// to an empty Path are indistinguishable by name alone, a documented accepted limitation.
 func sameProc(a, b model.InterceptedMessage) bool {
 	if a.Path != "" && b.Path != "" {
 		return a.Path == b.Path
@@ -320,7 +332,18 @@ func sameProc(a, b model.InterceptedMessage) bool {
 	if a.App != "" && b.App != "" {
 		return a.App == b.App
 	}
+	if procIdentity(a) != "" && procIdentity(b) != "" {
+		return false
+	}
 	return true
+}
+
+// procIdentity is a message's best available process identity: the executable path, else the app name.
+func procIdentity(m model.InterceptedMessage) string {
+	if m.Path != "" {
+		return m.Path
+	}
+	return m.App
 }
 
 func (m EgressModel) orderedGroups() []model.EgressGroup {

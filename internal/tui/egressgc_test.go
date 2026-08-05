@@ -101,3 +101,61 @@ func TestWithMessage_TrackedPIDStillUpdatesAtCapacity(t *testing.T) {
 		t.Fatalf("an already-tracked PID must keep updating at capacity, got %+v", m.Messages[1])
 	}
 }
+
+// Pre-existing HIGH (v0.7.0 ABORT re-review): a DECRYPTED flow whose owner attribution missed lands as
+// PID 0 / App "" / Path "" but carries real captured plaintext. It must be RETAINED (the proxy publishes
+// unattributable flows deliberately, Rule 13) and DISCLOSED, not silently dropped as if a stream notice.
+func TestWithMessage_RetainsUnattributedDecryptedFlow(t *testing.T) {
+	m := NewEgress()
+	m = m.withMessage(model.InterceptedMessage{ConnID: "c-1", Seq: 1, PID: 0, Status: model.FlowDecrypted, Direction: "request", Text: "POST /exfil HTTP/1.1"})
+	total := 0
+	for _, b := range m.Messages {
+		total += len(b)
+	}
+	if total != 1 {
+		t.Fatalf("an unattributed decrypted flow must be retained, not dropped: %+v", m.Messages)
+	}
+	if m.InterceptStatus == "" {
+		t.Fatalf("an unattributed flow must be disclosed so captured exfil is never silently unseen")
+	}
+}
+
+// A PID-attributed but nameless decrypted flow (proc_pidpath raced: PID set, App/Path empty) must file
+// under its PID so it joins its app row normally, not be dropped.
+func TestWithMessage_RetainsPIDKnownNamelessFlow(t *testing.T) {
+	m := NewEgress()
+	m = m.withMessage(model.InterceptedMessage{ConnID: "c-2", Seq: 1, PID: 4242, Status: model.FlowDecrypted, Direction: "request", Text: "POST /x HTTP/1.1"})
+	if len(m.Messages[4242]) != 1 {
+		t.Fatalf("a PID-attributed nameless flow must file under its PID: %+v", m.Messages)
+	}
+}
+
+// A GENUINE stream notice (ownerless, connectionless, contentless: version mismatch / malformed record)
+// must still surface to InterceptStatus and NOT be buffered under a phantom PID.
+func TestWithMessage_GenuineStreamNoticeNotBuffered(t *testing.T) {
+	m := NewEgress()
+	m = m.withMessage(model.InterceptedMessage{Status: model.FlowError, Reason: "unsupported record version"})
+	if len(m.Messages) != 0 {
+		t.Fatalf("a genuine ownerless/connectionless notice must not be buffered: %+v", m.Messages)
+	}
+	if m.InterceptStatus == "" {
+		t.Fatalf("a genuine notice must surface to InterceptStatus")
+	}
+}
+
+// sameProc hardening: disjoint partial identity (one side Path-only, the other App-only) shares no
+// comparable field and can only arise from a crafted untrusted record; treat as DIFFERENT (drop the
+// stale buffer), never silently merge.
+func TestSameProc_DisjointPartialIdentityTreatedDifferent(t *testing.T) {
+	if sameProc(model.InterceptedMessage{Path: "/a/evil"}, model.InterceptedMessage{App: "victim"}) {
+		t.Fatal("disjoint partial identity must be treated as different (conservative), not merged")
+	}
+}
+
+// ...but a genuine same-process message that merely raced to an empty Path (same App) must NOT be
+// treated as a recycle (no wrongful buffer clear).
+func TestSameProc_TransientPathRaceSameProcessNotCleared(t *testing.T) {
+	if !sameProc(model.InterceptedMessage{App: "python", Path: "/usr/bin/python"}, model.InterceptedMessage{App: "python", Path: ""}) {
+		t.Fatal("a same-process message that raced to an empty Path must not be treated as a recycle")
+	}
+}
