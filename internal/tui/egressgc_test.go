@@ -12,68 +12,73 @@ func liveGroup(pid int, path string) model.EgressGroup {
 	return model.EgressGroup{App: "app", Path: path, Members: []model.EgressInstance{{PID: pid, Path: path}}}
 }
 
-// W1 hygiene (v0.7.0 ABORT re-review): decrypted-message buffers for a PID that has left the live
-// group set must be GC'd, so a long session doesn't retain redacted-but-still-sensitive messages for
-// dead PIDs forever. A PID absent for a full grace cycle is pruned.
-func TestWithGroups_GCsMessagesForDeadPID(t *testing.T) {
-	m := NewEgress()
-	m.Messages = map[int][]model.InterceptedMessage{999: {{PID: 999, App: "gone", Path: "/x/gone"}}}
-	m.MessageDropCount = map[int]int{999: 5}
-	live := liveGroup(42, "/usr/bin/app")
-	m = m.withGroups([]model.EgressGroup{live}) // 999 absent once -> grace
-	m = m.withGroups([]model.EgressGroup{live}) // absent twice -> pruned
-	if _, ok := m.Messages[999]; ok {
-		t.Fatalf("messages for a dead PID must be GC'd, got %+v", m.Messages)
-	}
-	if _, ok := m.MessageDropCount[999]; ok {
-		t.Fatalf("drop count for a dead PID must be GC'd, got %+v", m.MessageDropCount)
-	}
+func msg(pid int, app, path, text, dest string) model.InterceptedMessage {
+	return model.InterceptedMessage{PID: pid, App: app, Path: path, Direction: "request", Text: text, DestName: dest}
 }
 
-// The GC must not drop a message that arrived just before its owning PID's first sample (the sampler
-// and the message stream are eventually consistent; a one-tick grace covers that window).
-func TestWithGroups_GraceKeepsJustArrivedMessage(t *testing.T) {
+// Regression (v0.7.0 ABORT re-review, Defect 1): retention must NOT be keyed on the sampler's live
+// set. A live process with a bursty/periodic connection is absent from a poll between bursts (group
+// membership is `for pid := range conns`), so pruning by live-set membership drops captured flows for
+// a still-alive, still-talking process, the exact exfil this tool exists to catch. withGroups must
+// never drop a PID's messages just because it is absent from the current sample.
+func TestWithMessage_RetainsBurstyLiveProcessAcrossAbsentSamples(t *testing.T) {
 	m := NewEgress()
-	m.Messages = map[int][]model.InterceptedMessage{77: {{PID: 77, App: "new", Path: "/x/new"}}}
+	m = m.withMessage(msg(100, "beacon", "/x/beacon", "POST /beacon HTTP/1.1", "c2.example.com"))
 	other := liveGroup(1, "/o")
-	m = m.withGroups([]model.EgressGroup{other}) // 77 absent once -> grace, must be KEPT
-	if len(m.Messages[77]) != 1 {
-		t.Fatalf("a just-arrived message must survive one grace cycle, got %+v", m.Messages)
+	m = m.withGroups([]model.EgressGroup{other}) // 100 absent (connection closed between polls)
+	m = m.withMessage(msg(100, "beacon", "/x/beacon", "POST /beacon2 HTTP/1.1", "c2.example.com"))
+	m = m.withGroups([]model.EgressGroup{other}) // still absent, but 100 is alive and talking
+	if len(m.Messages[100]) != 2 {
+		t.Fatalf("captured flows for a live, still-talking (bursty) PID must not be dropped, got %+v", m.Messages[100])
 	}
 }
 
-// A PID that stays live keeps its messages indefinitely.
-func TestWithGroups_KeepsMessagesForLivePID(t *testing.T) {
-	m := NewEgress()
-	m.Messages = map[int][]model.InterceptedMessage{42: {{PID: 42, App: "app", Path: "/usr/bin/app"}}}
-	live := liveGroup(42, "/usr/bin/app")
-	m = m.withGroups([]model.EgressGroup{live})
-	m = m.withGroups([]model.EgressGroup{live})
-	m = m.withGroups([]model.EgressGroup{live})
-	if len(m.Messages[42]) != 1 {
-		t.Fatalf("messages for a live PID must be kept, got %+v", m.Messages)
-	}
-}
-
-// GC is the real mitigation for PID-recycle misattribution (a fragile App/Path tiebreak is unsafe:
-// the PID join is deliberately path-agnostic because egress and intercept paths diverge). Once the
-// original owner exits and is GC'd, a process that later reuses the PID inherits no stale messages.
-func TestWithGroups_GCPreventsPIDRecycleMisattribution(t *testing.T) {
+// Recycle guard: when a PID is reused by a different process (intercept-side identity changes), the
+// prior process's buffer is dropped so its flows never render under the new one. Both identities are
+// intercept-side (proc_pidpath), so the comparison is safe (unlike egress-vs-intercept paths).
+func TestWithMessage_RecycleClearsPriorProcessBuffer(t *testing.T) {
 	m := NewEgress()
 	m.ProxyAddr = "127.0.0.1:62443"
-	// Slack captured under PID 500.
-	m.Messages = map[int][]model.InterceptedMessage{
-		500: {{PID: 500, App: "Slack", Path: "/Applications/Slack.app/Contents/MacOS/Slack",
-			Direction: "request", Text: "POST /steal HTTP/1.1", DestName: "evil.example.com"}},
-	}
-	// Slack exits: two samples without PID 500 -> its buffer is GC'd.
-	gone := liveGroup(1, "/o")
-	m = m.withGroups([]model.EgressGroup{gone})
-	m = m.withGroups([]model.EgressGroup{gone})
-	// curl now reuses PID 500.
+	m = m.withMessage(msg(500, "Slack", "/Applications/Slack.app/Contents/MacOS/Slack", "POST /steal HTTP/1.1", "evil.example.com"))
+	// PID 500 reused by curl.
+	m = m.withMessage(msg(500, "curl", "/usr/bin/curl", "GET /ok HTTP/1.1", "example.org"))
 	curl := model.EgressGroup{App: "curl", Path: "/usr/bin/curl", Members: []model.EgressInstance{{PID: 500, Path: "/usr/bin/curl"}}}
 	got := strings.Join(interceptSummary(m, curl, 6), "\n")
 	if strings.Contains(got, "evil.example.com") || strings.Contains(got, "/steal") {
-		t.Fatalf("Slack's captured flow must not render under a PID-recycled curl:\n%s", got)
+		t.Fatalf("a reused PID must not inherit the prior process's flows:\n%s", got)
+	}
+	if !strings.Contains(got, "example.org") {
+		t.Fatalf("the new process's own flow must render:\n%s", got)
+	}
+}
+
+// The same process sending many messages must NOT be treated as a recycle (identity unchanged).
+func TestWithMessage_SameProcessNotClearedAcrossMessages(t *testing.T) {
+	m := NewEgress()
+	m = m.withMessage(msg(42, "app", "/usr/bin/app", "GET /a HTTP/1.1", "a.example.com"))
+	m = m.withMessage(msg(42, "app", "/usr/bin/app", "GET /b HTTP/1.1", "b.example.com"))
+	if len(m.Messages[42]) != 2 {
+		t.Fatalf("same-process messages must accumulate, got %+v", m.Messages[42])
+	}
+}
+
+// Retention is bounded: the number of PIDs whose buffers are kept is capped, and the LEAST recently
+// active PID is evicted first (never the most recent), so a long session with many short-lived PIDs
+// cannot grow the map without bound or retain redacted-but-sensitive data indefinitely.
+func TestWithMessage_BoundsTrackedPIDsEvictingLeastRecent(t *testing.T) {
+	m := NewEgress()
+	// PID 1 is the oldest (least recently active) after this first message.
+	m = m.withMessage(msg(1, "old", "/x/old", "GET /old HTTP/1.1", "old.example.com"))
+	for pid := 2; pid <= maxTrackedPIDs+1; pid++ {
+		m = m.withMessage(msg(pid, "a", "/x/a", "GET / HTTP/1.1", "a"))
+	}
+	if len(m.Messages) > maxTrackedPIDs {
+		t.Fatalf("tracked-PID count must be bounded at %d, got %d", maxTrackedPIDs, len(m.Messages))
+	}
+	if _, ok := m.Messages[1]; ok {
+		t.Fatalf("the least-recently-active PID must be evicted first, but PID 1 is still retained")
+	}
+	if _, ok := m.Messages[maxTrackedPIDs+1]; !ok {
+		t.Fatalf("the most recent PID must be retained")
 	}
 }

@@ -73,7 +73,8 @@ type EgressModel struct {
 	Messages         map[int][]model.InterceptedMessage // key = originating PID
 	MessageDropCount map[int]int                        // per-PID overflow drops (bounded buffer)
 	InterceptStatus  string                             // stream-level notice shown in the Exfiltration footer
-	msgStale         map[int]bool                       // PIDs absent from the last live set (one-cycle GC grace)
+	msgSeq           map[int]uint64                     // per-PID last-message-arrival tick, for LRU eviction
+	msgClock         uint64                             // monotonic message counter driving msgSeq recency
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -248,59 +249,26 @@ func NewEgress() EgressModel {
 func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.Groups = gs
 	m.sampled = true // a real sampler result arrived; even an empty one means we've looked
-	m = m.gcMessages(gs)
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
 	}
 	return m
 }
 
-// gcMessages bounds the decrypted-message buffers against the live PID set. A PID absent from the
-// groups for a full grace cycle has its Messages/MessageDropCount pruned, so a long session never
-// retains redacted-but-still-sensitive flows for dead PIDs, and a PID macOS later recycles inherits
-// no stale messages (the safe mitigation for PID-recycle misattribution: an App/Path tiebreak is NOT
-// safe here because the PID join is deliberately path-agnostic, egressmodel paths and intercept paths
-// diverge for symlinked/Homebrew binaries). The one-cycle grace protects a message that arrived just
-// before its owning PID's first sample (the message stream and the sampler are eventually consistent).
-func (m EgressModel) gcMessages(gs []model.EgressGroup) EgressModel {
-	if len(m.Messages) == 0 && len(m.MessageDropCount) == 0 {
-		return m
-	}
-	live := map[int]bool{}
-	for _, g := range gs {
-		for _, mem := range g.Members {
-			live[mem.PID] = true
-		}
-	}
-	stale := map[int]bool{}
-	prune := func(pid int) {
-		delete(m.Messages, pid)
-		delete(m.MessageDropCount, pid)
-	}
-	seen := map[int]bool{}
-	consider := func(pid int) {
-		if seen[pid] || live[pid] {
-			return // live PIDs keep their buffers; dedupe across both maps
-		}
-		seen[pid] = true
-		if m.msgStale[pid] {
-			prune(pid) // absent for a full grace cycle
-		} else {
-			stale[pid] = true // first absent cycle: grace, keep this cycle
-		}
-	}
-	for pid := range m.Messages {
-		consider(pid)
-	}
-	for pid := range m.MessageDropCount {
-		consider(pid)
-	}
-	m.msgStale = stale
-	return m
-}
+// maxPerApp bounds one PID's decrypted-message buffer; maxTrackedPIDs bounds how many PIDs' buffers we
+// retain at once. Retention is keyed on message-arrival recency (LRU), NOT on the sampler's live set:
+// a live process with a bursty/periodic connection is absent from a poll between bursts, so pruning by
+// the live set drops captured flows for a still-alive process (the exact exfil this tool exists to
+// catch). LRU bounds retention without that data loss.
+const (
+	maxPerApp      = 500
+	maxTrackedPIDs = 256
+)
 
-// withMessage ingests one sanitized intercepted event, joining it to its app by PID. The per-PID
-// buffer is bounded so a noisy app can't unbounded-grow the view.
+// withMessage ingests one sanitized intercepted event, joining it to its app by PID. It guards PID
+// recycle (a reused PID must not inherit the prior process's flows), bounds the per-PID buffer, and
+// bounds the number of tracked PIDs (LRU), so a long session cannot grow the view without bound or
+// retain redacted-but-sensitive data indefinitely.
 func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 	// Stream-level notices (version mismatch / malformed record) carry no owner (empty Path AND App);
 	// surface them once, globally, instead of filing them under a phantom empty-key app.
@@ -314,7 +282,14 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 		m.Messages = make(map[int][]model.InterceptedMessage)
 	}
 	key := msg.PID
-	const maxPerApp = 500
+	// PID-recycle guard: if the buffer under this PID belongs to a DIFFERENT process, the PID was
+	// reused; drop the stale buffer so the prior process's flows never render under the new one. Both
+	// identities are intercept-side (proc_pidpath), so this comparison is consistent (unlike the
+	// egress-vs-intercept paths that make the JOIN deliberately path-agnostic).
+	if prev := m.Messages[key]; len(prev) > 0 && !sameProc(prev[len(prev)-1], msg) {
+		delete(m.Messages, key)
+		delete(m.MessageDropCount, key)
+	}
 	buf := append(m.Messages[key], msg)
 	if len(buf) > maxPerApp {
 		if m.MessageDropCount == nil {
@@ -324,6 +299,42 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 		buf = buf[len(buf)-maxPerApp:]
 	}
 	m.Messages[key] = buf
+	if m.msgSeq == nil {
+		m.msgSeq = make(map[int]uint64)
+	}
+	m.msgClock++
+	m.msgSeq[key] = m.msgClock // this PID is now the most-recently-active
+	return m.evictOverflowPIDs()
+}
+
+// sameProc reports whether two intercepted messages came from the same process, by their intercept-side
+// identity (Path, else App). Unknown identity can't be disproved, so it's treated as the same process
+// (never drop captured data on a guess).
+func sameProc(a, b model.InterceptedMessage) bool {
+	if a.Path != "" && b.Path != "" {
+		return a.Path == b.Path
+	}
+	if a.App != "" && b.App != "" {
+		return a.App == b.App
+	}
+	return true
+}
+
+// evictOverflowPIDs keeps the tracked-PID count within maxTrackedPIDs, evicting the least-recently-
+// active PID (smallest msgSeq) first, so a dead PID's buffer is reclaimed under pressure while a
+// still-active process is never pruned.
+func (m EgressModel) evictOverflowPIDs() EgressModel {
+	for len(m.Messages) > maxTrackedPIDs {
+		oldest, oldestSeq, first := 0, uint64(0), true
+		for pid := range m.Messages {
+			if seq := m.msgSeq[pid]; first || seq < oldestSeq {
+				oldest, oldestSeq, first = pid, seq, false
+			}
+		}
+		delete(m.Messages, oldest)
+		delete(m.MessageDropCount, oldest)
+		delete(m.msgSeq, oldest)
+	}
 	return m
 }
 
