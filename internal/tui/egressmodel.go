@@ -323,8 +323,9 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 // Path-only, the other App-only) shares no comparable field and only arises from a crafted untrusted
 // record, so it is treated as DIFFERENT (drop the stale buffer) rather than silently merged. A side
 // with no identity at all can't be disproved, so it favors retaining data (dropping a live process's
-// flows is the worse failure). Residual: two runs of the same-named binary that both raced proc_pidpath
-// to an empty Path are indistinguishable by name alone, a documented accepted limitation.
+// flows is the worse failure). Residual: when at least one side lacks a Path and both share an App name
+// (e.g. a reused PID whose new process raced proc_pidpath), same-named processes are indistinguishable
+// by name alone, a documented accepted limitation.
 func sameProc(a, b model.InterceptedMessage) bool {
 	if a.Path != "" && b.Path != "" {
 		return a.Path == b.Path

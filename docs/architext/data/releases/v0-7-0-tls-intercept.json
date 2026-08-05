@@ -3,11 +3,11 @@
   "version": "0.7.0",
   "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
   "status": "in-progress",
-  "posture": "at-risk",
-  "summary": "Phase 2 + 2.5 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) as per-message InterceptedMessage events streamed to a unix socket and/or a rotating 0600 log, ingested via `console --intercept` into the console's Exfiltration view. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Phase 2 core (CA + pump + teardown) was smoke-test verified 2026-07-16; the Phase 2.5 per-message pump + Exfiltration merge, and the fixes from the 2026-07-20/21 ABORT review (L1 secret leak, F1 relay deadlock, F-A silent-drop, Self1 self-attribution, W1 dead console path) were applied since and are NOT yet independently re-verified. Redact/block is Phase 3; a NetworkExtension transparent proxy is a later phase.",
-  "targetWindow": "NOT ready to cut: open ABORT findings (F-A, Self1, W1) pending a clean re-review of the applied fixes; PR #48 held as Draft until fully green.",
+  "posture": "on-track",
+  "summary": "Phase 2 + 2.5 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) as per-message InterceptedMessage events streamed to a unix socket and/or a rotating 0600 log, ingested via `console --intercept` into the console's Exfiltration view. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Phase 2 core (CA + pump + teardown) was smoke-test verified 2026-07-16; the Phase 2.5 per-message pump + Exfiltration merge and the 2026-07-20/21 ABORT-review fixes were independently RE-VERIFIED GREEN on 2026-08-05: Self1 (daemon self-exclusion across install paths), the tree de-alias honesty gap, and decrypted-message retention were fixed, plus a pre-existing silent-drop of unattributed decrypted flows. L1/F1/F-A confirmed holding. Redact/block is Phase 3; a NetworkExtension transparent proxy is a later phase.",
+  "targetWindow": "Ready to cut: v0.7.0 ABORT re-review GREEN (2026-08-05); PR #48 marked ready-for-review; feature->develop->main->tag.",
   "lastUpdated": "2026-08-05T00:00:00.000Z",
-  "updateSource": "swarm build cp-p2a..cp-p2j + smoke test 2026-07-16 + Phase 2.5 + v0.7.0 ABORT review & fixes 2026-07-20/21; 2026-08-05 honest reconcile: open ABORT findings (F-A, Self1, W1) recorded as blockers, PR #48 held Draft pending re-review",
+  "updateSource": "swarm build cp-p2a..cp-p2j + smoke test 2026-07-16 + Phase 2.5 + v0.7.0 ABORT review & fixes 2026-07-20/21; 2026-08-05 ABORT re-review GREEN (Self1 + tree de-alias + retention + pre-existing silent-drop fixed; L1/F1/F-A hold), blockers resolved, ready to cut",
   "scope": {
     "required": [
       {
@@ -61,8 +61,8 @@
         "id": "intercept-per-message-merge",
         "title": "Phase 2.5: per-message pump + Exfiltration merge + ABORT-review fixes",
         "kind": "feature",
-        "status": "in-progress",
-        "summary": "Per-message streaming pump (HTTP/1.1 framing, request↔response FIFO correlation via a channel, ALPN h2-only bypass) publishing InterceptedMessage events; merged into the console's Exfiltration view via `console --intercept`, joined to apps by PID, with honest empty states and a version-mismatch footer. The 2026-07-20/21 ABORT review found and drove fixes for: L1 (credential-name masking missed compound/prefix/plural forms), F1 (relay deadlock from a synchronous tee + blocking correlation), F-A (silent capture drop on tee detach), Self1 (self-attribution excluded the wrong process), W1 (console path was dead — nil channel, path-join mismatch). All fixes applied; a clean ABORT re-review is the gate before cut.",
+        "status": "complete",
+        "summary": "Per-message streaming pump (HTTP/1.1 framing, request↔response FIFO correlation via a channel, ALPN h2-only bypass) publishing InterceptedMessage events; merged into the console's Exfiltration view via `console --intercept`, joined to apps by PID, with honest empty states and a version-mismatch footer. The 2026-07-20/21 ABORT review drove fixes for L1/F1/F-A/Self1/W1; the 2026-08-05 ABORT re-review (independent red-team, reproduced-RED gate) verified L1/F1/F-A hold, and closed the remaining open findings: Self1 daemon self-exclusion now spans split installs; the tree de-alias honesty gap (armed destinations relabeled off the loopback proxy) is closed; decrypted-message retention is bounded by freeze-on-full (never evicting captured evidence) with a message-stream recycle guard; and a pre-existing silent-drop of unattributed decrypted flows was fixed (Rule 13). Remaining residuals are low-severity and documented in the ABORT artifact.",
         "owner": "Project maintainers",
         "workstreamId": "phase2",
         "dependsOn": [
@@ -70,8 +70,9 @@
           "intercept-command"
         ],
         "evidence": [
-          "go test ./... -race + coverage 86.3% green on the feature branch",
-          "docs/releases/v0.7.0-tls-intercept-abort.md (review + re-run closure)",
+          "go test ./... green; go vet + gofmt clean on the feature branch",
+          "2026-08-05 ABORT re-review: independent red-team verifiers, each reproducing RED before any claim; final verdict GO (fixes in 4900451, 1311ea6, e744ee3, 0e07819)",
+          "docs/releases/v0.7.0-tls-intercept-abort.md (review + re-run + 2026-08-05 re-review closure)",
           "docs/superpowers/specs/2026-07-21-intercept-view-merge-design.md"
         ]
       }
@@ -111,9 +112,9 @@
       "name": "Outbound visibility Phase 2 (TLS intercept)",
       "owner": "Project maintainers",
       "status": "in-progress",
-      "posture": "at-risk",
-      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, smoke-test verified 2026-07-16 (which disproved the approved pf routing and drove the CONNECT pivot). Phase 2.5 (per-message pump + Exfiltration merge) and the v0.7.0 ABORT-review fixes are applied but await a clean re-review before cut.",
-      "progress": 85,
+      "posture": "on-track",
+      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, smoke-test verified 2026-07-16 (which disproved the approved pf routing and drove the CONNECT pivot). Phase 2.5 (per-message pump + Exfiltration merge) and the v0.7.0 ABORT-review fixes passed an independent re-review GREEN on 2026-08-05; ready to cut.",
+      "progress": 100,
       "itemIds": [
         "intercept-core",
         "intercept-command",
@@ -166,48 +167,5 @@
       "status": "complete"
     }
   ],
-  "blockers": [
-    {
-      "id": "abort-fa-silent-capture-drop",
-      "title": "F-A: capture silently dropped when the tee detaches under load",
-      "severity": "high",
-      "status": "open",
-      "owner": "Project maintainers",
-      "summary": "The 2026-07-21 ABORT re-run left F-A open: under load the per-message tee can detach and drop captured bytes. A fix was applied (mark capture incomplete on tee detach) but has not passed an independent re-review, so it stays a blocker until re-verified.",
-      "nextAction": "Re-review the tee-detach path on the current branch and confirm a detached tee surfaces FlowError/incomplete rather than losing capture silently; close only on a clean verdict.",
-      "itemIds": ["intercept-per-message-merge"],
-      "evidenceNeeded": [
-        "Independent ABORT re-review verdict on the fixed branch",
-        "Repro/coverage that a tee detach yields an incomplete/error marker, not silent loss"
-      ]
-    },
-    {
-      "id": "abort-self1-self-attribution",
-      "title": "Self1: Exfiltration self-exclusion attributes to the wrong process",
-      "severity": "high",
-      "status": "open",
-      "owner": "Project maintainers",
-      "summary": "The 2026-07-21 ABORT re-run left Self1 open: the merged-view self-exclusion keyed on the wrong process, so counterspy's own proxy traffic can surface as an app's egress (or hide a real app). Design-level, not purely mechanical.",
-      "nextAction": "Verify PID-based self-exclusion under the armed-proxy topology on the current branch and re-review; close only on a clean verdict.",
-      "itemIds": ["intercept-per-message-merge"],
-      "evidenceNeeded": [
-        "Independent re-review confirming correct self-exclusion while armed",
-        "Test covering self-attribution under the armed proxy"
-      ]
-    },
-    {
-      "id": "abort-w1-merged-view-join",
-      "title": "W1: merged-view join key + armed-destination design tension",
-      "severity": "high",
-      "status": "open",
-      "owner": "Project maintainers",
-      "summary": "The 2026-07-21 ABORT re-run left W1 open: while the proxy is armed, an app's egress destination IS the loopback proxy, so the byte-level Exfiltration view and the decrypted-stream view key on different things and the join between InterceptedMessage events and egress rows is unresolved. Design-level.",
-      "nextAction": "Decide and record how decrypted per-message events join to egress rows while armed (destination rewrite/attribution), verify in the console, and re-review.",
-      "itemIds": ["intercept-per-message-merge"],
-      "evidenceNeeded": [
-        "Recorded design decision for the armed-destination join",
-        "Independent re-review verdict on the merged view"
-      ]
-    }
-  ]
+  "blockers": []
 }
