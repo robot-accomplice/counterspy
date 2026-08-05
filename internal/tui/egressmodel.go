@@ -73,8 +73,6 @@ type EgressModel struct {
 	Messages         map[int][]model.InterceptedMessage // key = originating PID
 	MessageDropCount map[int]int                        // per-PID overflow drops (bounded buffer)
 	InterceptStatus  string                             // stream-level notice shown in the Exfiltration footer
-	msgSeq           map[int]uint64                     // per-PID last-message-arrival tick, for LRU eviction
-	msgClock         uint64                             // monotonic message counter driving msgSeq recency
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -256,10 +254,10 @@ func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 }
 
 // maxPerApp bounds one PID's decrypted-message buffer; maxTrackedPIDs bounds how many PIDs' buffers we
-// retain at once. Retention is keyed on message-arrival recency (LRU), NOT on the sampler's live set:
-// a live process with a bursty/periodic connection is absent from a poll between bursts, so pruning by
-// the live set drops captured flows for a still-alive process (the exact exfil this tool exists to
-// catch). LRU bounds retention without that data loss.
+// retain at once. The tracked-PID bound is enforced by FREEZING (refuse new PIDs when full), never by
+// evicting an existing buffer: captured evidence must not be dropped by any heuristic, because a quiet,
+// low-volume beacon (the exact exfil this tool exists to catch) is precisely what an age/recency policy
+// would drop first (re-review Defect 1). New flows past the cap are disclosed, not silently lost.
 const (
 	maxPerApp      = 500
 	maxTrackedPIDs = 256
@@ -267,8 +265,8 @@ const (
 
 // withMessage ingests one sanitized intercepted event, joining it to its app by PID. It guards PID
 // recycle (a reused PID must not inherit the prior process's flows), bounds the per-PID buffer, and
-// bounds the number of tracked PIDs (LRU), so a long session cannot grow the view without bound or
-// retain redacted-but-sensitive data indefinitely.
+// caps the number of tracked PIDs by freezing (not evicting) so a long session stays bounded while no
+// captured flow is ever silently dropped.
 func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 	// Stream-level notices (version mismatch / malformed record) carry no owner (empty Path AND App);
 	// surface them once, globally, instead of filing them under a phantom empty-key app.
@@ -282,6 +280,14 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 		m.Messages = make(map[int][]model.InterceptedMessage)
 	}
 	key := msg.PID
+	// Retention backstop: at capacity, FREEZE. Refuse a NEW PID rather than evict an existing buffer,
+	// and DISCLOSE the loss. Any eviction policy would drop exactly the quiet beacon we exist to catch;
+	// freezing preserves every captured flow. Already-tracked PIDs (including recycles, same key) still
+	// update, so this never blocks an in-progress conversation.
+	if _, tracked := m.Messages[key]; !tracked && len(m.Messages) >= maxTrackedPIDs {
+		m.InterceptStatus = fmt.Sprintf("capture full at %d apps; new flows not retained (restart to resume)", maxTrackedPIDs)
+		return m
+	}
 	// PID-recycle guard: if the buffer under this PID belongs to a DIFFERENT process, the PID was
 	// reused; drop the stale buffer so the prior process's flows never render under the new one. Both
 	// identities are intercept-side (proc_pidpath), so this comparison is consistent (unlike the
@@ -299,17 +305,14 @@ func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
 		buf = buf[len(buf)-maxPerApp:]
 	}
 	m.Messages[key] = buf
-	if m.msgSeq == nil {
-		m.msgSeq = make(map[int]uint64)
-	}
-	m.msgClock++
-	m.msgSeq[key] = m.msgClock // this PID is now the most-recently-active
-	return m.evictOverflowPIDs()
+	return m
 }
 
 // sameProc reports whether two intercepted messages came from the same process, by their intercept-side
-// identity (Path, else App). Unknown identity can't be disproved, so it's treated as the same process
-// (never drop captured data on a guess).
+// identity (Path, else App). Unknown identity can't be disproved, so it's treated as the same process:
+// favor retaining captured data over a recycle guess (dropping a live process's flows is the worse
+// failure). A narrow residual remains, a basename collision when proc_pidpath raced to an empty Path,
+// documented as an accepted limitation.
 func sameProc(a, b model.InterceptedMessage) bool {
 	if a.Path != "" && b.Path != "" {
 		return a.Path == b.Path
@@ -318,24 +321,6 @@ func sameProc(a, b model.InterceptedMessage) bool {
 		return a.App == b.App
 	}
 	return true
-}
-
-// evictOverflowPIDs keeps the tracked-PID count within maxTrackedPIDs, evicting the least-recently-
-// active PID (smallest msgSeq) first, so a dead PID's buffer is reclaimed under pressure while a
-// still-active process is never pruned.
-func (m EgressModel) evictOverflowPIDs() EgressModel {
-	for len(m.Messages) > maxTrackedPIDs {
-		oldest, oldestSeq, first := 0, uint64(0), true
-		for pid := range m.Messages {
-			if seq := m.msgSeq[pid]; first || seq < oldestSeq {
-				oldest, oldestSeq, first = pid, seq, false
-			}
-		}
-		delete(m.Messages, oldest)
-		delete(m.MessageDropCount, oldest)
-		delete(m.msgSeq, oldest)
-	}
-	return m
 }
 
 func (m EgressModel) orderedGroups() []model.EgressGroup {

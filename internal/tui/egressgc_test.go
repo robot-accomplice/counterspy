@@ -62,23 +62,42 @@ func TestWithMessage_SameProcessNotClearedAcrossMessages(t *testing.T) {
 	}
 }
 
-// Retention is bounded: the number of PIDs whose buffers are kept is capped, and the LEAST recently
-// active PID is evicted first (never the most recent), so a long session with many short-lived PIDs
-// cannot grow the map without bound or retain redacted-but-sensitive data indefinitely.
-func TestWithMessage_BoundsTrackedPIDsEvictingLeastRecent(t *testing.T) {
+// Retention is bounded by FREEZING at capacity, not evicting: captured security evidence must never be
+// dropped by a heuristic, because a quiet, low-volume beacon (the exact exfil this tool exists to catch)
+// is precisely what any age/recency eviction would drop (re-review Defect 1). When full, a NEW PID is
+// refused and the loss is DISCLOSED via InterceptStatus; every already-captured buffer, including the
+// quietest oldest one, is retained.
+func TestWithMessage_FreezesNewPIDsWhenFull_NeverEvictsExisting(t *testing.T) {
 	m := NewEgress()
-	// PID 1 is the oldest (least recently active) after this first message.
-	m = m.withMessage(msg(1, "old", "/x/old", "GET /old HTTP/1.1", "old.example.com"))
-	for pid := 2; pid <= maxTrackedPIDs+1; pid++ {
+	// PID 1 is a quiet beacon: one flow, then never active again.
+	m = m.withMessage(msg(1, "beacon", "/x/beacon", "POST /beacon HTTP/1.1", "c2.example.com"))
+	for pid := 2; pid <= maxTrackedPIDs; pid++ { // fill to capacity (PIDs 1..maxTrackedPIDs)
 		m = m.withMessage(msg(pid, "a", "/x/a", "GET / HTTP/1.1", "a"))
 	}
-	if len(m.Messages) > maxTrackedPIDs {
+	m = m.withMessage(msg(maxTrackedPIDs+1, "new", "/x/new", "GET / HTTP/1.1", "n")) // one PID over
+
+	if len(m.Messages) != maxTrackedPIDs {
 		t.Fatalf("tracked-PID count must be bounded at %d, got %d", maxTrackedPIDs, len(m.Messages))
 	}
-	if _, ok := m.Messages[1]; ok {
-		t.Fatalf("the least-recently-active PID must be evicted first, but PID 1 is still retained")
+	if _, ok := m.Messages[1]; !ok {
+		t.Fatalf("the quiet oldest beacon must NEVER be evicted (that is the exfil we exist to catch)")
 	}
-	if _, ok := m.Messages[maxTrackedPIDs+1]; !ok {
-		t.Fatalf("the most recent PID must be retained")
+	if _, ok := m.Messages[maxTrackedPIDs+1]; ok {
+		t.Fatalf("a NEW PID over capacity must be frozen out, not admitted by evicting an existing one")
+	}
+	if m.InterceptStatus == "" {
+		t.Fatalf("a frozen-out flow must be DISCLOSED (InterceptStatus), never silently dropped")
+	}
+}
+
+// A PID already tracked keeps receiving messages even at capacity (freeze only refuses NEW PIDs).
+func TestWithMessage_TrackedPIDStillUpdatesAtCapacity(t *testing.T) {
+	m := NewEgress()
+	for pid := 1; pid <= maxTrackedPIDs; pid++ {
+		m = m.withMessage(msg(pid, "a", "/x/a", "GET /1 HTTP/1.1", "a"))
+	}
+	m = m.withMessage(msg(1, "a", "/x/a", "GET /2 HTTP/1.1", "a")) // existing PID, at capacity
+	if len(m.Messages[1]) != 2 {
+		t.Fatalf("an already-tracked PID must keep updating at capacity, got %+v", m.Messages[1])
 	}
 }
