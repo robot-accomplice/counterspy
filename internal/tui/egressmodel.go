@@ -73,6 +73,7 @@ type EgressModel struct {
 	Messages         map[int][]model.InterceptedMessage // key = originating PID
 	MessageDropCount map[int]int                        // per-PID overflow drops (bounded buffer)
 	InterceptStatus  string                             // stream-level notice shown in the Exfiltration footer
+	msgStale         map[int]bool                       // PIDs absent from the last live set (one-cycle GC grace)
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -247,9 +248,54 @@ func NewEgress() EgressModel {
 func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.Groups = gs
 	m.sampled = true // a real sampler result arrived; even an empty one means we've looked
+	m = m.gcMessages(gs)
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
 	}
+	return m
+}
+
+// gcMessages bounds the decrypted-message buffers against the live PID set. A PID absent from the
+// groups for a full grace cycle has its Messages/MessageDropCount pruned, so a long session never
+// retains redacted-but-still-sensitive flows for dead PIDs, and a PID macOS later recycles inherits
+// no stale messages (the safe mitigation for PID-recycle misattribution: an App/Path tiebreak is NOT
+// safe here because the PID join is deliberately path-agnostic, egressmodel paths and intercept paths
+// diverge for symlinked/Homebrew binaries). The one-cycle grace protects a message that arrived just
+// before its owning PID's first sample (the message stream and the sampler are eventually consistent).
+func (m EgressModel) gcMessages(gs []model.EgressGroup) EgressModel {
+	if len(m.Messages) == 0 && len(m.MessageDropCount) == 0 {
+		return m
+	}
+	live := map[int]bool{}
+	for _, g := range gs {
+		for _, mem := range g.Members {
+			live[mem.PID] = true
+		}
+	}
+	stale := map[int]bool{}
+	prune := func(pid int) {
+		delete(m.Messages, pid)
+		delete(m.MessageDropCount, pid)
+	}
+	seen := map[int]bool{}
+	consider := func(pid int) {
+		if seen[pid] || live[pid] {
+			return // live PIDs keep their buffers; dedupe across both maps
+		}
+		seen[pid] = true
+		if m.msgStale[pid] {
+			prune(pid) // absent for a full grace cycle
+		} else {
+			stale[pid] = true // first absent cycle: grace, keep this cycle
+		}
+	}
+	for pid := range m.Messages {
+		consider(pid)
+	}
+	for pid := range m.MessageDropCount {
+		consider(pid)
+	}
+	m.msgStale = stale
 	return m
 }
 

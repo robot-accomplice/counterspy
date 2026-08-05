@@ -92,6 +92,77 @@ func TestMonitor_ExcludesSelfByPath(t *testing.T) {
 	}
 }
 
+// Self1 (v0.7.0 ABORT re-review, 2026-08-05): the intercept daemon must be excluded even when it
+// runs from a DIFFERENT install path than the console. Path-equality alone missed it, and the tool's
+// OWN guidance (UnstableExePath: "install to /usr/local/bin, run the daemon from there") steers users
+// into exactly this split install, so the daemon's relay traffic surfaced as an app. Exclude by
+// identity: our binary running the `intercept` subcommand, regardless of install path.
+func TestMonitor_ExcludesInterceptDaemonAtDifferentPath(t *testing.T) {
+	m := New(2)
+	m.excludePath = "/opt/homebrew/bin/counterspy" // the CONSOLE's own path (Homebrew)
+	m.runNettop = func() []byte {
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,counterspy.4821,0,900000\n15:04:05.0,app.4822,0,300000\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"counterspy 4821 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n" +
+			"app 4822 root 11u IPv4 0x2 0t0 TCP 10.0.0.2:6->198.51.100.8:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{
+			4821: {PID: 4821, PPID: 1, Cmd: "/usr/local/bin/counterspy intercept"}, // daemon at a DIFFERENT path
+			4822: {PID: 4822, PPID: 1, Cmd: "/Applications/App.app/Contents/MacOS/app"},
+		}
+	}
+	m.exePaths = func() map[int]string {
+		return map[int]string{4821: "/usr/local/bin/counterspy", 4822: "/Applications/App.app/Contents/MacOS/app"}
+	}
+	m.trustOf = func(path string) string { return "signed" }
+	m.capsOf = func(path string) []string { return nil }
+
+	m.Sample()
+	groups := m.Sample()
+	appSeen := false
+	for _, g := range groups {
+		if strings.Contains(g.Path, "counterspy") || g.App == "counterspy" {
+			t.Fatalf("the intercept daemon at a different install path must still be excluded (Self1), got %+v", groups)
+		}
+		if g.App == "app" {
+			appSeen = true
+		}
+	}
+	if !appSeen {
+		t.Fatalf("a non-self app must still appear: %+v", groups)
+	}
+}
+
+// A genuinely different tool that merely has "intercept" somewhere in its argv (not OUR binary
+// running the intercept subcommand) must NOT be wrongly excluded: exclusion is gated on the exe
+// basename matching ours AND `intercept` being the subcommand (argv[1]).
+func TestMonitor_DoesNotExcludeUnrelatedInterceptArg(t *testing.T) {
+	m := New(2)
+	m.excludePath = "/opt/homebrew/bin/counterspy"
+	m.runNettop = func() []byte {
+		return []byte("time,,bytes_in,bytes_out\n15:04:05.0,tcpdump.5000,0,300000\n")
+	}
+	m.runLsof = func() []byte {
+		return []byte("COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+			"tcpdump 5000 root 10u IPv4 0x1 0t0 TCP 10.0.0.2:5->198.51.100.7:443 (ESTABLISHED)\n")
+	}
+	m.procs = func() map[int]*collect.Proc {
+		return map[int]*collect.Proc{5000: {PID: 5000, PPID: 1, Cmd: "/usr/sbin/tcpdump intercept traffic"}}
+	}
+	m.exePaths = func() map[int]string { return map[int]string{5000: "/usr/sbin/tcpdump"} }
+	m.trustOf = func(path string) string { return "apple" }
+	m.capsOf = func(path string) []string { return nil }
+
+	m.Sample()
+	groups := m.Sample()
+	if len(groups) != 1 || groups[0].App != "tcpdump" {
+		t.Fatalf("an unrelated tool with 'intercept' in argv must stay visible, got %+v", groups)
+	}
+}
+
 // #9: attacker-influenced identity strings (app name / path / ancestry from a crafted argv/exe
 // path) are run through Clean at the source, so an ANSI/newline payload can't reach storage or the
 // terminal, defense-in-depth over the JSON encoder and the TUI's render-time Clean.

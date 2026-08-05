@@ -397,7 +397,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 		drawText(s, 0, 0, tcell.StyleDefault.Foreground(colWarn), "terminal too small")
 		return
 	}
-	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), "CounterSpy · Exfiltration")
+	drawText(s, marginX, 0, tcell.StyleDefault.Foreground(colAccent).Bold(true), exfilTitle(m.ProxyAddr != ""))
 
 	groups := m.orderedGroups()
 	status := "sampling"
@@ -481,7 +481,7 @@ func egressView(m EgressModel, s tcell.Screen) {
 				break
 			}
 			row := rows[i]
-			drawEgressRow(s, cols, w, y, row, i == m.Selected, m.expanded, m.expandedPID, m.Trend, peak)
+			drawEgressRow(s, cols, w, y, row, i == m.Selected, m.expanded, m.expandedPID, m.Trend, peak, m.ProxyAddr)
 			y++
 		}
 	}
@@ -520,13 +520,36 @@ func drawEncGlyph(s tcell.Screen, x, y int, style tcell.Style, port int) int {
 	return 2
 }
 
-func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int) {
+// exfilTitle is the Exfiltration pane title. While the intercept proxy is armed it appends an armed
+// indicator: destinations shown in the tree are the LOCAL proxy (a proxy-honoring app's nettop-observed
+// dest is the loopback proxy, not the real remote), and the real remotes are listed per message in the
+// zoom. Without this the tree reads 127.0.0.1 as the app's destination (v0.7.0 ABORT re-review, Part A).
+func exfilTitle(armed bool) string {
+	if armed {
+		return "CounterSpy · Exfiltration · ⚿ intercept armed (dests = proxy; z for real remotes)"
+	}
+	return "CounterSpy · Exfiltration"
+}
+
+// destCell decides how a tree row's destination is shown. While armed, a row whose endpoint IS the
+// loopback proxy is relabeled off its raw IP so the user never reads it as the app's real remote (the
+// real remotes are per message in the zoom's decrypted section, mirroring the zoom's ⚿ mark). Returns
+// the label and whether it is the proxy, so the caller can skip the port-encryption glyph.
+func destCell(dest, ep, proxyAddr string) (string, bool) {
+	if destProxied(ep, proxyAddr) {
+		return "⚿ intercept proxy", true
+	}
+	return dest, false
+}
+
+func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int, proxyAddr string) {
 	g := row.group
 	var depth int
 	var marker rune
 	var label, trust, rate, dest string
 	var concernText string
-	var encPort int // destination port for the row's shown destination (0 = no dest / no glyph)
+	var encPort int   // destination port for the row's shown destination (0 = no dest / no glyph)
+	var destEP string // the row's destination as "ip:port", for the armed-proxy relabel
 	color := concernColor(g.Concern)
 
 	switch {
@@ -541,6 +564,9 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		if c := busiestConn(g.Conns); c != nil {
 			encPort = c.Endpoint.Port
 		}
+		if len(g.Destinations) > 0 {
+			destEP = fmt.Sprintf("%s:%d", g.Destinations[0].IP, g.Destinations[0].Port)
+		}
 	case row.conn == nil: // instance row
 		mem := row.member
 		depth = 1
@@ -554,8 +580,17 @@ func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, sel
 		marker = '·'
 		dest = fmt.Sprintf("%s %s:%d", strings.ToUpper(c.Proto), endpointHost(c.Endpoint), c.Endpoint.Port)
 		encPort = c.Endpoint.Port
+		destEP = fmt.Sprintf("%s:%d", c.Endpoint.IP, c.Endpoint.Port)
 		if c.OutRate > 0 {
 			rate = human(c.OutRate) + "/s"
+		}
+	}
+	// While the intercept proxy is armed, relabel a destination that IS the loopback proxy so it never
+	// reads as the app's real remote (the real remotes live in the zoom's decrypted section).
+	if dest != "" {
+		var isProxy bool
+		if dest, isProxy = destCell(dest, destEP, proxyAddr); isProxy {
+			encPort = 0 // the ⚿ label stands in for the port-encryption glyph
 		}
 	}
 

@@ -2,6 +2,7 @@
 package egress
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +68,14 @@ type Resolver interface {
 func (m *Monitor) SetResolver(r Resolver) { m.resolve = r.Lookup }
 
 func New(interval float64) *Monitor {
+	exe, exeErr := selfExePath()
+	if exeErr != nil {
+		// os.Executable essentially never fails on macOS, but if it does we must not silently ship a
+		// disabled self-exclusion: path-based exclusion (isSelf) and the argv daemon match both need our
+		// own path. Record it (Rule 14) rather than reading as "no self traffic". The daemon can then
+		// re-appear as an app group; the log line is the breadcrumb for that.
+		log.Printf("egress: could not resolve own executable path; self-exclusion disabled: %v", exeErr)
+	}
 	return &Monitor{
 		interval:  interval,
 		prev:      map[int]Bytes{},
@@ -93,21 +102,26 @@ func New(interval float64) *Monitor {
 		exePaths:    defaultExePaths,
 		trustOf:     defaultTrust,
 		capsOf:      defaultCaps,
-		excludePath: selfExePath(),
+		excludePath: exe,
 	}
 }
 
-// selfExePath returns the running binary's canonical (symlink-resolved) path, or the best available
-// fallback. Used to drop counterspy's own processes from the egress view.
-func selfExePath() string {
+// interceptSubcommand is the daemon's subcommand; a process running `<our binary> intercept` IS the
+// intercept daemon and must be self-excluded regardless of where it was installed (Self1).
+const interceptSubcommand = "intercept"
+
+// selfExePath returns the running binary's canonical (symlink-resolved) path, and any error resolving
+// it. On error the caller keeps self-exclusion disabled but records the failure (Rule 14) instead of
+// silently returning "" and reading as "counterspy has no traffic".
+func selfExePath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return ""
+		return "", err
 	}
 	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
-		return resolved
+		return resolved, nil
 	}
-	return exe
+	return exe, nil
 }
 
 // isSelf reports whether an executable path belongs to counterspy itself. The symlink-resolving
@@ -126,6 +140,30 @@ func (m *Monitor) isSelf(path string) bool {
 		return resolved == m.excludePath
 	}
 	return false
+}
+
+// isInterceptDaemon reports whether a sampled process is counterspy's OWN intercept daemon even when
+// it was installed at a DIFFERENT path than the console (the split install the tool's own guidance
+// steers toward: daemon in /usr/local/bin, console from Homebrew or a build tree). Path-equality alone
+// (isSelf) missed that case, so the daemon's relay traffic surfaced as an app (Self1). Here we key on
+// identity: the exe basename matches ours AND the process runs the `intercept` subcommand. The basename
+// gate keeps an unrelated tool that merely has "intercept" in its argv from being wrongly hidden.
+func (m *Monitor) isInterceptDaemon(path, cmd string) bool {
+	if m.excludePath == "" || path == "" || cmd == "" {
+		return false
+	}
+	if filepath.Base(path) != filepath.Base(m.excludePath) {
+		return false
+	}
+	// The subcommand is the first argv token after argv[0]. Strip the known exe path (from `ps comm`,
+	// spaces intact) to isolate it even when the path has spaces; fall back to a field split.
+	rest := cmd
+	if strings.HasPrefix(cmd, path) {
+		rest = cmd[len(path):]
+	} else if f := strings.Fields(cmd); len(f) >= 2 {
+		return f[1] == interceptSubcommand
+	}
+	return firstToken(strings.TrimSpace(rest)) == interceptSubcommand
 }
 
 // defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
@@ -220,7 +258,7 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		if path == "" {
 			path = binaryPath(p)
 		}
-		if m.isSelf(path) {
+		if m.isSelf(path) || m.isInterceptDaemon(path, cmdOf(p)) {
 			continue // never report on counterspy itself (console or the intercept daemon), Self1
 		}
 		app := appName(path, pid)
@@ -359,6 +397,14 @@ func binaryPath(p *collect.Proc) string {
 		return ""
 	}
 	return firstToken(p.Cmd)
+}
+
+// cmdOf is the process's full command line (argv), or "" when the proc is unknown.
+func cmdOf(p *collect.Proc) string {
+	if p == nil {
+		return ""
+	}
+	return p.Cmd
 }
 
 // appName is the display name: the executable's base name, or "pid:N" when no path resolved.
