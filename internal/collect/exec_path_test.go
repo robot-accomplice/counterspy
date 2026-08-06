@@ -3,7 +3,7 @@ package collect
 import "testing"
 
 func TestParseRunningPaths(t *testing.T) {
-	// `ps -axo pid=,args= -ww` — pid then the full argv. We collect every
+	// `ps -axo pid=,args= -ww`: pid then the full argv. We collect every
 	// absolute-path token so correlation works for a direct binary, a bare-argv0
 	// interpreter running a script (the path is an ARG), and avoids comm=' bare-name miss.
 	out := []byte(
@@ -51,6 +51,6 @@ func TestParseRunningPaths_SkipsMalformed(t *testing.T) {
 func TestParseRunningPaths_ArgPathIsCollected(t *testing.T) {
 	got := ParseRunningPaths([]byte("321 grep -r foo /var/db/dormant.plist\n"))
 	if !got["/var/db/dormant.plist"] {
-		t.Errorf("known limitation: an argv path token is collected — got %v", got)
+		t.Errorf("known limitation: an argv path token is collected; got %v", got)
 	}
 }

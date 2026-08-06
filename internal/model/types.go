@@ -12,7 +12,7 @@ import (
 const Version = "v0.6.0"
 
 // Clean strips control/escape characters from attacker-influenced strings (labels,
-// paths, argv) before they reach a terminal — so a crafted value can't inject ANSI or
+// paths, argv) before they reach a terminal, so a crafted value can't inject ANSI or
 // newlines that spoof a prompt, corrupt a tcell buffer, or hide a finding.
 func Clean(s string) string {
 	var b strings.Builder
@@ -53,7 +53,7 @@ type Subject struct {
 // can never alias a synthetic PID key.
 //
 // Precedence invariant: when a Path is known it is the whole identity and the PID
-// is dropped from the key — so two live processes executing the same on-disk binary
+// is dropped from the key, so two live processes executing the same on-disk binary
 // correlate as one subject. Collectors always emit either a real PID (>0) or a Path;
 // a Subject with neither is not produced (see ticket T-1).
 func (s Subject) Key() string {
@@ -64,7 +64,7 @@ func (s Subject) Key() string {
 }
 
 // Display is a human-facing name: label, else path, else the correlation key.
-// (Key() is the internal grouping id and leaks "path:"/"pid:" prefixes — not for display.)
+// (Key() is the internal grouping id and leaks "path:"/"pid:" prefixes, not for display.)
 func (s Subject) Display() string {
 	if s.Label != "" {
 		return s.Label
@@ -110,8 +110,8 @@ type Finding struct {
 	Actions  []Action
 }
 
-// ManifestItem records not just WHAT moved but WHY — the score, tripwire, category,
-// recommendation, and verdict that justified the action — so a later incident is
+// ManifestItem records not just WHAT moved but WHY (the score, tripwire, category,
+// recommendation, and verdict that justified the action) so a later incident is
 // root-causable from the manifest alone (ABORT C4).
 type ManifestItem struct {
 	Subject        Subject
@@ -148,13 +148,13 @@ type Assessment struct {
 	Category       string
 	Recommendation Recommendation
 	// Liveness is the finding's run-state: "active" (running), "armed" (installed/loaded, will fire
-	// on a trigger, no live PID), "dormant" (disabled .bak or missing target — cannot execute), or ""
+	// on a trigger, no live PID), "dormant" (disabled .bak or missing target, cannot execute), or ""
 	// (not a process/persistence subject). Derived in interpret so it can BOTH down-weight a dead
 	// remnant in scoring and drive the display glyph (issue #23).
 	Liveness string
 	// Concern is a coarse trust×location×behavior band (Minimal→Elevated) derived in interpret,
 	// used to COLOR and optionally sort the Findings view so the large tail of Apple-signed Monitor
-	// rows recedes and the few non-Apple/unsigned ones stand out. It is a legibility hint only — it
+	// rows recedes and the few non-Apple/unsigned ones stand out. It is a legibility hint only; it
 	// never changes the Recommendation or the score (issue #4).
 	Concern ConcernLevel
 }
@@ -177,10 +177,10 @@ const (
 
 // FeedbackRecord is an intrinsically-anonymous field report: a finding's heuristic
 // fingerprint plus the user's label. It carries no raw path, username, hostname, or
-// (by default) private identifier — anonymity lives in the data, not the transport.
+// (by default) private identifier; anonymity lives in the data, not the transport.
 type FeedbackRecord struct {
 	Schema         string            `json:"schema"`
-	Tool           string            `json:"tool"`  // Version — weights/allowlist provenance
+	Tool           string            `json:"tool"`  // Version: weights/allowlist provenance
 	Nonce          string            `json:"nonce"` // per-submission, non-correlatable
 	Label          string            `json:"label"`
 	Recommendation string            `json:"recommendation"`

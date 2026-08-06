@@ -38,7 +38,7 @@ func TestRenderEgressJSON_EmptyIsArray(t *testing.T) {
 }
 
 // #3 (Audit cp-p1a F-2): the additive Endpoint.Name must not change the egress JSON contract for
-// unresolved endpoints — it is omitted when empty, and present only when a name was observed.
+// unresolved endpoints; it is omitted when empty, and present only when a name was observed.
 func TestRenderEgressJSON_EndpointNameOmitEmpty(t *testing.T) {
 	groups := []model.EgressGroup{{App: "x", Destinations: []model.Endpoint{{IP: "1.2.3.4", Port: 443}}}}
 	b, err := RenderEgressJSON(groups)

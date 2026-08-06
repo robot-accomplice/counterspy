@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/andybalholm/brotli"
 )
 
 func TestDecodeCleartext_Request(t *testing.T) {
@@ -61,9 +63,9 @@ func TestDecodeCleartext_NonHTTPFallsBack(t *testing.T) {
 }
 
 // Audit cp-p1f F-1/F-2: a body mislabeled with a Content-Encoding it doesn't actually have must NOT
-// vanish — the raw bytes must still be shown (a decoder that drained the reader would lose them).
+// vanish; the raw bytes must still be shown (a decoder that drained the reader would lose them).
 func TestDecodeCleartext_MislabeledEncodingKeepsBody(t *testing.T) {
-	for _, enc := range []string{"gzip", "deflate"} {
+	for _, enc := range []string{"gzip", "deflate", "br"} {
 		raw := "HTTP/1.1 200 OK\r\nContent-Encoding: " + enc + "\r\nContent-Length: 5\r\n\r\nhello"
 		got, ok := DecodeCleartext([]byte(raw))
 		if !ok {
@@ -75,7 +77,7 @@ func TestDecodeCleartext_MislabeledEncodingKeepsBody(t *testing.T) {
 	}
 }
 
-// F-1 bound: a gzip bomb must not blow up memory — the DECOMPRESSED body is capped at maxBodyPreview.
+// F-1 bound: a gzip bomb must not blow up memory; the DECOMPRESSED body is capped at maxBodyPreview.
 func TestDecodeCleartext_GzipBombBounded(t *testing.T) {
 	var gz bytes.Buffer
 	w := gzip.NewWriter(&gz)
@@ -105,5 +107,24 @@ func TestDecodeCleartext_AnnotatesDecodedEncoding(t *testing.T) {
 	got, _ := DecodeCleartext(append([]byte(raw), gz.Bytes()...))
 	if !strings.Contains(got, "(decoded)") {
 		t.Fatalf("decoded body should annotate Content-Encoding: %q", got)
+	}
+}
+
+func TestDecodeCleartext_BrotliResponseDecompressed(t *testing.T) {
+	plain := []byte(`{"report":"brotli body"}`)
+	var br bytes.Buffer
+	bw := brotli.NewWriter(&br)
+	bw.Write(plain)
+	bw.Close()
+	raw := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Encoding: br\r\nContent-Length: %d\r\n\r\n", br.Len())
+	got, ok := DecodeCleartext(append([]byte(raw), br.Bytes()...))
+	if !ok {
+		t.Fatal("brotli response must decode")
+	}
+	if !strings.Contains(got, "brotli body") {
+		t.Fatalf("brotli body was not decompressed: %q", got)
+	}
+	if !strings.Contains(got, "br (decoded)") {
+		t.Fatalf("brotli Content-Encoding should be annotated as decoded: %q", got)
 	}
 }

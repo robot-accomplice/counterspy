@@ -54,15 +54,25 @@ type EgressModel struct {
 	sampled     bool            // a sampler result has arrived at least once (gates the empty-state
 	//                             remediation: before the first sample we're "collecting", not empty)
 
-	// Inspection overlay (spec §4): a modal over the tree, driven off the pure update like CopyReq —
+	// Inspection overlay (spec §4): a modal over the tree, driven off the pure update like CopyReq:
 	// egressUpdate only sets the request; RunConsole performs the capture I/O. There is NO consent
-	// gate: pressing `i` on your own machine's own flow IS the intent — the boundary that keeps this
+	// gate: pressing `i` on your own machine's own flow IS the intent; the boundary that keeps this
 	// counter-spy (own-machine-only) is architectural, not a runtime prompt (maintainer decision).
 	InspectReq *inspectTarget // RunConsole should capture+inspect this target, then clear it
 	Inspection *inspection    // result overlay is open (nil = closed)
 	Reveal     bool           // content pane is revealed (redaction off) for the open inspection
 
 	Zoom *zoomState // group-zoom dashboard is open (nil = closed); rendered under any Inspection
+
+	// Phase 2.5 merge: decrypted per-message events, joined to apps by the originating PID. PID join is
+	// exact and I/O-free; joining by executable path was a silent miss because egress paths come from
+	// `ps comm` and intercept paths from proc_pidpath, which diverge for symlinked/Homebrew/firmlink
+	// binaries (ABORT re-run). Stream-level notices (version mismatch / malformed) carry no owner and
+	// go to InterceptStatus, a global footer line, rather than a phantom empty-key app.
+	ProxyAddr        string                             // armed proxy endpoint; "" = not in intercept mode
+	Messages         map[int][]model.InterceptedMessage // key = originating PID
+	MessageDropCount map[int]int                        // per-PID overflow drops (bounded buffer)
+	InterceptStatus  string                             // stream-level notice shown in the Exfiltration footer
 }
 
 // zoomState is the open group-zoom dashboard: the group (re-resolved by name each frame so live
@@ -81,7 +91,7 @@ func (z *zoomState) withMode(m trendMode) *zoomState { c := *z; c.mode = m; retu
 func (z *zoomState) withByDest(b bool) *zoomState    { c := *z; c.byDest = b; return &c }
 
 // zoomedMembers returns a group's members sorted by out-rate desc (loud talkers first), stable by
-// PID — the shared order for the PID panel and the graph's colored lines.
+// PID: the shared order for the PID panel and the graph's colored lines.
 func zoomedMembers(g model.EgressGroup) []model.EgressInstance {
 	ms := append([]model.EgressInstance(nil), g.Members...)
 	sort.SliceStable(ms, func(i, j int) bool {
@@ -141,7 +151,7 @@ func zoomDests(g model.EgressGroup) []destRate {
 	return ds
 }
 
-// busiestConnTo returns the highest-out-rate connection to an "ip:port" endpoint (across PIDs) —
+// busiestConnTo returns the highest-out-rate connection to an "ip:port" endpoint (across PIDs):
 // the concrete flow `i` inspects when a destination is selected.
 func busiestConnTo(g model.EgressGroup, ep string) *model.Conn {
 	var best *model.Conn
@@ -236,11 +246,105 @@ func NewEgress() EgressModel {
 // are preserved.
 func (m EgressModel) withGroups(gs []model.EgressGroup) EgressModel {
 	m.Groups = gs
-	m.sampled = true // a real sampler result arrived — even an empty one means we've looked
+	m.sampled = true // a real sampler result arrived; even an empty one means we've looked
 	if m.Selected >= len(m.visibleRows()) {
 		m.Selected = 0
 	}
 	return m
+}
+
+// maxPerApp bounds one PID's decrypted-message buffer; maxTrackedPIDs bounds how many PIDs' buffers we
+// retain at once. The tracked-PID bound is enforced by FREEZING (refuse new PIDs when full), never by
+// evicting an existing buffer: captured evidence must not be dropped by any heuristic, because a quiet,
+// low-volume beacon (the exact exfil this tool exists to catch) is precisely what an age/recency policy
+// would drop first (re-review Defect 1). New flows past the cap are disclosed, not silently lost.
+const (
+	maxPerApp      = 500
+	maxTrackedPIDs = 256
+)
+
+// withMessage ingests one sanitized intercepted event, joining it to its app by PID. It guards PID
+// recycle (a reused PID must not inherit the prior process's flows), bounds the per-PID buffer, and
+// caps the number of tracked PIDs by freezing (not evicting) so a long session stays bounded while no
+// captured flow is ever silently dropped.
+func (m EgressModel) withMessage(msg model.InterceptedMessage) EgressModel {
+	// A GENUINE stream-level notice (version mismatch / malformed record) is fully ownerless AND
+	// connectionless AND carries no content; surface its reason globally instead of a phantom app.
+	// Anything with a PID, an owner, a connection (ConnID), or captured content is a REAL flow and must
+	// be retained even when attribution missed (PID 0, no name): the proxy publishes unattributable
+	// flows deliberately (Rule 13, "a flow we can't name is still one the user needs to see"), so
+	// dropping one here would silently lose decrypted exfil.
+	if msg.PID == 0 && msg.App == "" && msg.Path == "" && msg.ConnID == "" && msg.Text == "" {
+		if msg.Reason != "" {
+			m.InterceptStatus = msg.Reason
+		}
+		return m
+	}
+	if m.Messages == nil {
+		m.Messages = make(map[int][]model.InterceptedMessage)
+	}
+	key := msg.PID
+	// Retention backstop: at capacity, FREEZE. Refuse a NEW PID rather than evict an existing buffer,
+	// and DISCLOSE the loss. Any eviction policy would drop exactly the quiet beacon we exist to catch;
+	// freezing preserves every captured flow. Already-tracked PIDs (including recycles, same key) still
+	// update, so this never blocks an in-progress conversation.
+	if _, tracked := m.Messages[key]; !tracked && len(m.Messages) >= maxTrackedPIDs {
+		m.InterceptStatus = fmt.Sprintf("capture full at %d apps; new flows not retained (restart to resume)", maxTrackedPIDs)
+		return m
+	}
+	// PID-recycle guard: if the buffer under this PID belongs to a DIFFERENT process, the PID was
+	// reused; drop the stale buffer so the prior process's flows never render under the new one. Both
+	// identities are intercept-side (proc_pidpath), so this comparison is consistent (unlike the
+	// egress-vs-intercept paths that make the JOIN deliberately path-agnostic).
+	if prev := m.Messages[key]; len(prev) > 0 && !sameProc(prev[len(prev)-1], msg) {
+		delete(m.Messages, key)
+		delete(m.MessageDropCount, key)
+	}
+	buf := append(m.Messages[key], msg)
+	if len(buf) > maxPerApp {
+		if m.MessageDropCount == nil {
+			m.MessageDropCount = make(map[int]int)
+		}
+		m.MessageDropCount[key] += len(buf) - maxPerApp // count BEFORE reslicing, or it's always 0
+		buf = buf[len(buf)-maxPerApp:]
+	}
+	m.Messages[key] = buf
+	if msg.PID == 0 {
+		// A fully unattributed flow can't join any app row (no PID to match), so it is retained but
+		// would otherwise be unseen; disclose that captured-but-unattributed exfil exists (Rule 13).
+		m.InterceptStatus = "unattributed decrypted flow(s) captured (no owner); see the intercept log"
+	}
+	return m
+}
+
+// sameProc reports whether two intercepted messages came from the same process, by their intercept-side
+// identity. It compares the exact executable Path when both carry one (so a basename collision like
+// system vs brew python is distinguished), else the App name. Disjoint partial identity (one side
+// Path-only, the other App-only) shares no comparable field and only arises from a crafted untrusted
+// record, so it is treated as DIFFERENT (drop the stale buffer) rather than silently merged. A side
+// with no identity at all can't be disproved, so it favors retaining data (dropping a live process's
+// flows is the worse failure). Residual: when at least one side lacks a Path and both share an App name
+// (e.g. a reused PID whose new process raced proc_pidpath), same-named processes are indistinguishable
+// by name alone, a documented accepted limitation.
+func sameProc(a, b model.InterceptedMessage) bool {
+	if a.Path != "" && b.Path != "" {
+		return a.Path == b.Path
+	}
+	if a.App != "" && b.App != "" {
+		return a.App == b.App
+	}
+	if procIdentity(a) != "" && procIdentity(b) != "" {
+		return false
+	}
+	return true
+}
+
+// procIdentity is a message's best available process identity: the executable path, else the app name.
+func procIdentity(m model.InterceptedMessage) string {
+	if m.Path != "" {
+		return m.Path
+	}
+	return m.App
 }
 
 func (m EgressModel) orderedGroups() []model.EgressGroup {
@@ -301,7 +405,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 		case key == tcell.KeyEscape, r == 'i':
 			m.Inspection, m.Reveal = nil, false // back to the tree
 		case r == 'v':
-			m.Reveal = !m.Reveal // toggle secret masking — view/hide the plaintext (§6)
+			m.Reveal = !m.Reveal // toggle secret masking: view/hide the plaintext (§6)
 		case r == 'Q':
 			return m, true
 		}
@@ -311,7 +415,7 @@ func egressUpdate(m EgressModel, key tcell.Key, r rune) (EgressModel, bool) {
 	// requests inspection for the SELECTED pid, which then stacks on top.
 	if m.Zoom != nil {
 		g, ok := m.zoomGroup()
-		if !ok { // the group vanished between ticks — fall back to the tree
+		if !ok { // the group vanished between ticks; fall back to the tree
 			m.Zoom = nil
 			return m, false
 		}
@@ -398,7 +502,7 @@ func (m EgressModel) requestInspect(rows []egressRow) EgressModel {
 		m.Status = hint
 		return m
 	}
-	m.InspectReq = target // `i` captures directly — no consent gate (own machine, own data)
+	m.InspectReq = target // `i` captures directly: no consent gate (own machine, own data)
 	return m
 }
 
@@ -411,15 +515,15 @@ func resolveInspectTarget(rows []egressRow, selected int) (*inspectTarget, strin
 	}
 	row := rows[selected]
 	switch {
-	case row.conn != nil: // connection leaf — exact flow
+	case row.conn != nil: // connection leaf: exact flow
 		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *row.conn}, ""
-	case row.member != nil: // instance — inspect its busiest connection
+	case row.member != nil: // instance: inspect its busiest connection
 		c := busiestConn(row.member.Conns)
 		if c == nil {
 			return nil, "no connection on this process to inspect"
 		}
 		return &inspectTarget{app: row.group.App, pid: row.member.PID, trust: row.member.Trust, conn: *c}, ""
-	default: // app header — spans multiple pids; ambiguous
+	default: // app header: spans multiple pids; ambiguous
 		return nil, "expand to a process or connection to inspect"
 	}
 }

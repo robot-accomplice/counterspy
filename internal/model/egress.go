@@ -7,7 +7,7 @@ type Endpoint struct {
 	Name string `json:"Name,omitempty"` // hostname the app resolved for this IP (passive DNS); "" = unresolved, omitted from JSON so the egress snapshot contract is unchanged for unresolved endpoints (#3, Audit cp-p1a F-2)
 }
 
-// Conn is one established outbound connection — a constituent of an EgressGroup, revealed
+// Conn is one established outbound connection, a constituent of an EgressGroup, revealed
 // when the group is expanded in the TUI.
 type Conn struct {
 	PID      int
@@ -42,7 +42,7 @@ func (l ConcernLevel) String() string {
 	}
 }
 
-// EgressInstance is one process (PID) within an EgressGroup — the middle tier of the
+// EgressInstance is one process (PID) within an EgressGroup, the middle tier of the
 // name → instance → connection tree.
 type EgressInstance struct {
 	PID      int

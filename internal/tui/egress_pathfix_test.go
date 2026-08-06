@@ -58,7 +58,9 @@ func TestRunEgress_CopyPathToClipboard(t *testing.T) {
 	}
 	s.SetSize(120, 40)
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, nil, make(chan struct{}), clip) }()
+	go func() {
+		done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, nil, make(chan struct{}), clip, nil, "")
+	}()
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // switch to Exfiltration (warm sample fires)
 	time.Sleep(30 * time.Millisecond)           // let the sample land
 	s.InjectKey(tcell.KeyRune, 'y', tcell.ModNone)

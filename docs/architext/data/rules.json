@@ -37,6 +37,25 @@
         "edit": true,
         "delete": true
       }
+    },
+    {
+      "id": "release-ceremony-stages",
+      "title": "Release ceremony: docs current before the cut, close-out after the tag",
+      "summary": "Every release runs an ordered ceremony. BEFORE cutting (feature->develop->main->tag), all documentation must be current and validated for the exact scope shipping: Architext Release Truth + index, README, and any release notes describe what the release actually contains, and `architext validate` passes. AFTER the tag, run a post-release close-out stage: flip the shipped Release Truth item(s) to complete/released with the tag as evidence, remove them from any active blocker and open-milestone itemIds, mark the cut milestone complete, and delete temporary artifacts (ABORT/scratch review docs, .bak recovery files, resolved repair-advice entries, throwaway logs). A release is not done until the close-out runs.",
+      "category": "release",
+      "criticality": "high",
+      "order": 30,
+      "source": "maintainer",
+      "rationale": "Docs written after a cut describe a moving target and routinely drift; validating scope before the tag keeps the shipped truth honest. Skipping the post-release close-out strands Release Truth mid-flight (stale in-progress/at-risk states, orphaned blocker/milestone itemIds, leftover scratch files) and gives future agents and humans false confidence. Making both stages standing parts of the ceremony prevents the recurring drift where Release Truth reads as unfinished long after a release, or as complete before one is verified.",
+      "appliesTo": [
+        "release cut",
+        "release truth maintenance",
+        "documentation"
+      ],
+      "protection": {
+        "edit": true,
+        "delete": true
+      }
     }
   ]
 }

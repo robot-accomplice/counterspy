@@ -9,14 +9,16 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/andybalholm/brotli"
 )
 
 // maxBodyPreview bounds how much decoded body we render for one direction.
 const maxBodyPreview = 4 << 10
 
 // DecodeCleartext tries to parse b as an HTTP request or response and render it with its body
-// DECODED — net/http dechunks a chunked Transfer-Encoding, and this additionally decompresses a
-// gzip/deflate Content-Encoding — so a compressed or chunked cleartext payload reads as text instead
+// DECODED (net/http dechunks a chunked Transfer-Encoding, and this additionally decompresses a
+// gzip/deflate Content-Encoding) so a compressed or chunked cleartext payload reads as text instead
 // of a binary hexdump (the "reveal as much as we can" goal, #3). It returns (rendered, true) on a
 // successful parse, else ("", false) so the caller keeps the existing text/hexdump rendering. It only
 // reveals structure + content; secret masking stays with model.Redact at render time (so the same
@@ -27,7 +29,7 @@ func DecodeCleartext(b []byte) (string, bool) {
 	}
 	if req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b))); err == nil {
 		h := req.Header
-		if req.Host != "" { // net/http hoists Host out of the header map — put it back for display
+		if req.Host != "" { // net/http hoists Host out of the header map; put it back for display
 			h = req.Header.Clone()
 			h.Set("Host", req.Host)
 		}
@@ -43,8 +45,8 @@ func DecodeCleartext(b []byte) (string, bool) {
 const maxRawBody = 1 << 20
 
 // readBody reads the (already dechunked) body into a buffer, then decompresses a gzip/deflate
-// Content-Encoding OVER A COPY — so a decode failure falls back to the UNTOUCHED raw bytes instead of
-// a reader the decompressor already drained (which would make the plaintext vanish — Audit cp-p1f
+// Content-Encoding OVER A COPY, so a decode failure falls back to the UNTOUCHED raw bytes instead of
+// a reader the decompressor already drained (which would make the plaintext vanish, Audit cp-p1f
 // F-1). On a successful decode it annotates the shown Content-Encoding so the body doesn't read as
 // still-compressed (F-3). Bounded output (maxBodyPreview) caps a decompression bomb.
 func readBody(h http.Header, body io.ReadCloser) string {
@@ -80,6 +82,8 @@ func decodeBody(enc string, raw []byte) (out []byte, decoded bool) {
 		fr := flate.NewReader(bytes.NewReader(raw))
 		defer fr.Close()
 		r = fr
+	case "br":
+		r = brotli.NewReader(bytes.NewReader(raw))
 	default:
 		return raw, false
 	}

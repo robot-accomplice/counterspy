@@ -1,6 +1,6 @@
 // Package ack is the LOCAL, revisitable triage-decision store: a record that the user has
 // reviewed a finding and chosen to "leave it" (issue #4). It is deliberately separate from
-// internal/feedback — feedback is an opt-in, shareable, anonymous field report; an ack is a
+// internal/feedback: feedback is an opt-in, shareable, anonymous field report; an ack is a
 // private, never-transmitted note that only affects how the Findings view flags a row. Acks are
 // never hidden: a decided finding stays visible, flagged with its decision, and is re-flagged
 // "reviewed · changed" when the finding's state no longer matches what was reviewed.
@@ -34,7 +34,7 @@ type Store struct {
 func NewStore(path string) *Store { return &Store{path: path, recs: map[string]Record{}} }
 
 // Fingerprint is a stable digest of a finding's MATERIAL state: its score plus the sorted set of
-// evidence "kind|summary" lines. A change to either — a new signal, a higher score — changes the
+// evidence "kind|summary" lines. A change to either (a new signal, a higher score) changes the
 // digest, which is what lets the view re-flag a prior ack as "reviewed · changed" instead of
 // silently masking newly-surfaced concern. Facts are intentionally excluded: they carry volatile
 // detail (PIDs, timestamps) that would make every rescan look "changed".
@@ -53,7 +53,7 @@ func Fingerprint(a model.Assessment) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// Load reads the store into memory. A missing or empty file is not an error — it is an empty store.
+// Load reads the store into memory. A missing or empty file is not an error. It is an empty store.
 func (s *Store) Load() error {
 	s.recs = map[string]Record{}
 	b, err := os.ReadFile(s.path)

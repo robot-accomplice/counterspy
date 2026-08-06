@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="#d93a3a" role="img" aria-label="Counterspy">
+  <path d="M6.9 8.4C6.9 5.1 9.2 3 12 3s5.1 2.1 5.1 5.4H6.9z" />
+  <ellipse cx="12" cy="8.7" rx="8.4" ry="1.5" />
+  <circle cx="8.3" cy="14" r="2.5" />
+  <circle cx="15.7" cy="14" r="2.5" />
+  <rect x="10.6" y="13.3" width="2.8" height="1.1" />
+  <rect x="3.4" y="13.3" width="2.6" height="1" />
+  <rect x="18" y="13.3" width="2.6" height="1" />
+  <path d="M7 21c0-2.4 2.2-3.8 5-3.8s5 1.4 5 3.8H7z" />
+</svg>

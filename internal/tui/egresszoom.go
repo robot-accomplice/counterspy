@@ -13,7 +13,7 @@ import (
 
 // pidPalette is the per-PID line colors, shared between the graph lines and the PID table swatches.
 // Keyed by PID (not row position) so a PID keeps its color even as the rate-sorted order reshuffles
-// between ticks — a row and its line always read as the same PID (cp-zoom Audit F2).
+// between ticks; a row and its line always read as the same PID (cp-zoom Audit F2).
 var pidPalette = []tcell.Color{colInvestigate, colAccent, colQuarantine, colMonitor, colWarn, colText}
 
 func pidLineColor(pid int) tcell.Color {
@@ -46,7 +46,7 @@ func seriesValues(mem model.EgressInstance, mode trendMode) []uint64 {
 	return metricSamples(mem.Spark, mem.InSpark, mode)
 }
 
-// addAligned sums two rate-history slices aligned at their NEWEST (right) end — histories can differ
+// addAligned sums two rate-history slices aligned at their NEWEST (right) end; histories can differ
 // in length (a younger connection has fewer samples), so a left-aligned sum would misattribute time.
 func addAligned(a, b []uint64) []uint64 {
 	n := len(a)
@@ -73,7 +73,7 @@ type destAgg struct {
 
 // destSeriesList aggregates the group's connections by endpoint, summing each endpoint's metric
 // history across the PIDs that talk to it. Ordered by endpoint string for a stable plot order (so
-// overlapping cells don't flicker color as rates reshuffle — same rule as the PID graph).
+// overlapping cells don't flicker color as rates reshuffle, same rule as the PID graph).
 func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
 	agg := map[string]*destAgg{}
 	for _, c := range g.Conns {
@@ -93,7 +93,7 @@ func destSeriesList(g model.EgressGroup, mode trendMode) []destAgg {
 	return out
 }
 
-// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border — a thin frame
+// drawPanel draws a single-line box [x,x+w)×[y,y+h) with a title in the top border: a thin frame
 // (unlike the solid-filled modal drawBox), matching the btm reference. A focused panel gets an
 // accent border + title so the user can see which box the arrow keys drive.
 func drawPanel(s tcell.Screen, x, y, w, h int, title string, focused bool) {
@@ -162,8 +162,8 @@ func drawEgressZoom(s tcell.Screen, m EgressModel) {
 	drawZoomGraph(s, 0, 0, leftW, topH, g, members, m.Zoom.mode, byDest, emphPID, emphEp)
 	drawZoomPIDs(s, leftW, 0, w-leftW, topH, g, members, selPID, !byDest)
 	botY, botH := topH, h-topH
-	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest)
-	drawZoomMeta(s, leftW, botY, w-leftW, botH, g)
+	drawZoomDests(s, 0, botY, leftW, botH, g, dests, selDest, byDest, m.ProxyAddr)
+	drawZoomMeta(s, leftW, botY, w-leftW, botH, m, g)
 }
 
 func drawZoomGraph(s tcell.Screen, x, y, w, h int, g model.EgressGroup, members []model.EgressInstance, mode trendMode, byDest bool, emphPID int, emphEp string) {
@@ -272,7 +272,15 @@ func shareBar(pct, n int) string {
 	return string(b)
 }
 
-func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool) {
+// destProxied reports whether a dest endpoint IS the intercept proxy. While armed, a proxy-honoring
+// app's decrypted traffic flows to this loopback endpoint (its REAL destinations are listed
+// per-message in the decrypted section, not here). Matching external IPs was wrong: while armed the
+// app never talks to them directly, so that marker could never fire (ABORT re-run). Pure → tested.
+func destProxied(ep, proxyAddr string) bool {
+	return proxyAddr != "" && ep == proxyAddr
+}
+
+func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []destRate, sel int, focused bool, proxyAddr string) {
 	drawPanel(s, x, y, w, h, "destinations", focused)
 	ix, iy, iw := x+2, y+1, w-4
 	if iw < 12 {
@@ -301,16 +309,24 @@ func drawZoomDests(s tcell.Screen, x, y, w, h int, g model.EgressGroup, ds []des
 		// zoom panel. IP:port labels were inert, but resolved names are not (#3).
 		drawText(s, tx, row, st,
 			truncate(fmt.Sprintf("%-24s ↑%6s %3d%%", middleEllipsis(model.Clean(d.label), 24), human(d.rate), share), iw-(tx-ix)))
+		// Mark the intercept proxy endpoint (this app's decrypted egress goes here while armed); the
+		// real destinations appear in the decrypted section. Drawn at the panel's right edge so it
+		// never disturbs column layout.
+		if destProxied(d.ep, proxyAddr) {
+			s.SetContent(x+w-2, row, '⚿', nil, tcell.StyleDefault.Foreground(colWarn))
+		}
 	}
 }
 
-func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
+func drawZoomMeta(s tcell.Screen, x, y, w, h int, m EgressModel, g model.EgressGroup) {
 	drawPanel(s, x, y, w, h, "this group", false)
 	ix, iy, iw := x+2, y+1, w-4
 	lines := []string{model.Clean(fmt.Sprintf("%s · %s · cadence: %s", g.Trust, bgLabel(g.Background), g.Cadence))}
 	if len(g.Capabilities) > 0 {
 		lines = append(lines, model.Clean("can access  "+strings.Join(g.Capabilities, " · ")))
 	}
+	// Decrypted per-message section (only in `console --intercept` mode); empty-state-aware.
+	lines = append(lines, interceptSummary(m, g, 6)...)
 	for i, ln := range lines {
 		row := iy + i
 		if row >= y+h-1 {
@@ -321,4 +337,65 @@ func drawZoomMeta(s tcell.Screen, x, y, w, h int, g model.EgressGroup) {
 	// Key hints on the bottom border, like the tree footer.
 	drawText(s, x+2, y+h-1, tcell.StyleDefault.Foreground(colDim),
 		truncate(" i inspect · ↑/↓ pid · t out/in · g pid/dest · z back ", w-4))
+}
+
+// interceptSummary renders the "decrypted flows" section for one app in the zoom meta pane. It joins
+// messages by PID across the group's member instances (the exact join key), and is pure so the three
+// honest states are unit-tested: not in intercept mode (nil: the section is absent), intercept on but
+// nothing captured for this app yet, and the recent per-message summaries (newest last, bounded by
+// max). Per-PID drops are summed and surfaced so a bounded buffer never silently hides flows.
+func interceptSummary(m EgressModel, g model.EgressGroup, max int) []string {
+	if m.ProxyAddr == "" {
+		return nil // not in intercept mode
+	}
+	out := []string{"── decrypted · " + m.ProxyAddr}
+	var msgs []model.InterceptedMessage
+	dropped := 0
+	for _, mem := range g.Members {
+		msgs = append(msgs, m.Messages[mem.PID]...)
+		dropped += m.MessageDropCount[mem.PID]
+	}
+	if len(msgs) == 0 {
+		return append(out, "  no decrypted flows for this app yet")
+	}
+	start := 0
+	if max > 0 && len(msgs) > max {
+		start = len(msgs) - max
+	}
+	for _, msg := range msgs[start:] {
+		out = append(out, "  "+interceptMsgLine(msg))
+	}
+	if dropped > 0 {
+		out = append(out, fmt.Sprintf("  (+%d older dropped · buffer bound)", dropped))
+	}
+	return out
+}
+
+// interceptMsgLine is a one-line summary of an intercepted message: a direction arrow, the HTTP start
+// line (first line of the already-redacted Text), and the destination. Connection-level events (no
+// direction/text) fall back to their reason.
+func interceptMsgLine(msg model.InterceptedMessage) string {
+	arrow := "·"
+	switch msg.Direction {
+	case "request":
+		arrow = "→"
+	case "response":
+		arrow = "←"
+	}
+	start := msg.Text
+	if i := strings.IndexAny(start, "\r\n"); i >= 0 {
+		start = start[:i]
+	}
+	if start == "" {
+		start = msg.Reason // connection-level events carry a reason, not message text
+	}
+	dest := msg.DestName
+	if dest == "" {
+		dest = msg.DestIP
+	}
+	line := arrow + " " + start
+	if dest != "" {
+		line += "  " + dest
+	}
+	return model.Clean(line)
 }

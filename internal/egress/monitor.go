@@ -2,6 +2,8 @@
 package egress
 
 import (
+	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -11,18 +13,27 @@ import (
 	"counterspy/internal/model"
 )
 
-const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence) — wide enough for
+const sparkLen = 60 // recent rate samples kept per ring (~1min at the 1s cadence), wide enough for
 // the zoom graph; the tree's small sparklines downsample this to their column width.
+
+// The sampling tools are invoked by absolute path, never resolved through PATH: the monitor runs
+// under sudo for full visibility, so a writable directory on PATH would let any of these be
+// substituted and executed with the monitor's privileges (go:S4036).
+const (
+	nettopBin = "/usr/bin/nettop"
+	lsofBin   = "/usr/sbin/lsof"
+	psBin     = "/bin/ps"
+)
 
 // Monitor holds the sampling state (previous cumulative bytes + per-app spark history) and
 // the injectable exec/join seams. Sample() is called once per tick.
 type Monitor struct {
 	interval  float64
 	prev      map[int]Bytes
-	prevConn  map[string]Bytes    // previous cumulative bytes per connKey — for per-conn rates
-	spark     map[string][]uint64 // per-app (path) out-rate history — app-header sparkline
-	sparkPID  map[int][]uint64    // per-PID out-rate history — instance-row sparkline
-	sparkConn map[string][]uint64 // per-connKey out-rate history — connection-row sparkline
+	prevConn  map[string]Bytes    // previous cumulative bytes per connKey, for per-conn rates
+	spark     map[string][]uint64 // per-app (path) out-rate history, app-header sparkline
+	sparkPID  map[int][]uint64    // per-PID out-rate history, instance-row sparkline
+	sparkConn map[string][]uint64 // per-connKey out-rate history, connection-row sparkline
 
 	sparkIn     map[string][]uint64 // per-app in-rate history
 	sparkInPID  map[int][]uint64    // per-PID in-rate history
@@ -35,6 +46,14 @@ type Monitor struct {
 	trustOf   func(path string) string
 	capsOf    func(path string) []string
 	resolve   func(ip string) (name string, ok bool) // passive-DNS name lookup; nil = names unavailable (#3)
+
+	// excludePath is the console's own canonical executable path. Any sampled process resolving to the
+	// SAME binary is dropped so counterspy never reports on itself: critically the SEPARATE `intercept`
+	// daemon process (same install, different pid), whose relay dials to every upstream would otherwise
+	// dominate the Exfiltration view while armed. A pid-based exclusion was wrong: the daemon is a
+	// different process, so os.Getpid() of the console never matched it (Self1, ABORT re-run). A copy of
+	// the binary at a different path stays visible. Set to the resolved os.Executable() in New.
+	excludePath string
 }
 
 // Resolver maps a destination IP to the hostname most recently observed resolving to it (passive
@@ -49,6 +68,14 @@ type Resolver interface {
 func (m *Monitor) SetResolver(r Resolver) { m.resolve = r.Lookup }
 
 func New(interval float64) *Monitor {
+	exe, exeErr := selfExePath()
+	if exeErr != nil {
+		// os.Executable essentially never fails on macOS, but if it does we must not silently ship a
+		// disabled self-exclusion: path-based exclusion (isSelf) and the argv daemon match both need our
+		// own path. Record it (Rule 14) rather than reading as "no self traffic". The daemon can then
+		// re-appear as an app group; the log line is the breadcrumb for that.
+		log.Printf("egress: could not resolve own executable path; self-exclusion disabled: %v", exeErr)
+	}
 	return &Monitor{
 		interval:  interval,
 		prev:      map[int]Bytes{},
@@ -67,21 +94,82 @@ func New(interval float64) *Monitor {
 			// -n disables DNS/hostname resolution: WITHOUT it nettop blocks ~5s per sample (making
 			// the live view/zoom graph crawl); WITH it a sample returns in ~10ms and endpoints stay
 			// as IPs, which is exactly what the IP-based parser wants.
-			b, _ := exec.Command("nettop", "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
+			b, _ := exec.Command(nettopBin, "-n", "-L", "1", "-x", "-J", "bytes_in,bytes_out").Output()
 			return b
 		},
-		runLsof:  func() []byte { b, _ := exec.Command("lsof", "-i", "-nP").Output(); return b },
-		procs:    defaultProcs,
-		exePaths: defaultExePaths,
-		trustOf:  defaultTrust,
-		capsOf:   defaultCaps,
+		runLsof:     func() []byte { b, _ := exec.Command(lsofBin, "-i", "-nP").Output(); return b },
+		procs:       defaultProcs,
+		exePaths:    defaultExePaths,
+		trustOf:     defaultTrust,
+		capsOf:      defaultCaps,
+		excludePath: exe,
 	}
 }
 
+// interceptSubcommand is the daemon's subcommand; a process running `<our binary> intercept` IS the
+// intercept daemon and must be self-excluded regardless of where it was installed (Self1).
+const interceptSubcommand = "intercept"
+
+// selfExePath returns the running binary's canonical (symlink-resolved) path, and any error resolving
+// it. On error the caller keeps self-exclusion disabled but records the failure (Rule 14) instead of
+// silently returning "" and reading as "counterspy has no traffic".
+func selfExePath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		return resolved, nil
+	}
+	return exe, nil
+}
+
+// isSelf reports whether an executable path belongs to counterspy itself. The symlink-resolving
+// comparison only runs when the basename could match, so ordinary processes cost one string compare.
+func (m *Monitor) isSelf(path string) bool {
+	if m.excludePath == "" || path == "" {
+		return false
+	}
+	if path == m.excludePath {
+		return true
+	}
+	if filepath.Base(path) != filepath.Base(m.excludePath) {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved == m.excludePath
+	}
+	return false
+}
+
+// isInterceptDaemon reports whether a sampled process is counterspy's OWN intercept daemon even when
+// it was installed at a DIFFERENT path than the console (the split install the tool's own guidance
+// steers toward: daemon in /usr/local/bin, console from Homebrew or a build tree). Path-equality alone
+// (isSelf) missed that case, so the daemon's relay traffic surfaced as an app (Self1). Here we key on
+// identity: the exe basename matches ours AND the process runs the `intercept` subcommand. The basename
+// gate keeps an unrelated tool that merely has "intercept" in its argv from being wrongly hidden.
+func (m *Monitor) isInterceptDaemon(path, cmd string) bool {
+	if m.excludePath == "" || path == "" || cmd == "" {
+		return false
+	}
+	if filepath.Base(path) != filepath.Base(m.excludePath) {
+		return false
+	}
+	// The subcommand is the first argv token after argv[0]. Strip the known exe path (from `ps comm`,
+	// spaces intact) to isolate it even when the path has spaces; fall back to a field split.
+	rest := cmd
+	if strings.HasPrefix(cmd, path) {
+		rest = cmd[len(path):]
+	} else if f := strings.Fields(cmd); len(f) >= 2 {
+		return f[1] == interceptSubcommand
+	}
+	return firstToken(strings.TrimSpace(rest)) == interceptSubcommand
+}
+
 // defaultExePaths resolves every pid's real executable path from `ps -o comm` (no argv, so
-// spaces in the path are unambiguous — fixes the "Application" mislabel).
+// spaces in the path are unambiguous; fixes the "Application" mislabel).
 func defaultExePaths() map[int]string {
-	b, _ := exec.Command("ps", "-axo", "pid=,comm=").Output()
+	b, _ := exec.Command(psBin, "-axo", "pid=,comm=").Output()
 	return ParsePidPaths(b)
 }
 
@@ -95,13 +183,13 @@ func (m *Monitor) Sample() []model.EgressGroup {
 	exe := m.exePaths()
 
 	// Enrich each lsof-discovered connection with its per-connection out-rate (from nettop's
-	// per-connection byte counts) and advance its own spark ring — so every connection leaf
+	// per-connection byte counts) and advance its own spark ring, so every connection leaf
 	// row shows a real trend, not a flat line. Prune connKeys gone this tick.
 	liveConn := make(map[string]bool, len(curConn))
 	rateOf := make(map[string]uint64, len(curConn))
 	rateInOf := make(map[string]uint64, len(curConn))
 	// First pass: advance each UNIQUE connKey's ring exactly once (two lsof FDs to the same
-	// remote share a key — advancing per-entry would grow the ring 2x/tick and desync rows).
+	// remote share a key; advancing per-entry would grow the ring 2x/tick and desync rows).
 	for pid, cs := range conns {
 		for i := range cs {
 			k := connKey(pid, cs[i].Endpoint.IP, cs[i].Endpoint.Port)
@@ -169,6 +257,9 @@ func (m *Monitor) Sample() []model.EgressGroup {
 		path := exe[pid]
 		if path == "" {
 			path = binaryPath(p)
+		}
+		if m.isSelf(path) || m.isInterceptDaemon(path, cmdOf(p)) {
+			continue // never report on counterspy itself (console or the intercept daemon), Self1
 		}
 		app := appName(path, pid)
 		// First sighting of a pid has no prior cumulative baseline; rate is 0 rather than
@@ -308,6 +399,14 @@ func binaryPath(p *collect.Proc) string {
 	return firstToken(p.Cmd)
 }
 
+// cmdOf is the process's full command line (argv), or "" when the proc is unknown.
+func cmdOf(p *collect.Proc) string {
+	if p == nil {
+		return ""
+	}
+	return p.Cmd
+}
+
 // appName is the display name: the executable's base name, or "pid:N" when no path resolved.
 func appName(path string, pid int) string {
 	if path == "" {
@@ -328,7 +427,7 @@ func firstToken(s string) string {
 // defaultProcs/defaultTrust/defaultCaps are the real joins, kept tiny so Sample stays the
 // orchestrator. defaultTrust maps a binary's codesign state; defaultCaps maps TCC grants.
 func defaultProcs() map[int]*collect.Proc {
-	b, _ := exec.Command("ps", "-axo", "pid,ppid,user,command").Output()
+	b, _ := exec.Command(psBin, "-axo", "pid,ppid,user,command").Output()
 	return collect.ParsePs(b)
 }
 

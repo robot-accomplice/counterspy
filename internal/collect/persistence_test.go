@@ -89,7 +89,7 @@ func TestParsePersistencePlist_InlineInterpreterIsPayload(t *testing.T) {
 	}
 }
 
-// T-7 (Antagonist A1): `/usr/bin/env python3 -c <src>` — the env wrapper must be stripped so the
+// T-7 (Antagonist A1): `/usr/bin/env python3 -c <src>`; the env wrapper must be stripped so the
 // real interpreter is seen, the inline source is the payload, and neither env nor the interpreter
 // becomes the codesign subject.
 func TestParsePersistencePlist_EnvWrappedInlineInterpreter(t *testing.T) {
@@ -134,7 +134,7 @@ func TestParsePersistencePlist_InterpreterMatchIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// T-7 (Audit F-1): the whitewash also survives without an inline flag — an interpreter with a
+// T-7 (Audit F-1): the whitewash also survives without an inline flag; an interpreter with a
 // RELATIVE script arg leaves pickTarget resolving to the interpreter itself. The trusted shim must
 // never be the codesign subject even in this non-inline shape.
 func TestParsePersistencePlist_InterpreterNeverBecomesSubject(t *testing.T) {
@@ -153,7 +153,7 @@ func TestParsePersistencePlist_InterpreterNeverBecomesSubject(t *testing.T) {
 	}
 }
 
-// T-7 (Audit F-3): inline-code flags are interpreter-scoped — `node -r <module>` is require, NOT
+// T-7 (Audit F-3): inline-code flags are interpreter-scoped; `node -r <module>` is require, NOT
 // inline code. A legit dev-tooling agent must not be flagged, and its real script target must be
 // preserved (not discarded via the plist fallback).
 func TestParsePersistencePlist_NodeRequireIsNotInlineCode(t *testing.T) {

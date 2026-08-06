@@ -14,13 +14,13 @@ const protoUDP = 17
 
 // buildPortFilter assembles a classic-BPF program keeping only UDP or TCP packets whose src OR dst
 // port equals `port`, across IPv4 and IPv6. It scopes the passive DNS capture to port 53 so the
-// kernel doesn't copy the whole interface — especially high-volume QUIC on UDP/443 — into userspace.
+// kernel doesn't copy the whole interface (especially high-volume QUIC on UDP/443) into userspace.
 // Unlike buildFlowFilter it can't specialize on address family at build time (the observer sees both
 // families on one interface), so it dispatches on the IP version nibble at runtime.
 //
 // This is a VOLUME cut, not a correctness gate: the observer re-checks the port and parses DNS in
 // userspace, so an over-strict filter merely misses some names and an over-loose one merely wastes a
-// little CPU — neither can produce a wrong name. IPv6 extension headers are not walked (rare for DNS);
+// little CPU; neither can produce a wrong name. IPv6 extension headers are not walked (rare for DNS);
 // such packets fall through to REJECT (their names are simply missed).
 func buildPortFilter(linkHdrLen, port int) ([]bpf.RawInstruction, error) {
 	return bpf.Assemble(portFilterInsns(uint32(linkHdrLen), uint32(port)))
@@ -63,7 +63,7 @@ func portFilterInsns(L, p uint32) []bpf.Instruction {
 
 // buildFlowFilter assembles a classic-BPF program that keeps only TCP packets to/from the flow's
 // remote host, so the kernel never copies the rest of the interface's traffic into our process
-// (spec §6 least-privilege). The program is family-specific — we know the remote's address family
+// (spec §6 least-privilege). The program is family-specific; we know the remote's address family
 // at build time, so no runtime v4/v6 dispatch is needed. Port precision stays in the (tested)
 // userspace Inspect correlation; the kernel filter's job is the coarse, high-volume cut: one host,
 // TCP only. linkHdrLen is the datalink header length (Ethernet 14, null 4, raw 0) that the IP
@@ -103,7 +103,7 @@ func ipv4HostFilter(L uint32, host [4]byte) []bpf.Instruction {
 
 // ipv6HostFilter keeps IPv6/TCP packets whose src OR dst 128-bit address equals host. The address
 // is compared word-by-word (four 32-bit loads each); any src mismatch jumps to the dst block, any
-// dst mismatch jumps to REJECT. Indices are load-bearing — the VM tests cover src-match, dst-match,
+// dst mismatch jumps to REJECT. Indices are load-bearing; the VM tests cover src-match, dst-match,
 // wrong-host, and non-TCP so a bad skip fails a test.
 func ipv6HostFilter(L uint32, host [16]byte) []bpf.Instruction {
 	w := func(i int) uint32 {

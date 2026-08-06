@@ -4,7 +4,7 @@ package score
 // noise from Apple's own components. Extend deliberately.
 //
 // SECURITY: `authority` passed to IsAllowlisted MUST originate only from a
-// codesign-verified AND Gatekeeper-accepted (spctl) chain — never a raw/unverified
+// codesign-verified AND Gatekeeper-accepted (spctl) chain, never a raw/unverified
 // certificate CN, which an attacker can set to anything. Matching is EXACT (not
 // substring) so a spoofed CN like "Software Signing Evil Edition" cannot alias a
 // real Apple authority. (cp-3 Audit F-4; collector-side enforcement is ticket T-3.)

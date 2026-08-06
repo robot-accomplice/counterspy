@@ -74,8 +74,18 @@ swarm re-reads it (see "Resuming" below).
    cluster per `consensus.md` Stage 2, and append them to the reviewers' `findings/*.md` files so the
    trail survives the subagents that produced it.
 4. **RCA (you → RCA subagent).** For each confirmed failure, spawn an RCA subagent scoped to the
-   failing slice. It runs the **already-fixed / in-flight check first** (see `roles.md`), then returns
-   a fix brief or an `already-addressed:` note. Persist to `rca-out.md`.
+   failing slice, and instruct it to **invoke the `code-rca` skill and follow it** (see `roles.md`).
+   It runs the **already-fixed / in-flight check first**, then returns a fix brief carrying a
+   falsifiable claim and the recorded state that reproduced it — or an `already-addressed:` note.
+   Persist to `rca-out.md`.
+
+   **Do NOT diagnose inline instead of spawning this.** You are the Coder here, and a writer holding a
+   hypothesis reaches for a fix; the gate exists to stop that. When you catch yourself explaining a
+   symptom in prose ("the daemon is dead but the proxy is set, so teardown leaked"), that IS the RCA
+   step, and it must go through the skill's gate — reproduce from recorded state, state a falsifiable
+   claim — not through your own plausibility. This has misfired on real incidents in this project
+   (a false "teardown leaked" report against a still-running daemon; a pf-direction diagnosis whose
+   actual cause was IPv6), so treat inline RCA as drift, not as a shortcut.
 5. **Vote (you, as Conductor).** Run the consensus protocol yourself: gate on agreement, vote only on
    genuine splits, majority-then-stop, escalate irreversible/product calls to the human via
    `escalations.md`. You are the tally-keeper; you do not get to vote away the human's calls.

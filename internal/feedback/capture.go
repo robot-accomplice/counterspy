@@ -36,7 +36,7 @@ func Capture(a model.Assessment, label string, detail Detail, nonce string) mode
 	return r
 }
 
-// NewNonce returns a random, non-correlatable submission nonce. Not used for identity —
+// NewNonce returns a random, non-correlatable submission nonce. Not used for identity;
 // it deduplicates a single submission's records, not a user across submissions.
 func NewNonce() string {
 	var b [8]byte

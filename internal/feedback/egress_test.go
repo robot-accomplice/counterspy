@@ -31,10 +31,10 @@ func TestEgressOnly(t *testing.T) {
 			strings.Contains(src, "NewDecoder(") ||
 			strings.Contains(src, ".Decode(")
 		if touchesResponseBody && decodes {
-			t.Errorf("%s reads an HTTP response body AND decodes — egress-only forbids reading a reply into program state", f)
+			t.Errorf("%s reads an HTTP response body AND decodes: egress-only forbids reading a reply into program state", f)
 		}
 	}
-	// Positive assertion: http.go actually drains the body to io.Discard — the exact call,
+	// Positive assertion: http.go actually drains the body to io.Discard, the exact call,
 	// not merely the words appearing in a comment.
 	b, err := os.ReadFile("http.go")
 	if err != nil {

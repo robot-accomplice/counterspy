@@ -70,7 +70,7 @@ func toInspectView(r inspect.Result) model.InspectView {
 }
 
 // renderFlowBytes turns one direction's captured bytes into what the pane shows: readable TEXT when
-// the direction is plaintext (HTTP headers, protocol text — secrets still masked in the view); a
+// the direction is plaintext (HTTP headers, protocol text, secrets still masked in the view); a
 // HEXDUMP when it's cleartext-but-binary (so the actual payload is inspectable, and its ASCII gutter
 // surfaces any embedded text); or nothing when the flow is TLS (the bytes are ciphertext noise, and
 // the verdict already says so). The wire bytes are never hidden just for being non-text (§6).
@@ -78,7 +78,7 @@ func renderFlowBytes(b []byte, plaintext, encrypted bool) string {
 	if len(b) == 0 {
 		return ""
 	}
-	// A direction whose OWN bytes are readable is shown even inside a TLS flow — the per-direction
+	// A direction whose OWN bytes are readable is shown even inside a TLS flow; the per-direction
 	// plaintext flag beats the flow-level encrypted flag (a TLS connection can carry a cleartext
 	// direction in the capture window). Decode HTTP structure + body first, else the raw text.
 	if plaintext {
@@ -88,7 +88,7 @@ func renderFlowBytes(b []byte, plaintext, encrypted bool) string {
 		return sanitizeMultiline(string(b))
 	}
 	if encrypted {
-		return "" // TLS ciphertext — random bytes; surfacing them adds noise, not information
+		return "" // TLS ciphertext: random bytes; surfacing them adds noise, not information
 	}
 	// Cleartext-but-binary: a gzipped/chunked HTTP body isn't "plaintext" but IS decodable into
 	// readable text (#3, the reveal-more goal); only a genuine non-HTTP binary payload hexdumps.
@@ -145,12 +145,12 @@ func sanitizeMultiline(s string) string {
 
 // captureFailVerdict turns an OpenLiveCapture error into the one-line verdict shown in the pane.
 // The monitor (nettop/lsof/ps) runs unprivileged, but reading raw packets off /dev/bpf is gated
-// by macOS behind root — so the common failure is "not root". That gets an actionable message
+// by macOS behind root, so the common failure is "not root". That gets an actionable message
 // naming the exact fix rather than a raw errno, so inspection reads as the one sudo-only feature,
 // not a broken tool. Any other failure is surfaced verbatim.
 func captureFailVerdict(err error) string {
 	if errors.Is(err, os.ErrPermission) {
-		return "inspection needs packet-capture access — relaunch with `sudo counterspy console`"
+		return "inspection needs packet-capture access: relaunch with `sudo counterspy console`"
 	}
 	return "capture failed: " + err.Error()
 }
@@ -208,7 +208,7 @@ func newInspector(noInspect bool) tui.Inspector {
 const dnsCacheSize = 4096
 
 // dnsInterface picks the interface the passive DNS observer captures on: the default-route interface
-// (probed toward a public resolver), falling back to en0 — the same resolution the flow inspector uses.
+// (probed toward a public resolver), falling back to en0, the same resolution the flow inspector uses.
 func dnsInterface() string {
 	return outboundInterface(netip.MustParseAddrPort("8.8.8.8:53"))
 }

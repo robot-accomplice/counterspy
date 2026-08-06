@@ -29,7 +29,7 @@ func Score(ev []model.Evidence) []model.Finding {
 	for _, k := range order {
 		f := groups[k]
 		f.Score = applyCorrelation(f.Score, len(f.Kinds))
-		f.Tripwire = tripwire(*f) // computed BEFORE suppression — a tripwire always surfaces
+		f.Tripwire = tripwire(*f) // computed BEFORE suppression. A tripwire always surfaces
 		if f.Tripwire == "" && subjectTrusted(*f) {
 			continue // genuinely known-good and nothing contradicting → suppress noise
 		}

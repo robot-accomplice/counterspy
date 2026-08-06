@@ -12,7 +12,7 @@ import (
 )
 
 // Expanding an app can push rows past the bottom edge; the tree must scroll to keep the selected
-// row on-screen (it had no viewport — the overflow was just clipped). With the selection at the
+// row on-screen (it had no viewport: the overflow was just clipped). With the selection at the
 // end and far more rows than fit, a top row scrolls off and a near-selection row stays visible.
 func TestEgressView_ScrollsToKeepSelectionVisible(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
@@ -41,7 +41,7 @@ func TestEgressView_ScrollsToKeepSelectionVisible(t *testing.T) {
 }
 
 // The encryption annotation: a TLS port draws the sealed box (2 cols), a cleartext port the open
-// box, and an unknown port nothing (0 cols) — a port-only heuristic.
+// box, and an unknown port nothing (0 cols): a port-only heuristic.
 func TestDrawEncGlyph(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
 	if err := s.Init(); err != nil {
@@ -202,7 +202,7 @@ func TestDrawTrend_HeightsAndColors(t *testing.T) {
 }
 
 func TestTopDest_ZeroOneMany(t *testing.T) {
-	if got := topDest(model.EgressGroup{}); got != "—" {
+	if got := topDest(model.EgressGroup{}); got != "-" {
 		t.Fatalf("zero destinations should render em-dash, got %q", got)
 	}
 	one := model.EgressGroup{Destinations: []model.Endpoint{{IP: "1.2.3.4", Port: 443}}}
@@ -311,7 +311,7 @@ func TestEgressView_EmptyState(t *testing.T) {
 	egressView(m, s)
 	s.Show()
 	out := screenText(s)
-	if !strings.Contains(out, "No outbound traffic observed — run with sudo for full visibility.") {
+	if !strings.Contains(out, "No outbound traffic observed. Run with sudo for full visibility.") {
 		t.Fatalf("expected empty-state hint, got:\n%s", out)
 	}
 }
@@ -376,7 +376,7 @@ func TestEgressView_SparklineDownsampledAndColumnsAligned(t *testing.T) {
 }
 
 // The exfil view is split into panes by light rules: one under the title (row 1), one under the
-// column headers (row 3), and one directly above the footer usage line — so the title, labels,
+// column headers (row 3), and one directly above the footer usage line, so the title, labels,
 // values, and controls read as separate sections instead of one dense block.
 func TestEgressView_SectionSeparators(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
@@ -442,7 +442,7 @@ func TestComputeCols_ColumnsAscendAndFitWidth(t *testing.T) {
 }
 
 // Task 8: the egress tree toggle uses +/- (a disclosure control), never ▸ (which is
-// reserved for the liveness "active" mark) — resolving that glyph collision.
+// reserved for the liveness "active" mark), resolving that glyph collision.
 func TestEgressTreeTogglesWithPlusMinus(t *testing.T) {
 	if got := collapsedMarker(false); got != '+' {
 		t.Errorf("collapsed marker: got %q want +", got)
@@ -484,7 +484,7 @@ func TestTempColor_ShareOfPeak(t *testing.T) {
 	if hot != heatColor(1.0) || cold != heatColor(1.0/1000.0) {
 		t.Fatalf("tempColor must be heatColor(rate/peak): hot=%v cold=%v", hot, cold)
 	}
-	_ = tempColor(0, 0) // no traffic — no divide-by-zero
+	_ = tempColor(0, 0) // no traffic, no divide-by-zero
 }
 
 func TestDirectionColor(t *testing.T) {
@@ -496,7 +496,7 @@ func TestDirectionColor(t *testing.T) {
 	if amber != dirColor(1.0) || green != dirColor(0.0) {
 		t.Fatalf("directionColor must map out/(out+in) through dirColor: amber=%v green=%v", amber, green)
 	}
-	_ = directionColor(0, 0) // no traffic — no divide-by-zero
+	_ = directionColor(0, 0) // no traffic, no divide-by-zero
 }
 
 func TestTrendSeries_Combined(t *testing.T) {
@@ -539,7 +539,7 @@ func TestFramePeak_MaxAcrossRowsPerMode(t *testing.T) {
 		t.Fatalf("in peak = loudest in across rows, got %d", p)
 	}
 	if p := framePeak(rows, trendCombined); p != 0 {
-		t.Fatalf("combined uses direction color, not temperature — peak should be 0, got %d", p)
+		t.Fatalf("combined uses direction color, not temperature; peak should be 0, got %d", p)
 	}
 }
 
@@ -555,7 +555,7 @@ func TestEgressView_TrendModeReachesTheTree(t *testing.T) {
 	s.SetSize(120, 40)
 	g := eg("x", model.Low, 10)
 	g.Spark = []uint64{0, 0, 100}   // out: rising
-	g.InSpark = []uint64{100, 0, 0} // in: falling — a different shape
+	g.InSpark = []uint64{100, 0, 0} // in: falling, a different shape
 	m := NewEgress().withGroups([]model.EgressGroup{g})
 
 	trendGlyphs := func(mode trendMode) string {
@@ -571,7 +571,7 @@ func TestEgressView_TrendModeReachesTheTree(t *testing.T) {
 		return string(b)
 	}
 	if trendGlyphs(trendOut) == trendGlyphs(trendIn) {
-		t.Fatal("out and in modes must render different trend shapes — egressView must thread m.Trend through")
+		t.Fatal("out and in modes must render different trend shapes; egressView must thread m.Trend through")
 	}
 }
 
@@ -601,7 +601,7 @@ func TestEgressView_TrendLegendAndHeader(t *testing.T) {
 	}
 	out, in, comb := render(trendOut), render(trendIn), render(trendCombined)
 
-	// Header glyph per mode — the single-source trendGlyph reaches the column header.
+	// Header glyph per mode: the single-source trendGlyph reaches the column header.
 	if !simContains(out, "TREND ↑") {
 		t.Fatal("out header must show TREND ↑")
 	}

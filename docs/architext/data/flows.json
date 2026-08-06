@@ -2,7 +2,7 @@
   "flows": [
     {
       "id": "scan-pipeline",
-      "name": "Scan pipeline (collect → score → interpret → report)",
+      "name": "Scan pipeline (collect \u2192 score \u2192 interpret \u2192 report)",
       "status": "implemented",
       "summary": "The read-only scan: fan out four collectors, score+correlate, synthesize recommendations, render a ranked report. Never mutates.",
       "trigger": "operator runs `sudo counterspy scan`",
@@ -109,7 +109,7 @@
     },
     {
       "id": "quarantine",
-      "name": "Consented quarantine (disable → move → manifest)",
+      "name": "Consented quarantine (disable \u2192 move \u2192 manifest)",
       "status": "implemented",
       "summary": "The only mutating flow: on per-item approval, disable the launch item and MOVE its artifacts into a reversible quarantine, recording a manifest.",
       "trigger": "operator answers y to a finding in `scan --interactive`",
@@ -152,7 +152,7 @@
         }
       ],
       "guarantees": [
-        "Never deletes — moves only",
+        "Never deletes \u2014 moves only",
         "Reversible (restore round-trips byte-identically)",
         "Partial failures still write a manifest so nothing is orphaned"
       ],
@@ -171,9 +171,9 @@
     },
     {
       "id": "inspection",
-      "name": "Flow inspection (i → /dev/bpf capture → honest verdict)",
+      "name": "Flow inspection (i \u2192 /dev/bpf capture \u2192 honest verdict)",
       "status": "implemented",
-      "summary": "On demand, capture one selected Exfiltration flow with a native /dev/bpf tap scoped to its 4-tuple and return an honest coverage verdict (readable plaintext, TLS ciphertext, or cleartext binary) — never decrypting, keeping bytes local and ephemeral.",
+      "summary": "On demand, capture one selected Exfiltration flow with a native /dev/bpf tap scoped to its 4-tuple and return an honest coverage verdict (readable plaintext, TLS ciphertext, or cleartext binary) \u2014 never decrypting, keeping bytes local and ephemeral.",
       "trigger": "operator presses `i` on a flow in the Exfiltration view",
       "actors": [
         "operator"
@@ -280,6 +280,130 @@
       "knownGaps": [
         "Destination NAMES (SNI/DNS) not yet threaded into the tree (issue #3)",
         "Full TCP reassembly deferred (T-10)"
+      ]
+    },
+    {
+      "id": "intercept",
+      "name": "TLS intercept (arm \u2192 system proxy \u2192 CONNECT \u2192 decrypt \u2192 publish \u2192 console \u2192 disarm)",
+      "status": "implemented",
+      "summary": "Consented, read-only decryption of the user's own outbound TLS: install a local CA, register as the system HTTPS proxy, terminate each CONNECT tunnel with a per-SNI leaf, re-dial the verified upstream, relay unmodified, capture + mask the plaintext into per-message InterceptedMessage events, publish them to a live unix socket and/or a rotating 0600 log, and ingest them into the console's Exfiltration view via `console --intercept` \u2014 all reverted on exit. Verified end-to-end on macOS 2026-07-16.",
+      "trigger": "operator runs `sudo counterspy intercept` and consents",
+      "actors": [
+        "operator"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "intercept + consent",
+          "kind": "start",
+          "summary": "Run `intercept`; confirm the trusted-CA install + system-proxy change (y/N, default No).",
+          "data": []
+        },
+        {
+          "id": "s2",
+          "from": "counterspy-cli",
+          "to": "mod-intercept",
+          "action": "arm",
+          "kind": "process",
+          "summary": "Load-or-create the CA; install trust, THEN register the system proxy (teardown registered first so any interrupt still disarms).",
+          "data": []
+        },
+        {
+          "id": "s3",
+          "from": "mod-intercept",
+          "to": "macos-tools",
+          "action": "installTrust + setsecurewebproxy",
+          "kind": "persistence",
+          "summary": "Add the CA as a System-keychain trusted root (security) and point each network service's HTTPS proxy at 127.0.0.1 (networksetup), capturing each PRIOR setting.",
+          "data": []
+        },
+        {
+          "id": "s4",
+          "from": "macos-tools",
+          "to": "mod-intercept",
+          "action": "CONNECT host:443",
+          "kind": "process",
+          "summary": "A proxy-honoring app opens a CONNECT tunnel, NAMING its destination \u2014 authoritative, replacing the disproved pf origdest lookup.",
+          "data": []
+        },
+        {
+          "id": "s5",
+          "from": "mod-intercept",
+          "to": "mod-model",
+          "action": "decode + mask",
+          "kind": "process",
+          "summary": "Terminate the client TLS with a per-SNI leaf, re-dial the upstream verified against the CONNECT authority, relay unmodified, and DecodeCleartext + Redact the captured plaintext into per-message InterceptedMessage events (request/response correlated in FIFO order).",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s6",
+          "from": "mod-intercept",
+          "to": "counterspy-cli",
+          "action": "publish",
+          "kind": "persistence",
+          "summary": "Publish the masked flow to the live unix socket (chowned to the invoking user) and/or the rotating 0600 log.",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s7",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "console --intercept",
+          "kind": "process",
+          "summary": "As the ordinary user, open the console and ingest the decrypted stream (live socket, or a captured --log file) into the Exfiltration view; counterspy's own relay dials are excluded from that view.",
+          "data": []
+        },
+        {
+          "id": "s8",
+          "from": "counterspy-cli",
+          "to": "operator",
+          "action": "render flows",
+          "kind": "return",
+          "returnOf": "s7",
+          "summary": "Per-app decrypted-message summaries in the Exfiltration zoom, with honest empty states and a marker on destinations whose TLS was decrypted; content only for 'decrypted' status \u2014 pinned/opaque/error explain why there is none.",
+          "data": [
+            "decrypted-flow"
+          ]
+        },
+        {
+          "id": "s9",
+          "from": "operator",
+          "to": "counterspy-cli",
+          "action": "Ctrl-C / --uninstall",
+          "kind": "stop",
+          "summary": "Teardown restores each service's prior proxy setting then removes the CA trust (reverse order), exactly once, on exit/panic/signal.",
+          "data": []
+        }
+      ],
+      "guarantees": [
+        "Read-only mirror: relayed bytes are never modified; upstream verified against the CONNECT authority",
+        "Secrets Redact-masked before any flow is published; only 'decrypted' flows carry plaintext",
+        "Arm is always reversible: proxy + trust reverted on exit, panic, and signal; --uninstall self-heals"
+      ],
+      "failureBehavior": [
+        "A cert-pinned client that rejects the leaf is shown honestly as 'pinned' (bypassed, not decrypted)",
+        "A connection whose CONNECT cannot be read publishes a FlowError \u2014 never dropped silently",
+        "Any arming failure rolls back what was installed and fails loud; a revert failure is reported, never silent"
+      ],
+      "observability": [
+        "Exfiltration view decrypted section (console --intercept)",
+        "rotating 0600 JSONL log",
+        "honest per-flow status (decrypted / pinned / opaque / error)"
+      ],
+      "verification": [
+        "go test ./internal/intercept/... ./internal/tui/ ./... -race",
+        "root smoke test 2026-07-16: live decrypt of system traffic; proxy + trust restored on exit"
+      ],
+      "knownGaps": [
+        "COOPERATIVE: software ignoring the system proxy is not intercepted (needs a NetworkExtension transparent proxy \u2014 later phase)",
+        "Redact/block of outbound payloads deferred to Phase 3 (this phase is decrypt/visibility only)",
+        "curl does not honor the macOS system proxy (use `curl -x`); browsers/CFNetwork apps do"
       ]
     }
   ]
