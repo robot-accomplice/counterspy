@@ -153,6 +153,47 @@ func TestFramingReader_ChunkExtensionsIgnored(t *testing.T) {
 	}
 }
 
+// #47 (CRITICAL evasion): strconv.ParseInt accepts a leading sign, so a "-0"/"+0" chunk size parsed as
+// 0 and was treated as the terminal chunk, silently ending capture (truncated=false, empty reason) while
+// every following byte was delivered to the client and hidden from the sensor. RFC 7230 §4.1:
+// chunk-size = 1*HEXDIG, no sign. A signed size must mark the capture truncated with an honest reason.
+func TestFramingReader_ChunkSizeMinusZeroDoesNotSilentlyEndCapture(t *testing.T) {
+	body := "-0\r\n\r\n1a\r\nEXFILTRATED-SECRET-PAYLOAD\r\n0\r\n\r\n"
+	req := "POST /x HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n" + body
+	r := newFramingReader(strings.NewReader(req), testKeep, testMessage, testHeader)
+	m, _ := r.readRequest()
+	if !m.truncated {
+		t.Fatalf("a signed chunk size must mark truncated, not silently complete; body=%q reason=%q", string(m.body), m.reason)
+	}
+	if m.reason == "" {
+		t.Fatal("a malformed chunk size must carry a reason, not an empty (silent) one")
+	}
+}
+
+func TestFramingReader_ChunkSizePlusZeroRejected(t *testing.T) {
+	body := "+0\r\n\r\n1a\r\nEXFILTRATED-SECRET-PAYLOAD\r\n0\r\n\r\n"
+	req := "POST /x HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n" + body
+	r := newFramingReader(strings.NewReader(req), testKeep, testMessage, testHeader)
+	m, _ := r.readRequest()
+	if !m.truncated {
+		t.Fatalf("a '+0' chunk size must mark truncated, not silently complete; body=%q", string(m.body))
+	}
+}
+
+// Leading zeros are valid HEXDIG (net/http accepts "0005") and must still parse.
+func TestFramingReader_ChunkSizeLeadingZerosAccepted(t *testing.T) {
+	body := "0005\r\nhello\r\n0\r\n\r\n"
+	req := "POST /x HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n" + body
+	r := newFramingReader(strings.NewReader(req), testKeep, testMessage, testHeader)
+	m, err := r.readRequest()
+	if err != nil {
+		t.Fatalf("readRequest: %v", err)
+	}
+	if got := string(m.body); got != "hello" {
+		t.Fatalf("leading-zero chunk size must parse; body=%q", got)
+	}
+}
+
 func TestFramingReader_ContentLengthCapped(t *testing.T) {
 	keep := 4
 	payload := "1234567890"
