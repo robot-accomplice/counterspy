@@ -1,5 +1,5 @@
 // Package tui is an interactive tcell triage face over []model.Assessment. It performs
-// no analysis — it renders findings and acts through the Actor interface (§12 invariant).
+// no analysis; it renders findings and acts through the Actor interface (§12 invariant).
 package tui
 
 import (
@@ -89,7 +89,7 @@ func recRank(r model.Recommendation) int {
 	}
 }
 
-// visible applies filter + sort. Pure. Every tier — including Monitor — is shown; the tool gains
+// visible applies filter + sort. Pure. Every tier, including Monitor, is shown; the tool gains
 // nothing by hiding the low-tier items behind a toggle.
 func (m Model) visible() []model.Assessment {
 	out := make([]model.Assessment, 0, len(m.Assessments))

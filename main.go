@@ -24,6 +24,7 @@ import (
 	"counterspy/internal/egress"
 	"counterspy/internal/feedback"
 	"counterspy/internal/inspect"
+	"counterspy/internal/intercept/publish"
 	"counterspy/internal/interpret"
 	"counterspy/internal/mark"
 	"counterspy/internal/model"
@@ -66,6 +67,8 @@ func run(args []string, stdout io.Writer) int {
 		return 0
 	case "feedback":
 		return runFeedback(args[1:], stdout)
+	case "intercept":
+		return runIntercept(args[1:], stdout)
 	default:
 		fmt.Fprintln(stdout, "unknown command:", args[0])
 		fmt.Fprintln(stdout)
@@ -77,7 +80,7 @@ func run(args []string, stdout io.Writer) int {
 // usage prints the full help: the tool banner + version, every command with its flags, and
 // how to choose the plain CLI (scan) vs the interactive UI (tui).
 func usage(w io.Writer) {
-	fmt.Fprintf(w, `CounterSpy %s — macOS spyware triage 🕵️
+	fmt.Fprintf(w, `CounterSpy %s: macOS spyware triage 🕵️
 Scans for spyware-like activity, ranks findings, and reversibly quarantines on approval (never deletes).
 
 Usage:
@@ -90,9 +93,20 @@ Commands:
   console                  Open the interactive UI: Findings triage + the Exfiltration monitor,
                            switched with Tab / Shift-Tab (the visual mode)
       --from <file>          load a 'scan --json' snapshot instead of scanning live (read-only)
+      --intercept[=path]     show decrypted flows in the Exfiltration view: live from the armed
+                             daemon's socket, or from a captured --log file
       --json                 print the Exfiltration report as JSON and exit (no live UI)
       --once                 print the Exfiltration report once and exit (no live UI)
   restore <manifest.json>  Undo a quarantine from its manifest
+  intercept                Decrypt outbound TLS through a local proxy (installs a trusted CA + sets
+                           the system HTTPS proxy; reverts on exit). Requires sudo. View via console.
+      --stream[=sock]        publish live flows to a unix socket (the default output)
+      --log[=path]           publish flows to a rotating 0600 JSONL log
+      --uninstall            revert the CA trust + system proxy and exit
+      --yes                  skip the interactive consent prompt
+      --install-daemon       install a PERSISTENT root daemon (re-arms at every boot, logs to
+                             /var/log/counterspy; prompts separately). counterspy scan will flag it.
+      --uninstall-daemon     remove the daemon and revert everything
   feedback [list|submit]   Manage opt-in anonymous false-positive feedback (off by default)
   version                  Print the version (also --version)
   help                     Show this help (also -h, --help, -?)
@@ -145,14 +159,14 @@ type collectorSpec struct {
 var evidenceCollectors = []collectorSpec{
 	{"Persistence signal unavailable", collect.CollectPersistence},
 	{"Process/network signal unavailable", collect.CollectProcesses},
-	{"TCC privacy-grant signal unavailable — run with sudo to include it", collect.CollectTCC},
+	{"TCC privacy-grant signal unavailable: run with sudo to include it", collect.CollectTCC},
 }
 
-// collectAll fans out the collectors and returns any signal GAPS as friendly notes —
+// collectAll fans out the collectors and returns any signal GAPS as friendly notes:
 // a missing signal is reported, never silently read as "clean" (spec §9, Rule 13).
 // livenessFor assembles each assessment's display marks (run-state + socket) from the
 // liveness interpret already derived (issue #23). The run-state itself is resolved once,
-// at Assess time, against the live-process set — so a snapshot (`--from`) carries its
+// at Assess time, against the live-process set, so a snapshot (`--from`) carries its
 // scan-time liveness instead of being re-derived against a different machine's processes.
 func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
 	return mark.Classify(assessments)
@@ -161,7 +175,7 @@ func livenessFor(assessments []model.Assessment) map[string]mark.Liveness {
 func collectAll() ([]model.Evidence, []string) { return collectAllWithProgress(nil) }
 
 // collectAllWithProgress runs the collectors, then the per-binary code-signature checks
-// CONCURRENTLY (a bounded pool — each CollectCodesign spawns 3 subprocesses, so serial over
+// CONCURRENTLY (a bounded pool: each CollectCodesign spawns 3 subprocesses, so serial over
 // hundreds of binaries is the dominant startup cost). onCodesign, if non-nil, is called after
 // each binary completes so callers can render progress.
 func collectAllWithProgress(onCodesign func(done, total int)) ([]model.Evidence, []string) {
@@ -179,7 +193,7 @@ func collectAllWithProgress(onCodesign func(done, total int)) ([]model.Evidence,
 		add(c.gap, c.fn)
 	}
 	// codesign runs ONCE per unique on-disk binary surfaced by the other collectors.
-	// Skip .plist files (they aren't signed binaries — codesigning one yields a bogus
+	// Skip .plist files (they aren't signed binaries; codesigning one yields a bogus
 	// "unsigned") and anything that isn't a regular existing file.
 	seen := map[string]bool{}
 	var paths []string
@@ -262,7 +276,7 @@ func collectWithSpinner() ([]model.Evidence, []string) {
 // scanSpinner animates a braille spinner + progress line on w until stop closes.
 func scanSpinner(w io.Writer, done, total *int64, stop <-chan struct{}) {
 	frames := []rune("⣾⣽⣻⢿⡿⣟⣯⣷")
-	// Tint the braille glyph with the shared mint accent (report sMint, 38;5;79 — CounterSpy
+	// Tint the braille glyph with the shared mint accent (report sMint, 38;5;79, CounterSpy
 	// chrome); the message stays default. NO_COLOR drops the tint (the caller already gates the
 	// whole spinner on a tty).
 	col, reset := "\033[38;5;79m", "\033[0m"
@@ -303,7 +317,7 @@ func colorEnabled() bool {
 	return isTerminal(os.Stdout)
 }
 
-// quarantiner performs the quarantine effect quarantineLoop requests — a small local
+// quarantiner performs the quarantine effect quarantineLoop requests, a small local
 // interface (narrower than tui.Actor, which quarantineLoop doesn't need) so tests can
 // inject a fake and assert y/N/q branch behavior without touching the filesystem.
 type quarantiner interface {
@@ -350,7 +364,7 @@ func quarantineLoop(assessments []model.Assessment, stdout io.Writer, stdin io.R
 
 // plannedActions derives the reversible actions for a finding: disable the launch
 // item (by label), then move its plist(s) and its on-disk target. A finding with no
-// label and no path (e.g. a bare process) yields no actions — CounterSpy won't perform
+// label and no path (e.g. a bare process) yields no actions; CounterSpy won't perform
 // an irreversible kill.
 func plannedActions(f model.Finding) []model.Action {
 	var a []model.Action
@@ -405,6 +419,47 @@ func filterAllowed(as []model.Assessment, allow map[string]bool) []model.Assessm
 	return out
 }
 
+// proxyEndpointForConsole returns the armed intercept proxy endpoint so the Exfiltration view can
+// recognize proxied connections. It is plain data from main's constant; no internal package imports
+// package main (decoupling invariant).
+func proxyEndpointForConsole() string { return fmt.Sprintf("127.0.0.1:%d", interceptProxyPort) }
+
+// interceptSource returns the two forms of `console --intercept[=path]` (an approved Phase 2 flag):
+// bare `--intercept` streams the live unix socket the armed daemon publishes to; `--intercept=path`
+// reads a captured `--log` JSONL file. It parses the forms directly rather than via flagValue, which
+// would grab a following flag (e.g. `--intercept --no-inspect`) as the path.
+func interceptSource(flags []string) (on bool, logPath string) {
+	for _, f := range flags {
+		switch {
+		case f == "--intercept":
+			on = true
+		case strings.HasPrefix(f, "--intercept="):
+			on, logPath = true, strings.TrimPrefix(f, "--intercept=")
+		}
+	}
+	return on, logPath
+}
+
+// interceptMessages streams intercepted per-message events into the console. With no logPath it dials
+// the live socket the armed daemon publishes to; with one it reads that captured JSONL log (one-shot
+// catch-up). Either way it is a single source that publishes each message once, so no dedup is needed.
+// A read error (socket absent because intercept isn't running, missing log) is non-fatal: the channel
+// simply stays empty and the Exfiltration view shows its honest "no intercepted messages" state. The
+// reader ends when the source ends (log EOF, socket close) or the process exits.
+func interceptMessages(logPath string) <-chan model.InterceptedMessage {
+	ch := make(chan model.InterceptedMessage, 64)
+	go func() {
+		defer close(ch)
+		send := func(m model.InterceptedMessage) { ch <- m }
+		if logPath == "" {
+			_ = publish.ReadSocket(interceptSocketPath, send)
+		} else {
+			_ = publish.ReadLog(logPath, send)
+		}
+	}()
+	return ch
+}
+
 // runConsole is the unified interactive UI: Findings triage + the Exfiltration monitor in one
 // screen, switched with Tab. `console --json`/`--once` instead prints the non-interactive
 // Exfiltration report (what `egress --json/--once` used to do).
@@ -415,7 +470,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	// The console needs a real terminal; refuse (and guide) when piped BEFORE doing a scan, so
 	// `console > out.txt` exits fast instead of collecting evidence it will never render.
 	if !isTerminal(os.Stdout) {
-		fmt.Fprintln(stdout, "console needs a terminal — use `counterspy scan` (or `console --json`).")
+		fmt.Fprintln(stdout, "console needs a terminal: use `counterspy scan` (or `console --json`).")
 		return 2
 	}
 	from := flagValue(flags, "--from")
@@ -431,7 +486,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 		gaps = g // a snapshot's collector gaps now surface in --from, same as a live scan (#8)
 	} else {
 		// Show the progress spinner while collecting (before the alt-screen opens) so the
-		// TUI startup isn't a silent multi-second freeze — same helper the scan path uses.
+		// TUI startup isn't a silent multi-second freeze; same helper the scan path uses.
 		ev, g := collectWithSpinner()
 		running, _ := collect.CollectRunningPaths()
 		assessments = filterAllowed(interpret.Assess(score.Score(ev), running), userAllowlist())
@@ -455,7 +510,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	var finiOnce sync.Once
 	fini := func() { finiOnce.Do(func() { screen.Fini() }) }
 
-	// Restore the terminal on an EXTERNAL kill (SIGINT/TERM/HUP — e.g. `kill`, SSH drop)
+	// Restore the terminal on an EXTERNAL kill (SIGINT/TERM/HUP, e.g. `kill`, SSH drop)
 	// which bypasses defers. SIGKILL can never be caught (true of any TUI) (ABORT-TUI
 	// Worst-Case-Customer NO-GO).
 	sigCh := make(chan os.Signal, 1)
@@ -467,7 +522,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 		case <-sigCh:
 			fini()
 			os.Exit(130)
-		case <-sigDone: // normal exit — unregister and return instead of leaking this goroutine
+		case <-sigDone: // normal exit: unregister and return instead of leaking this goroutine
 		}
 	}()
 
@@ -506,7 +561,7 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 	// Exfiltration sampler + a ~3Hz ticker. RunConsole samples LAZILY (only while Exfiltration is
 	// the visible mode), so the ticker fires regardless but no nettop/lsof work happens in
 	// Findings mode. The ticker closes `tick` on stop so RunConsole's sample goroutine ends.
-	// 0.3s keeps the live view — and the zoom graph — advancing briskly (bounded by nettop/lsof
+	// 0.3s keeps the live view (and the zoom graph) advancing briskly (bounded by nettop/lsof
 	// latency: if one sample takes longer than the interval, the sample loop just runs back-to-back).
 	const interval = 0.3
 	mon := newEgressMonitor(interval)
@@ -532,9 +587,18 @@ func runConsole(flags []string, stdout io.Writer) (code int) {
 			}
 		}
 	}()
+	// `console --intercept[=path]` (approved Phase 2 flag): stream decrypted per-message events from
+	// the armed daemon's live socket, or from a captured --log file, into the Exfiltration view. Off
+	// by default → nil channel + empty proxyAddr, which the view reads as "not in intercept mode".
+	var messages <-chan model.InterceptedMessage
+	proxyAddr := ""
+	if interceptOn, logPath := interceptSource(flags); interceptOn {
+		messages = interceptMessages(logPath)
+		proxyAddr = proxyEndpointForConsole()
+	}
 	// The `i` inspection overlay captures a flow's packets via native /dev/bpf (root); --no-inspect
 	// disables it entirely for locked-down environments (spec §5.3), leaving a nil Inspector.
-	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy)
+	err = tui.RunConsole(screen, m, actor, mon, newInspector(has(flags, "--no-inspect")), tick, pbcopy, messages, proxyAddr)
 	if err != nil {
 		fmt.Fprintln(stdout, "console:", err)
 		return 1
@@ -568,7 +632,7 @@ func loadSnapshot(path string) ([]model.Assessment, []string, error) {
 		return nil, nil, err
 	}
 	if len(b) > maxSnapshotBytes {
-		return nil, nil, fmt.Errorf("snapshot exceeds %d MiB — refusing to load", maxSnapshotBytes>>20)
+		return nil, nil, fmt.Errorf("snapshot exceeds %d MiB: refusing to load", maxSnapshotBytes>>20)
 	}
 	// Current wrapped form: {tool_version, gaps, assessments}.
 	var snap report.Snapshot
@@ -597,16 +661,16 @@ func (c *cliActor) Quarantine(a model.Assessment) (string, error) {
 	// Defense-in-depth: even if the UI's ReadOnly gate is ever bypassed, the actor
 	// boundary refuses to move files from an untrusted snapshot (ABORT-TUI Attacker/Domain #2).
 	if c.readOnly {
-		return "", fmt.Errorf("quarantine refused — snapshot is read-only; run a live scan to act")
+		return "", fmt.Errorf("quarantine refused: snapshot is read-only; run a live scan to act")
 	}
 	if len(a.Actions) == 0 { // Actions were pre-populated by runTUI (or empty for a bare process)
 		a.Actions = plannedActions(a.Finding)
 	}
 	if len(a.Actions) == 0 {
-		return "", fmt.Errorf("nothing to quarantine — no on-disk artifact for %s", a.Subject.Display())
+		return "", fmt.Errorf("nothing to quarantine: no on-disk artifact for %s", a.Subject.Display())
 	}
 	item, err := act.Quarantine(c.root, c.ts, a)
-	// A manifest was written iff at least one action completed — report the path only
+	// A manifest was written iff at least one action completed; report the path only
 	// then, so the TUI never claims "recorded" for a no-op (ABORT-TUI Domain #3).
 	mp := ""
 	if len(item.Actions) > 0 {
@@ -619,7 +683,7 @@ func (c *cliActor) RestoreItem(manifest string, a model.Assessment) error {
 	return act.RestoreItem(manifest, a.Subject.Key())
 }
 
-// Label records a TP/FP judgement to the local store (no network — submission is a
+// Label records a TP/FP judgement to the local store (no network; submission is a
 // separate, consent-gated step). A read-only snapshot may still be labeled.
 func (c *cliActor) Label(a model.Assessment, falsePositive bool) error {
 	if c.store == nil {
@@ -648,7 +712,7 @@ func (c *cliActor) Unack(a model.Assessment) error {
 	return c.acks.Unack(a.Subject.Key())
 }
 
-// invokingUserHome resolves the HOME of the human who ran the tool, not root's — the tool
+// invokingUserHome resolves the HOME of the human who ran the tool, not root's; the tool
 // runs under sudo, so os.UserHomeDir() would point at /var/root. Falls back to os.UserHomeDir.
 func invokingUserHome() string {
 	if su := os.Getenv("SUDO_USER"); su != "" {
@@ -673,7 +737,7 @@ func ackPath() string {
 
 // acksFor loads the ack store and derives the two per-finding display maps the TUI needs: which
 // findings are acked, and which of those have CHANGED since they were reviewed (stored fingerprint
-// no longer matches the finding's current state). A load error degrades to no acks — a triage view
+// no longer matches the finding's current state). A load error degrades to no acks; a triage view
 // must never fail to open because a local note file is unreadable (Rule 13: surfaced via empty maps,
 // the feature simply shows nothing rather than crashing).
 func acksFor(store *ack.Store, assessments []model.Assessment) (acked, changed map[string]bool) {
@@ -720,10 +784,10 @@ func submitFeedback(cfg feedback.Config, store *feedback.Store, tx feedback.Tran
 	}
 	fmt.Fprintf(out, "  shared %d record(s). Thank you.\n", len(pending))
 	if err := store.MarkSent(pending); err != nil {
-		// Sent, but the local mark didn't stick — surface it loudly (§13 fail-loud): those records
+		// Sent, but the local mark didn't stick; surface it loudly (§13 fail-loud): those records
 		// may re-send next run. The endpoint dedups on nonce+fingerprint, so this is a warning,
 		// not data loss.
-		fmt.Fprintln(out, "  warning: records were sent but could not be marked locally — they may re-send next run (the endpoint dedups):", err)
+		fmt.Fprintln(out, "  warning: records were sent but could not be marked locally; they may re-send next run (the endpoint dedups):", err)
 		return err
 	}
 	return nil
@@ -760,7 +824,7 @@ func runFeedback(args []string, stdout io.Writer) int {
 		return 0
 	case "submit":
 		if cfg.Share == feedback.ShareOff {
-			fmt.Fprintln(stdout, "sharing is off — set share to \"ask\" or \"always\" in", cfgPath)
+			fmt.Fprintln(stdout, "sharing is off: set share to \"ask\" or \"always\" in", cfgPath)
 			return 0
 		}
 		if err := submitFeedback(cfg, store, chooseTransmitter(cfg, filepath.Dir(storePath)), true, os.Stdin, stdout); err != nil {
@@ -785,7 +849,7 @@ var newDNSCapture = func(iface string, port int) (inspect.PacketSource, error) {
 
 // startNameResolver wires passive DNS name resolution into a live egress Monitor and returns a stop
 // func (call it deferred). Best-effort + flagless: a non-Monitor sampler (the test fake) or a failed
-// capture (no sudo / the non-darwin stub) leaves it a no-op — destinations then show their IPs, never
+// capture (no sudo / the non-darwin stub) leaves it a no-op; destinations then show their IPs, never
 // a failure. SetResolver runs BEFORE the caller starts sampling (the set-once ordering, cp-p1e).
 func startNameResolver(mon tui.Sampler) func() {
 	realMon, ok := mon.(*egress.Monitor)
@@ -801,7 +865,7 @@ func startNameResolver(mon tui.Sampler) func() {
 	obs := netname.NewObserver(cache, src)
 	go func() {
 		// A mid-session read failure degrades destinations to IPs. Surfacing the terminating error for
-		// RCA (Rule 14) needs a TUI-safe channel we don't have while the alt-screen is up — deferred to
+		// RCA (Rule 14) needs a TUI-safe channel we don't have while the alt-screen is up; deferred to
 		// the --non-interactive logging mode, which writes to a file/stdout (T-17).
 		_ = obs.Run()
 	}()
@@ -814,7 +878,7 @@ var newScreen = func() (tcell.Screen, error) { return tcell.NewScreen() }
 
 // runEgress observes per-app outbound traffic. On a TTY it launches the live "egress top"
 // TUI; piped/redirected (or with --once) it prints a one-shot report (or --json).
-// exfilReport prints the non-interactive Exfiltration report (or JSON) — the output the old
+// exfilReport prints the non-interactive Exfiltration report (or JSON): the output the old
 // `egress --once/--json` produced, now reached via `console --once/--json`.
 func exfilReport(flags []string, stdout io.Writer) int {
 	mon := newEgressMonitor(2.0)
@@ -845,9 +909,13 @@ func flagValue(flags []string, name string) string {
 	return ""
 }
 
+// pbcopyBin is absolute because the TUI may be running under sudo: resolving the tool through PATH
+// would let any writable PATH entry substitute it and run with those privileges (go:S4036).
+const pbcopyBin = "/usr/bin/pbcopy"
+
 // pbcopy writes s to the macOS clipboard (the egress TUI's copy-path action).
 func pbcopy(s string) error {
-	c := exec.Command("pbcopy")
+	c := exec.Command(pbcopyBin)
 	c.Stdin = strings.NewReader(s)
 	return c.Run()
 }

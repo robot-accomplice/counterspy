@@ -196,7 +196,7 @@ func TestBuildPortFilter(t *testing.T) {
 }
 
 // Audit cp-p1b F-1: exercise the branches the base test skipped and that are most likely to regress
-// silently — IPv4 with options (IHL>5, drives LoadMemShift), a non-first fragment (the 0x1fff drop),
+// silently: IPv4 with options (IHL>5, drives LoadMemShift), a non-first fragment (the 0x1fff drop),
 // and an IPv6 packet with an extension header (the documented fixed-40-byte REJECT fallthrough).
 func TestBuildPortFilter_VariableHeaderAndFragments(t *testing.T) {
 	insns := portFilterInsns(0, 53)
@@ -218,7 +218,7 @@ func TestBuildPortFilter_VariableHeaderAndFragments(t *testing.T) {
 		t.Fatal("IPv4 with options (IHL>5) + port 53 must be accepted (LoadMemShift offset)")
 	}
 
-	// A non-first fragment (fragment offset != 0) carrying port-53 bytes must be dropped — it has no
+	// A non-first fragment (fragment offset != 0) carrying port-53 bytes must be dropped; it has no
 	// usable transport header, so the userspace parser could never use it anyway.
 	frag := ipv4UDP(dns, cli, nil)
 	binary.BigEndian.PutUint16(frag[6:], 100) // fragment offset = 100 (non-first)

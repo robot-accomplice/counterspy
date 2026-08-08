@@ -24,7 +24,7 @@ var rebootstrap = func(plist string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), launchctlTimeout)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "launchctl", "bootstrap", domain, plist).Run()
+	_ = exec.CommandContext(ctx, launchctlBin, "bootstrap", domain, plist).Run()
 }
 
 // Restore reverses a quarantine from its manifest: every moved artifact goes back
@@ -50,7 +50,7 @@ func Restore(manifestPath string) error {
 }
 
 // RestoreItem reverses ONE quarantined item from the manifest, identified by its Subject.Key(), and
-// drops it from the manifest on full success — so the TUI can undo a single finding rather than the
+// drops it from the manifest on full success, so the TUI can undo a single finding rather than the
 // whole session (#8). A partial restore keeps the item recorded so its remaining artifacts stay
 // recoverable (no orphaned quarantine).
 func RestoreItem(manifestPath, subjectKey string) error {

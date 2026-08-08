@@ -14,11 +14,11 @@ import (
 // closing the inspection returns to the zoom (not the tree), and z returns to the tree.
 func TestRunConsole_ZoomAndInspect(t *testing.T) {
 	s := simInit(t)
-	fi := &fakeInspector{view: model.InspectView{Verdict: "plaintext — readable", Coverage: model.InspectPlaintext, Sent: "GET /x"}}
+	fi := &fakeInspector{view: model.InspectView{Verdict: "plaintext, readable", Coverage: model.InspectPlaintext, Sent: "GET /x"}}
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("backuptool", model.Elevated, 900)}}
 	tick := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil) }()
+	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil, nil, "") }()
 	step := func() { time.Sleep(35 * time.Millisecond) }
 
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // → Exfiltration
@@ -140,10 +140,10 @@ func TestDrawEgressZoom_RendersPanelsAndSelection(t *testing.T) {
 	}
 }
 
-// The non-emphasized lines must NOT change color as the rate-sort reshuffles the table — they plot
+// The non-emphasized lines must NOT change color as the rate-sort reshuffles the table; they plot
 // in a stable PID order, so an overlapping cell's winner is deterministic (the observed "historical
-// points change color" flicker). The emphasized (selected) line is held constant here — a loud PID
-// that always sorts first — so this isolates the overlap-order flicker from the legitimate
+// points change color" flicker). The emphasized (selected) line is held constant here (a loud PID
+// that always sorts first) so this isolates the overlap-order flicker from the legitimate
 // selection change.
 func TestDrawEgressZoom_GraphStableUnderRateReorder(t *testing.T) {
 	// PID 100 is always the loudest (always selected/emphasized). PIDs 200 and 300 share the same
@@ -175,7 +175,7 @@ func TestDrawEgressZoom_GraphStableUnderRateReorder(t *testing.T) {
 			ra, _, sta, _ := a.GetContent(x, y)
 			rb, _, stb, _ := b.GetContent(x, y)
 			if ra != rb || sta != stb {
-				t.Fatalf("graph cell (%d,%d) changed with rate order: %q/%v vs %q/%v — plot order not stable",
+				t.Fatalf("graph cell (%d,%d) changed with rate order: %q/%v vs %q/%v; plot order not stable",
 					x, y, ra, sta, rb, stb)
 			}
 		}
@@ -336,7 +336,7 @@ func TestZoomedMembers_SortedByOutDesc(t *testing.T) {
 }
 
 // cp-p1g self-caught: a crafted destination NAME (from an observed DNS packet) must be Clean-stripped
-// before it reaches the zoom panel — no ANSI/control chars into the terminal.
+// before it reaches the zoom panel: no ANSI/control chars into the terminal.
 func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
 	g := model.EgressGroup{Conns: []model.Conn{
 		{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443, Name: "evil\x1b[31m\r\ninject.example"}, OutRate: 10},
@@ -348,5 +348,73 @@ func TestZoomDestLabel_CleansCraftedName(t *testing.T) {
 	// The label itself carries the raw name (keying/aggregation is fine); the DRAW path must Clean it.
 	if got := model.Clean(ds[0].label); strings.ContainsAny(got, "\x1b\r\n") {
 		t.Fatalf("model.Clean must strip control chars from the label: %q", got)
+	}
+}
+
+// interceptSummary drives the three honest states of the decrypted-flows section (v0.7.0 W1): off
+// (no --intercept → no section at all), on-but-empty for this app, and populated with per-message
+// summaries. The section must never silently show nothing while intercept is active.
+func TestInterceptSummary_HonestStates(t *testing.T) {
+	g := model.EgressGroup{Path: "/bin/app", Members: []model.EgressInstance{{PID: 42}}}
+	// 1. Not in intercept mode: no section.
+	if got := interceptSummary(EgressModel{}, g, 6); got != nil {
+		t.Fatalf("off mode must produce no section, got %v", got)
+	}
+	// 2. Intercept on, nothing captured for this app yet: honest empty line, not silence.
+	m := EgressModel{ProxyAddr: "127.0.0.1:62443"}
+	empty := interceptSummary(m, g, 6)
+	if len(empty) < 2 || !strings.Contains(empty[0], "127.0.0.1:62443") ||
+		!strings.Contains(strings.Join(empty, "\n"), "no decrypted flows for this app yet") {
+		t.Fatalf("on-but-empty must state so honestly, got %v", empty)
+	}
+	// 3. Populated: per-message summaries with direction + start line + dest, joined by PID.
+	m.Messages = map[int][]model.InterceptedMessage{
+		42: {
+			{PID: 42, Direction: "request", Text: "GET /v1/data HTTP/1.1\r\nHost: api.example.com", DestName: "api.example.com"},
+			{PID: 42, Direction: "response", Text: "HTTP/1.1 200 OK\r\nContent-Type: application/json", DestName: "api.example.com"},
+		},
+	}
+	got := strings.Join(interceptSummary(m, g, 6), "\n")
+	for _, want := range []string{"→ GET /v1/data HTTP/1.1", "← HTTP/1.1 200 OK", "api.example.com"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("populated summary missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "no decrypted flows") {
+		t.Fatalf("populated summary must not show the empty state:\n%s", got)
+	}
+}
+
+// The join is by PID, NOT path: the regression that motivated the redesign. When the egress group's
+// Path (ps comm) differs from the message's Path (proc_pidpath) but the PID matches, messages MUST
+// still render. A path-keyed join silently showed nothing here.
+func TestInterceptSummary_JoinsByPIDNotPath(t *testing.T) {
+	g := model.EgressGroup{
+		Path:    "/opt/homebrew/bin/curl",           // ps comm (symlink)
+		Members: []model.EgressInstance{{PID: 777}}, // same real pid
+	}
+	m := EgressModel{
+		ProxyAddr: "127.0.0.1:62443",
+		Messages: map[int][]model.InterceptedMessage{
+			777: {{PID: 777, Direction: "request", Text: "POST /u HTTP/1.1", DestName: "api.example.com"}},
+		},
+	}
+	got := strings.Join(interceptSummary(m, g, 6), "\n")
+	if !strings.Contains(got, "POST /u HTTP/1.1") || strings.Contains(got, "no decrypted flows") {
+		t.Fatalf("PID join must render even when g.Path != msg.Path:\n%s", got)
+	}
+}
+
+// destProxied flags the intercept proxy endpoint itself (where an app's decrypted egress goes while
+// armed), replacing the external-IP match that could never fire in that mode. (v0.7.0 ABORT re-run.)
+func TestDestProxied(t *testing.T) {
+	if !destProxied("127.0.0.1:62443", "127.0.0.1:62443") {
+		t.Fatal("the proxy endpoint must be flagged")
+	}
+	if destProxied("198.51.100.7:443", "127.0.0.1:62443") {
+		t.Fatal("a real external dest must not be flagged as the proxy")
+	}
+	if destProxied("127.0.0.1:62443", "") {
+		t.Fatal("no proxy addr (not armed) must never flag")
 	}
 }

@@ -97,7 +97,7 @@ func TestUpdate_QuarantineModalCancel(t *testing.T) {
 	}
 }
 
-// #8: `u` is per-item — it restores the SELECTED finding only when that finding was quarantined
+// #8: `u` is per-item: it restores the SELECTED finding only when that finding was quarantined
 // this session, and otherwise explains why there's nothing to undo (no whole-session sweep).
 func TestUpdate_RestoreItemEmitsCmdForDoneSelection(t *testing.T) {
 	m := threeQ()
@@ -125,7 +125,7 @@ func TestUpdate_CtrlCQuitsFromFilter(t *testing.T) {
 	}
 }
 
-// cp-tui-3: a --from snapshot is read-only — 'q' must not open the quarantine modal.
+// cp-tui-3: a --from snapshot is read-only; 'q' must not open the quarantine modal.
 func TestUpdate_ReadOnlyBlocksQuarantine(t *testing.T) {
 	m := threeQ()
 	m.ReadOnly = true
@@ -231,7 +231,7 @@ func TestMoveSel_EmptyListResetsToZero(t *testing.T) {
 	}
 }
 
-// #4: `a` toggles the local review flag — emits "ack" for an undecided finding and "unack" for one
+// #4: `a` toggles the local review flag: emits "ack" for an undecided finding and "unack" for one
 // already acked (revisitable).
 func TestUpdate_AckToggle(t *testing.T) {
 	m := threeQ()

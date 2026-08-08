@@ -32,7 +32,7 @@ func ParsePs(b []byte) map[int]*Proc {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		// Reconstruct the command from the 4th field onward — robust against a
+		// Reconstruct the command from the 4th field onward; robust against a
 		// username that recurs elsewhere in the line (cp-7 F-3/F-2).
 		cmd := strings.Join(fields[3:], " ")
 		out[pid] = &Proc{PID: pid, PPID: ppid, User: fields[2], Cmd: cmd}
@@ -132,10 +132,10 @@ func firstField(cmd string) string {
 
 // CollectProcesses runs ps + lsof (I/O edge).
 func CollectProcesses() ([]model.Evidence, error) {
-	psb, err := execOutput("ps", "-axo", "pid,ppid,user,command")
+	psb, err := execOutput(psBin, "-axo", "pid,ppid,user,command")
 	if err != nil {
 		return nil, err
 	}
-	lsb, _ := execOutput("lsof", "-i", "-nP") // may be partial without root
+	lsb, _ := execOutput(lsofBin, "-i", "-nP") // may be partial without root
 	return BuildProcessEvidence(ParsePs(psb), ParseLsof(lsb)), nil
 }

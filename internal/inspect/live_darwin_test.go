@@ -20,7 +20,7 @@ import (
 )
 
 // liveSNI is the hostname the smoke test's client puts in its ClientHello and the capture must
-// recover — proving the whole native path end to end.
+// recover, proving the whole native path end to end.
 const liveSNI = "counterspy.smoke.test"
 
 // requireLiveEnv skips unless the root smoke gate is set, so `go test ./...` stays green without root.
@@ -61,14 +61,14 @@ func TestLiveCapture_LoopbackTLS_SNI(t *testing.T) {
 
 	res := Inspect(src, Flow{Remote: remote}, 1024)
 	if res.SNI != liveSNI {
-		t.Fatalf("live capture did NOT recover the SNI — coverage=%d tier=%q sni=%q verdict=%q err=%v",
+		t.Fatalf("live capture did NOT recover the SNI: coverage=%d tier=%q sni=%q verdict=%q err=%v",
 			res.Coverage, res.Tier, res.SNI, res.Verdict, res.Err)
 	}
-	t.Logf("LIVE CAPTURE OK — recovered SNI=%q via the real /dev/bpf path (coverage=%d verdict=%q)",
+	t.Logf("LIVE CAPTURE OK: recovered SNI=%q via the real /dev/bpf path (coverage=%d verdict=%q)",
 		res.SNI, res.Coverage, res.Verdict)
 }
 
-// TestLiveCapture_FilterDropsUnscopedTraffic proves the BIOCSETF scoped filter actually engaged —
+// TestLiveCapture_FilterDropsUnscopedTraffic proves the BIOCSETF scoped filter actually engaged,
 // which the SNI test above cannot, since on loopback both endpoints are 127.0.0.1 and a host filter
 // passes everything regardless. Here the capture is scoped to a bogus TEST-NET host (RFC 5737, never
 // on the wire) while real loopback TLS traffic flows; a correctly-installed filter drops it all in
@@ -96,14 +96,14 @@ func TestLiveCapture_FilterDropsUnscopedTraffic(t *testing.T) {
 	leaked := 0
 	for i := 0; i < 128; i++ {
 		if _, err := src.Next(); err != nil {
-			break // io.EOF at the deadline — the filter held
+			break // io.EOF at the deadline: the filter held
 		}
 		leaked++
 	}
 	if leaked != 0 {
 		t.Fatalf("BIOCSETF filter did NOT engage: %d loopback packets not scoped to the filter leaked to userspace", leaked)
 	}
-	t.Logf("FILTER OK — kernel dropped all traffic not scoped to the capture (raw source silent)")
+	t.Logf("FILTER OK: kernel dropped all traffic not scoped to the capture (raw source silent)")
 }
 
 // loopbackRemote is the listener's address as a netip.AddrPort (the flow the smoke test inspects).
@@ -127,7 +127,7 @@ func driveLoopbackTLS(addr string) (chan struct{}, func()) {
 		defer wg.Done()
 		// Test-only: the client connects to a self-signed cert generated inline in
 		// newLoopbackTLSServer, purely to emit a ClientHello carrying liveSNI for the capture to
-		// parse — no identity is trusted here, so skipping verification is correct and scoped to
+		// parse; no identity is trusted here, so skipping verification is correct and scoped to
 		// this smoke harness.
 		cfg := &tls.Config{InsecureSkipVerify: true, ServerName: liveSNI, MinVersion: tls.VersionTLS12} //nolint:gosec // self-signed loopback smoke server
 		for {

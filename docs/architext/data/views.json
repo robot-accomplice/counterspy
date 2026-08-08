@@ -33,7 +33,7 @@
       "id": "dataflow",
       "name": "Dataflow",
       "type": "dataflow",
-      "summary": "Evidence moves left to right: native tools → collectors → pure analysis → report/act → operator.",
+      "summary": "Evidence moves left to right: native tools \u2192 collectors \u2192 pure analysis \u2192 report/act \u2192 operator.",
       "lanes": [
         {
           "id": "collect",
@@ -131,7 +131,7 @@
       "id": "c4-container",
       "name": "C4 Container",
       "type": "c4-container",
-      "summary": "One deployable unit — the counterspy binary — plus the external tools it shells out to.",
+      "summary": "One deployable unit \u2014 the counterspy binary \u2014 plus the external tools it shells out to.",
       "scopeNodeId": "counterspy-system",
       "lanes": [
         {
@@ -193,6 +193,13 @@
           "name": "Faces",
           "nodeIds": [
             "mod-tui"
+          ]
+        },
+        {
+          "id": "intercept",
+          "name": "Intercept (Phase 2)",
+          "nodeIds": [
+            "mod-intercept"
           ]
         }
       ]

@@ -25,7 +25,7 @@ func (f *fakeSource) Next() ([]byte, error) {
 }
 func (f *fakeSource) Close() error { f.closed = true; return nil }
 
-// ipv4UDPPacket wraps a UDP payload in IPv4 + UDP headers (no link header — the capture strips it).
+// ipv4UDPPacket wraps a UDP payload in IPv4 + UDP headers (no link header: the capture strips it).
 func ipv4UDPPacket(srcPort, dstPort int, payload []byte) []byte {
 	udp := make([]byte, 8)
 	binary.BigEndian.PutUint16(udp[0:], uint16(srcPort))
@@ -117,7 +117,7 @@ func TestUDPPayload(t *testing.T) {
 
 const protoTCP4 = 6
 
-// Antagonist cp-p1c F-1: a source that yields (nil, nil) forever must NOT spin the goroutine — Run
+// Antagonist cp-p1c F-1: a source that yields (nil, nil) forever must NOT spin the goroutine. Run
 // returns instead. Audit cp-p1c F-3: Run surfaces the terminating error.
 func TestObserver_NilPacketDoesNotSpin(t *testing.T) {
 	spin := &nilSource{}
@@ -137,7 +137,7 @@ func TestObserver_NilPacketDoesNotSpin(t *testing.T) {
 	}
 }
 
-// nilSource always returns (nil, nil) — the contract-violating source the guard defends against.
+// nilSource always returns (nil, nil), the contract-violating source the guard defends against.
 type nilSource struct{ calls int }
 
 func (n *nilSource) Next() ([]byte, error) { n.calls++; return nil, nil }

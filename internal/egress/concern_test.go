@@ -43,7 +43,7 @@ func TestExfil(t *testing.T) {
 	}
 }
 
-// A TRUSTED app that quietly uploads in the background must still surface — trust is one
+// A TRUSTED app that quietly uploads in the background must still surface; trust is one
 // signal, not a kill switch. Guards the trust-gating regression a review caught.
 func TestConcern_TrustedBackgroundUploaderStillSurfaces(t *testing.T) {
 	g := model.EgressGroup{Trust: "notarized", Background: true, OutRate: 800_000,
@@ -53,14 +53,14 @@ func TestConcern_TrustedBackgroundUploaderStillSurfaces(t *testing.T) {
 	}
 }
 
-// #3: the raw-IP concern nudge is LIGHT TOUCH + CORROBORATED — it lifts a band only when the app is
+// #3: the raw-IP concern nudge is LIGHT TOUCH + CORROBORATED: it lifts a band only when the app is
 // already suspicious (untrusted, or a sustained background upload), and never for a trusted/idle app.
 func TestConcern_RawIPIsCorroboratedAndLightTouch(t *testing.T) {
 	rawIP := []model.Endpoint{{IP: "203.0.113.9"}} // nameless
 	named := []model.Endpoint{{IP: "203.0.113.9", Name: "api.vendor.com"}}
 	const up = sustainedBytesPerSec + 1
 
-	// A notarized, IDLE app talking to a nameless IP gets NO nudge — stays Minimal.
+	// A notarized, IDLE app talking to a nameless IP gets NO nudge; stays Minimal.
 	calm := model.EgressGroup{Trust: "notarized", Destinations: rawIP}
 	if got := Concern(calm); got != model.Minimal {
 		t.Fatalf("notarized idle app to a raw IP must stay Minimal, got %v", got)

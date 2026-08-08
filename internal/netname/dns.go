@@ -10,8 +10,8 @@ import (
 )
 
 // Record is one resolved answer: an address the response returned, attributed to the QUERIED name
-// (not the answer RR's owner). Attributing to the question name is what the caller wants — "this IP
-// is the app's `analytics.example.com`" — and it transparently handles CNAME chains without walking
+// (not the answer RR's owner). Attributing to the question name is what the caller wants ("this IP
+// is the app's `analytics.example.com`") and it transparently handles CNAME chains without walking
 // them (the A/AAAA at the end of a chain still belongs, for our purposes, to the queried name).
 type Record struct {
 	Name string
@@ -30,11 +30,11 @@ const (
 // It never returns an error: an answer RR it can't parse is skipped, and it returns whatever valid
 // records it gathered.
 //
-// Trust model (Audit cp-p1a F-1): this is PASSIVE observation of whatever DNS crosses the wire — it
+// Trust model (Audit cp-p1a F-1): this is PASSIVE observation of whatever DNS crosses the wire. It
 // issues no queries, so it cannot correlate a response to a request (there is no request of ours to
 // match). A party able to inject DNS responses onto the host's own network could therefore poison the
 // name shown for an IP. That is accepted: the name is a display hint and a light-touch, corroborated
-// concern nudge only — never a security decision — and anyone forging the victim's DNS is already
+// concern nudge only (never a security decision) and anyone forging the victim's DNS is already
 // on-path. Names are honest hints, not attestations.
 func ParseDNSResponse(msg []byte) ([]Record, bool) {
 	if len(msg) < 12 {
@@ -105,7 +105,7 @@ func parseName(msg []byte, off int) (string, int, bool) {
 		}
 		b := int(msg[off])
 		switch {
-		case b == 0: // root label — end of name
+		case b == 0: // root label, end of name
 			if next < 0 {
 				next = off + 1
 			}

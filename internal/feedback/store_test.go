@@ -9,7 +9,7 @@ import (
 )
 
 // save() writes atomically (temp + rename): the store round-trips, no .tmp files are left behind,
-// and the file keeps 0600 — so a crash mid-write can't corrupt or expose the store.
+// and the file keeps 0600, so a crash mid-write can't corrupt or expose the store.
 func TestStore_SaveIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(filepath.Join(dir, "feedback.json"))

@@ -31,7 +31,7 @@ func TestBuildProcessEvidence_AttributesListenerToAncestry(t *testing.T) {
 }
 
 // cp-7 Audit F-1 (crit): argv[0] is attacker-controlled, so it must NOT become the
-// subject identity — else a listener could alias onto an allowlisted app and be suppressed.
+// subject identity; else a listener could alias onto an allowlisted app and be suppressed.
 func TestBuildProcessEvidence_KeysByPIDNotArgv0(t *testing.T) {
 	procs := map[int]*Proc{999: {PID: 999, PPID: 1, Cmd: "/System/Library/CoreServices/legit /tmp/payload"}}
 	listeners := map[int][]string{999: {"*:4444 (LISTEN)"}}

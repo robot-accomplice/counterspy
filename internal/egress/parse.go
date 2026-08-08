@@ -1,6 +1,6 @@
 // Package egress observes per-application outbound traffic via sudo-CLI polling (nettop +
 // lsof), joins trust/provenance/capability from internal/collect, and scores concern and
-// exfiltration-risk — all pure given inputs. Observe-only; no payloads are read.
+// exfiltration-risk, all pure given inputs. Observe-only; no payloads are read.
 package egress
 
 import (
@@ -51,7 +51,7 @@ func ParseNettop(b []byte) map[int]Bytes {
 
 // pidFromNameDotPid finds the "name.pid" field and returns the trailing pid. A timestamp
 // column (e.g. "15:04:05.123456") also ends in ".<int>", so fields whose pre-dot portion
-// contains a ':' are skipped — otherwise the microseconds would be misread as a PID.
+// contains a ':' are skipped; otherwise the microseconds would be misread as a PID.
 func pidFromNameDotPid(fields []string) int {
 	for _, f := range fields {
 		f = strings.TrimSpace(f)
@@ -94,7 +94,7 @@ func ParseLsofConns(b []byte) map[int][]model.Conn {
 		name := f[8]
 		arrow := strings.Index(name, "->")
 		if arrow < 0 {
-			continue // LISTEN / no remote peer — not egress
+			continue // LISTEN / no remote peer: not egress
 		}
 		remote := name[arrow+2:]
 		if sp := strings.IndexByte(remote, ' '); sp >= 0 {
@@ -106,7 +106,7 @@ func ParseLsofConns(b []byte) map[int][]model.Conn {
 		}
 		ip = canonIP(ip)
 		// Collapse the several TCP FDs a process may hold to the SAME remote endpoint into one
-		// logical "connection to R" — the exfil view cares about the destination, and nettop
+		// logical "connection to R"; the exfil view cares about the destination, and nettop
 		// aggregates per-destination bytes anyway (avoids duplicate rows sharing one rate).
 		k := proto + "|" + connKey(pid, ip, port)
 		if seen[k] {
@@ -118,7 +118,7 @@ func ParseLsofConns(b []byte) map[int][]model.Conn {
 	return out
 }
 
-// ParsePidPaths parses `ps -axo pid=,comm=` — one "PID /full/executable path" per line — into
+// ParsePidPaths parses `ps -axo pid=,comm=` (one "PID /full/executable path" per line) into
 // a pid→path map. `comm` is the executable path with NO argv, so the path (which on macOS is
 // riddled with spaces, e.g. ".../Application Support/...") is everything after the leading pid;
 // this avoids the space-splitting that collapsed spaced paths to "Application".
@@ -159,7 +159,7 @@ func connKey(pid int, ip string, port int) string {
 	return strconv.Itoa(pid) + "|" + canonIP(ip) + "|" + strconv.Itoa(port)
 }
 
-// canonIP normalizes an IP so the same address keys identically regardless of tool spelling —
+// canonIP normalizes an IP so the same address keys identically regardless of tool spelling:
 // lsof's bracketed "[fe80::1]" vs nettop's zoned "fe80::1%en0". net/netip does the real work:
 // parse, drop the %zone scope id, and re-render canonically. A non-IP (e.g. a hostname) passes
 // through untouched.
@@ -172,8 +172,8 @@ func canonIP(ip string) string {
 }
 
 // parseNettopEndpoint splits a nettop endpoint into (canonical ip, port). nettop spells IPv4 as
-// "a.b.c.d:port" (which netip.ParseAddrPort reads directly) but IPv6 as "addr%zone.port" — a DOT
-// before the port — which no standard parser accepts, so we peel the port and hand the address
+// "a.b.c.d:port" (which netip.ParseAddrPort reads directly) but IPv6 as "addr%zone.port" (a DOT
+// before the port) which no standard parser accepts, so we peel the port and hand the address
 // to netip.ParseAddr (which understands the %zone). Returns ("",0) for a non-endpoint (e.g. "*:*").
 func parseNettopEndpoint(s string) (string, int) {
 	s = strings.TrimSpace(s)
@@ -226,14 +226,14 @@ func ParseNettopConns(b []byte) map[string]Bytes {
 			continue
 		}
 		if pid := pidFromNameDotPid(f); pid != 0 {
-			curPID = pid // process row — establishes the owner for the sub-rows that follow
+			curPID = pid // process row: establishes the owner for the sub-rows that follow
 			continue
 		}
 		if curPID == 0 {
-			continue // a connection row before any process row — unattributable
+			continue // a connection row before any process row: unattributable
 		}
 		// Find the connection descriptor ("proto src<->dst") by scanning fields, not assuming
-		// f[0] — some nettop invocations prepend a timestamp column (matches ParseNettop).
+		// f[0]; some nettop invocations prepend a timestamp column (matches ParseNettop).
 		name := ""
 		for _, fld := range f {
 			if strings.Contains(fld, "<->") {

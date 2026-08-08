@@ -15,15 +15,22 @@ const (
 	modeExfil
 )
 
-// RunConsole hosts both faces in one screen — Findings triage and the Exfiltration monitor —
+// RunConsole hosts both faces in one screen (Findings triage and the Exfiltration monitor)
 // switched with Tab / Shift-Tab. It replaces the separate Run (findings) and RunEgress (egress)
 // loops. The Exfiltration sampler runs LAZILY: the background sample goroutine only calls the
 // (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
 // happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
 // closes `tick` (or exits) to stop.
-func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error) error {
+// RunConsole hosts both faces in one screen (Findings triage and the Exfiltration monitor)
+// switched with Tab / Shift-Tab. It replaces the separate Run (findings) and RunEgress (egress)
+// loops. The Exfiltration sampler runs LAZILY: the background sample goroutine only calls the
+// (slow) Sample() while Exfiltration is the visible mode and not paused, so no nettop/lsof work
+// happens while triaging findings. Screen is injected for tests; the caller Inits/Finis it and
+// closes `tick` (or exits) to stop.
+func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector Inspector, tick <-chan struct{}, clip func(string) error, messages <-chan model.InterceptedMessage, proxyAddr string) error {
 	mode := modeFindings
 	em := NewEgress()
+	em.ProxyAddr = proxyAddr
 	var lastManifest string
 
 	var sampling atomic.Bool
@@ -44,6 +51,12 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 			case <-sampleNow:
 				do()
 			}
+		}
+	}()
+	// Feed intercepted per-message events into the same event loop as egress samples.
+	go func() {
+		for msg := range messages {
+			s.PostEvent(tcell.NewEventInterrupt(msg))
 		}
 	}()
 	setSampling := func() { sampling.Store(mode == modeExfil && !em.Paused) }
@@ -124,8 +137,13 @@ func RunConsole(s tcell.Screen, m Model, actor Actor, sampler Sampler, inspector
 				}
 			}
 		case *tcell.EventInterrupt:
-			if groups, ok := ev.Data().([]model.EgressGroup); ok && !em.Paused {
-				em = em.withGroups(groups)
+			switch data := ev.Data().(type) {
+			case []model.EgressGroup:
+				if !em.Paused {
+					em = em.withGroups(data)
+				}
+			case model.InterceptedMessage:
+				em = em.withMessage(data)
 			}
 		case nil:
 			return nil // screen finished
@@ -142,9 +160,9 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 	case "quarantine":
 		mp, err := actor.Quarantine(c.A)
 		switch {
-		case err != nil && mp != "": // a partial manifest exists — undo is possible
+		case err != nil && mp != "": // a partial manifest exists; undo is possible
 			*lastManifest = mp
-			m.Toast = "stopped — partial state recorded (u to undo): " + err.Error()
+			m.Toast = "stopped, partial state recorded (u to undo): " + err.Error()
 		case err != nil:
 			m.Toast = "quarantine failed (nothing changed): " + err.Error()
 		default:
@@ -161,7 +179,7 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 		if err := actor.RestoreItem(*lastManifest, c.A); err != nil {
 			// Leave the item marked done: a failed/partial restore means containment may still
 			// hold, so we must NOT misreport it as restored (ABORT-TUI Domain #1, per-item).
-			m.Toast = "restore finished with issues — rescan to confirm: " + err.Error()
+			m.Toast = "restore finished with issues, rescan to confirm: " + err.Error()
 			break
 		}
 		m.Done = withoutKey(m.Done, key)
@@ -188,7 +206,7 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 		key := c.A.Subject.Key()
 		m.Acked = withKey(m.Acked, key)
 		m.AckChanged = withoutKey(m.AckChanged, key) // just reviewed at the current state → not "changed"
-		m.Toast = "reviewed — leaving " + c.A.Subject.Display() + " (a to undo)"
+		m.Toast = "reviewed, leaving " + c.A.Subject.Display() + " (a to undo)"
 	case "unack":
 		if err := actor.Unack(c.A); err != nil {
 			m.Toast = "could not clear decision: " + err.Error()
@@ -204,7 +222,7 @@ func applyFindingsCmd(m Model, c Cmd, actor Actor, lastManifest *string) Model {
 
 // drawConsoleTabs overlays the unified mode header on row 0 (both sub-views draw their own title
 // there; this replaces the left portion with the Findings ⇄ Exfiltration switcher, leaving the
-// right side — e.g. the Exfiltration status — intact).
+// right side, e.g. the Exfiltration status, intact).
 func drawConsoleTabs(s tcell.Screen, mode consoleMode, readOnly bool) {
 	w, _ := s.Size()
 	// Clear the left region we own on row 0. In Exfiltration mode the sub-view draws its status

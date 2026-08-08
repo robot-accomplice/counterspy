@@ -3,7 +3,7 @@ package tui
 import "github.com/gdamore/tcell/v2"
 
 // A braille cell (U+2800 base) is a 2×4 dot grid; brailleBit[col][row] is the dot bit for the
-// sub-pixel at (col∈{0,1}, row∈{0,1,2,3}) — the standard Unicode braille numbering.
+// sub-pixel at (col∈{0,1}, row∈{0,1,2,3}): the standard Unicode braille numbering.
 var brailleBit = [2][4]byte{
 	{0x01, 0x02, 0x04, 0x40}, // left column, top→bottom
 	{0x08, 0x10, 0x20, 0x80}, // right column, top→bottom
@@ -30,7 +30,7 @@ func abs(x int) int {
 // plotSeries rasterizes each series as a connected braille LINE into a rows×cols grid sharing one
 // Y-axis scaled to maxY (0 = auto = the max value across all series). Sub-resolution is 2×cols wide
 // and 4×rows tall. Consecutive samples are joined by straight line segments (Bresenham), spread to
-// fill the full width — sample 0 at the left edge, the newest at the right — so a short history
+// fill the full width (sample 0 at the left edge, the newest at the right) so a short history
 // still spans the panel. Emphasized series are plotted last so a selected line wins a shared cell's
 // color (btm's overlap rule).
 func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell {
@@ -83,7 +83,7 @@ func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell
 		bits[sy/4][sx/2] |= brailleBit[sx%2][sy%4]
 		colr[sy/4][sx/2] = c
 	}
-	// line draws a straight braille line between two sub-pixels (Bresenham) — this is what makes the
+	// line draws a straight braille line between two sub-pixels (Bresenham); this is what makes the
 	// graph read as clean connected lines (btm-style) instead of a filled/dotty band.
 	line := func(x0, y0, x1, y1 int, c tcell.Color) {
 		dx, dy := abs(x1-x0), -abs(y1-y0)
@@ -122,7 +122,7 @@ func plotSeries(series []graphSeries, cols, rows int, maxY uint64) [][]graphCell
 		}
 		n := len(vals)
 		// Spread the samples across the FULL width (sample 0 at the left, newest at the right) and
-		// connect consecutive samples with straight line segments — a line graph, not a fill.
+		// connect consecutive samples with straight line segments: a line graph, not a fill.
 		col := func(i int) int {
 			if n <= 1 {
 				return subCols - 1

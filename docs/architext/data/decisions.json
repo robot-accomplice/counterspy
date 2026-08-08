@@ -1,17 +1,38 @@
 {
   "decisions": [
     {
+      "id": "dec-intercept-correlation-queue",
+      "status": "accepted",
+      "title": "Request↔response correlation uses a blocking single-producer/single-consumer queue",
+      "context": "The per-message pump parses each tunnel direction in its own goroutine (parseRequests, parseResponses) and correlates a response to its request through a shared queue. The first implementation was a mutex-guarded slice: parseResponses read the head, then popped the queue, and treated an empty queue as a protocol violation (markOpaque \"response without matching request\") and aborted the parser. HTTP guarantees the request precedes its response on the wire, but nothing synchronized the two goroutines — copyTee writes to the upstream before teeing to the request parser, and the io.Pipe tee blocks until that parser reads — so under load the response could be parsed and pop the queue before the request goroutine had pushed. Result: a false 'unmatched response', an aborted parser, and every later message in that direction silently dropped. It was intermittent (~1 in 15 under -race) and shipped RED because the prior session verified against cached test results.",
+      "decision": "Two coupled parts. (1) Model the correlation queue as a buffered channel (cap maxPipelinedRequests), single producer (parseRequests) / single consumer (parseResponses); popQueue is a blocking receive, so a response that arrives before its request waits for the push instead of racing it, and closeRequests closes the channel at request-stream EOF so a closed-drained queue is the ONLY condition meaning a genuinely unmatched response (popQueue returns ok=false → opaque). (2) The forward-path tee MUST be non-blocking, because part (1) on its own deadlocks: a blocked popQueue stops draining the response pipe, and the original SYNCHRONOUS io.Pipe tee then back-pressured and froze the forwarding goroutine, whose completion closeRequests transitively depended on — a permanent hang on any unmatched response. The tee is therefore a bounded teeFeeder: copyTee hands each forward chunk to a small buffered channel via a non-blocking submit and detaches teeing when the parser falls maxTeeBacklogChunks behind, and each parser closes its pipe read end on exit so a feeder blocked on an abandoned pipe is released. Correlation happens-before is thus a structural property of the queue channel, and 'parsing never affects traffic' a structural property of the non-blocking tee.",
+      "consequences": [
+        "Pipelined and keep-alive responses correlate to the correct request under load; no messages dropped on the parser race",
+        "A genuine unmatched response is detected at request-EOF instead of immediately — strictly fewer false positives, and the relay keeps forwarding bytes meanwhile",
+        "No deadlock, but ONLY because the tee is non-blocking: the blocking popQueue from part (1) shipped with a synchronous tee and DID deadlock permanently on an unmatched response (ABORT review F1, confirmed by goroutine dump — parseResponses parked in popQueue while the response copyTee blocked on the tee pipe). Part (2) is what makes deadlock-freedom real; a prior claim that part (1) alone was deadlock-free was false.",
+        "A parked parser can no longer back-pressure forwarding: when it falls behind, teeing detaches (that connection becomes opaque) but bytes keep relaying — honoring 'never affects traffic' and also removing the tee as a throughput rate-limiter",
+        "Detection of a real protocol violation is deferred to connection close rather than mid-stream — an accepted latency tradeoff for correctness",
+        "Guarded by deterministic tests: the queue contract (pop-before-push blocks then correlates; closed empty queue returns unmatched) and a relay-level regression (large unmatched response must not wedge runRelay), since neither reproduces under a -count=1 CI run"
+      ],
+      "relatedNodes": [
+        "mod-intercept"
+      ],
+      "relatedFlows": [
+        "intercept"
+      ]
+    },
+    {
       "id": "dec-liveness-scoring",
       "status": "accepted",
       "title": "Liveness is derived once in interpret and feeds both scoring and display",
-      "context": "Run-state was display-only (mark.Classify, 2-state ▸/†) and computed after interpret. A dead persistence remnant (disabled .bak + missing target, the com.ironclad.agent case) therefore scored the same as a live, loaded agent, and the mark layer re-derived a run-state the scorer never saw — a DRY split that could drift.",
-      "decision": "interpret.livenessState derives a 3-state run-state (active ▸ / armed ◐ / dormant †) once, against the live-process set passed into Assess, and stores it on Assessment.Liveness. recommend() caps a dormant subject at Monitor (it cannot execute) unless a tripwire fires; active/armed keep the score-based recommendation (down-weight the dead, never up-weight the live). mark.Classify now only maps that single value to a glyph and adds the socket mark. This reverses the earlier 'liveness never influences scoring' invariant, but only ever to LOWER urgency, so it cannot manufacture a false escalation. Assess itself stays I/O-free — the caller collects running paths — so verdicts remain reproducible from (findings, running).",
+      "context": "Run-state was display-only (mark.Classify, 2-state \u25b8/\u2020) and computed after interpret. A dead persistence remnant (disabled .bak + missing target, the com.ironclad.agent case) therefore scored the same as a live, loaded agent, and the mark layer re-derived a run-state the scorer never saw \u2014 a DRY split that could drift.",
+      "decision": "interpret.livenessState derives a 3-state run-state (active \u25b8 / armed \u25d0 / dormant \u2020) once, against the live-process set passed into Assess, and stores it on Assessment.Liveness. recommend() caps a dormant subject at Monitor (it cannot execute) unless a tripwire fires; active/armed keep the score-based recommendation (down-weight the dead, never up-weight the live). mark.Classify now only maps that single value to a glyph and adds the socket mark. This reverses the earlier 'liveness never influences scoring' invariant, but only ever to LOWER urgency, so it cannot manufacture a false escalation. Assess itself stays I/O-free \u2014 the caller collects running paths \u2014 so verdicts remain reproducible from (findings, running).",
       "consequences": [
         "A dead remnant no longer reads as urgently as a live agent",
-        "Scored and displayed run-state are the same value — cannot disagree",
-        "armed ◐ distinguishes loaded-not-running from dormant in the UI",
+        "Scored and displayed run-state are the same value \u2014 cannot disagree",
+        "armed \u25d0 distinguishes loaded-not-running from dormant in the UI",
         "A --from snapshot carries its scan-time liveness, not a re-derivation against a different machine",
-        "Liveness can only reduce a recommendation, never escalate — no new false-positive surface"
+        "Liveness can only reduce a recommendation, never escalate \u2014 no new false-positive surface"
       ],
       "relatedNodes": [
         "mod-interpret",
@@ -26,7 +47,7 @@
       "status": "accepted",
       "title": "The scoring engine is a pure function",
       "context": "Scoring is the risk center; it must be testable and free of side effects so weights can be tuned with confidence.",
-      "decision": "internal/score is a pure Score([]Evidence) []Finding with no I/O — collectors do all I/O at the edge, so the entire brain is unit-tested from fixtures.",
+      "decision": "internal/score is a pure Score([]Evidence) []Finding with no I/O \u2014 collectors do all I/O at the edge, so the entire brain is unit-tested from fixtures.",
       "consequences": [
         "Zero-risk to run",
         "Fully fixture-testable",
@@ -62,7 +83,7 @@
       "status": "accepted",
       "title": "Verdicts are rule-based, not model-generated",
       "context": "The tool recommends quarantining people's software; its recommendations must be reproducible and auditable.",
-      "decision": "internal/interpret derives verdict/category/recommendation from deterministic rules over the evidence — no LLM in the decision path — so a reviewer (or the ABORT gate) can confirm or refute every label.",
+      "decision": "internal/interpret derives verdict/category/recommendation from deterministic rules over the evidence \u2014 no LLM in the decision path \u2014 so a reviewer (or the ABORT gate) can confirm or refute every label.",
       "consequences": [
         "Reproducible verdicts",
         "Auditable by a release gate",
@@ -97,7 +118,7 @@
       "status": "accepted",
       "title": "Inspection tells the truth about coverage and shows the wire bytes",
       "context": "An inspector that overstates ('encrypted') or hides ('nothing to view') undermines the tool's credibility. A cleartext binary payload once read as 'ENCRYPTED (TLS)' because its bytes looked like ciphertext.",
-      "decision": "'Encrypted (TLS)' requires positive evidence (a ClientHello SNI, a TLS record, or a well-known TLS port), never merely non-printable bytes. Captured bytes are always shown — readable text as text, cleartext-binary as a hexdump — while TLS ciphertext is withheld as noise. This revises the earlier §6 'never render encrypted' rule, which over-hid.",
+      "decision": "'Encrypted (TLS)' requires positive evidence (a ClientHello SNI, a TLS record, or a well-known TLS port), never merely non-printable bytes. Captured bytes are always shown \u2014 readable text as text, cleartext-binary as a hexdump \u2014 while TLS ciphertext is withheld as noise. This revises the earlier \u00a76 'never render encrypted' rule, which over-hid.",
       "consequences": [
         "Verdicts match reality (no false TLS labels)",
         "The actual outbound payload is inspectable, even when binary",
@@ -108,6 +129,28 @@
       ],
       "relatedFlows": [
         "inspection"
+      ]
+    },
+    {
+      "id": "dec-tls-intercept",
+      "status": "accepted",
+      "title": "Phase 2 intercepts TLS via a consented CONNECT proxy (pf rdr disproved by smoke test)",
+      "context": "Passive egress observation (Phase 1) names destinations but TLS payloads stay opaque. Phase 2 was approved with a TRANSPARENT pf rdr redirect of :443. A root smoke test disproved that mechanism: pf translates only INBOUND packets, so a maximally permissive rule (rdr pass inet proto tcp from any to any port = 443) logged 27828 Evaluations and 0 Packets against the machine's own outbound curl. It cannot fail to match an EVALUATED v4 SYN to 443, so locally-originated packets are never evaluated at all. Linux has iptables OUTPUT REDIRECT and FreeBSD has divert-to; macOS pf has neither, so no rule tuning could fix it.",
+      "decision": "Intercept via an HTTP CONNECT proxy registered as the macOS system secure-web proxy (networksetup), not a transparent redirect. The client NAMES its destination in CONNECT, which is authoritative (better than the inferred lookup it replaces) and yields the real hostname without SNI \u2014 so pf_darwin.go, pfioc_natlook, DIOCNATLOOK and the anchor machinery were DELETED rather than repaired. Everything downstream (CA, pump, sinks, masking, teardown) was unchanged and is verified. Arming requires per-launch consent and always reverts. Accepted tradeoff: this is COOPERATIVE \u2014 apps honoring the system proxy are seen, evasive software is not; a NetworkExtension transparent proxy is approved as a LATER phase to close that gap. Redact/block stays Phase 3.",
+      "consequences": [
+        "The user sees decrypted plaintext of their own outbound TLS (masked) \u2014 verified live: Proton Mail Sentry telemetry, iTunes commerce endpoints",
+        "Cert-pinned apps reject the leaf and are shown honestly as 'pinned' (bypassed, not decrypted), never faked",
+        "Evasive software that ignores the system proxy is NOT covered \u2014 an honest, documented gap, not a silent one",
+        "The whole pf/ioctl layer is gone: less code, no root-only struct layout to keep in sync with xnu",
+        "Interception cannot silently persist: teardown reverts the system proxy + trust on every exit path",
+        "A NetworkExtension transparent proxy would require an app bundle + entitlement \u2014 a distribution change, scoped as a later phase"
+      ],
+      "relatedNodes": [
+        "mod-intercept",
+        "counterspy-system"
+      ],
+      "relatedFlows": [
+        "intercept"
       ]
     }
   ]

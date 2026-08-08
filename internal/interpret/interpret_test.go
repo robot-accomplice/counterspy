@@ -71,7 +71,7 @@ func TestAssess_CorroboratedGrantIsSpywareGeneric(t *testing.T) {
 }
 
 // C3: a Gatekeeper-accepted signed app (e.g. an EDR) with a strong shape must NOT be
-// auto-Quarantined — capped at Investigate so the tool can't be weaponized to disable
+// auto-Quarantined, capped at Investigate so the tool can't be weaponized to disable
 // legitimate security software.
 func TestAssess_SignedAcceptedNeverQuarantines(t *testing.T) {
 	sub := model.Subject{Path: "/Applications/Falcon.app", Label: "com.crowdstrike.falcon"}
@@ -93,7 +93,7 @@ func TestAssess_SignedAcceptedNeverQuarantines(t *testing.T) {
 }
 
 // C3: an unsigned persistence-only item (a dev's own tool) caps at Investigate, not
-// Quarantine, without a tripwire — even above HighTier.
+// Quarantine, without a tripwire, even above HighTier.
 func TestAssess_UnsignedPersistenceOnlyCapsAtInvestigate(t *testing.T) {
 	sub := model.Subject{Path: "/Users/me/.roboticus/roboticus"}
 	in := []model.Finding{{
@@ -135,7 +135,7 @@ func TestAssess_LowScoreMonitor(t *testing.T) {
 }
 
 // #23: a dormant persistence remnant (missing target / disabled .bak plist) cannot execute, so it
-// caps at Monitor even at a score that would otherwise Investigate — the com.ironclad.agent case
+// caps at Monitor even at a score that would otherwise Investigate, the com.ironclad.agent case
 // (a dead .bak remnant must not read as urgently as a live agent).
 func TestAssess_DormantRemnantCapsAtMonitor(t *testing.T) {
 	sub := model.Subject{Path: "/x/agent"}

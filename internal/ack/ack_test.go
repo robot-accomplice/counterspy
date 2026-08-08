@@ -17,7 +17,7 @@ func e(kind model.SignalKind, summary string) model.Evidence {
 }
 
 // Fingerprint is stable across identical material state and across volatile Facts (a rescan with a
-// new PID must NOT read as "changed"), but changes when the score or an evidence line changes — that
+// new PID must NOT read as "changed"), but changes when the score or an evidence line changes. That
 // is what drives the "reviewed · changed" re-flag.
 func TestFingerprint_StableAndChangeSensitive(t *testing.T) {
 	a := mk(10, e(model.KindPersistence, "user LaunchAgent"), e(model.KindCodesign, "unsigned"))
@@ -69,7 +69,7 @@ func TestStore_AckUnackRoundTrip(t *testing.T) {
 	}
 }
 
-// Load tolerates an empty file (empty store) and reports a corrupt one (Rule 13 — a garbled local
+// Load tolerates an empty file (empty store) and reports a corrupt one (Rule 13: a garbled local
 // note file surfaces as an error to the caller, which degrades to "no acks", never a silent panic).
 func TestStore_LoadEmptyAndCorrupt(t *testing.T) {
 	dir := t.TempDir()

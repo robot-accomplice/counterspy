@@ -33,7 +33,7 @@ func simInit(t *testing.T) tcell.SimulationScreen {
 	return s
 }
 
-// `i` on a resolvable row requests the capture directly — there is no consent gate (the user is
+// `i` on a resolvable row requests the capture directly; there is no consent gate (the user is
 // inspecting their own machine's own traffic; the own-machine-only boundary is architectural).
 func TestEgressInspect_RequestsDirectly(t *testing.T) {
 	m := NewEgress().withGroups([]model.EgressGroup{eg("backuptool", model.Elevated, 900)})
@@ -79,7 +79,7 @@ func TestResolveInspectTarget(t *testing.T) {
 // The result overlay is modal: `r` toggles secret masking, esc closes back to the tree.
 func TestEgressInspect_RevealAndClose(t *testing.T) {
 	m := NewEgress()
-	m.Inspection = &inspection{view: model.InspectView{Verdict: "plaintext — readable (not encrypted)"}}
+	m.Inspection = &inspection{view: model.InspectView{Verdict: "plaintext, readable (not encrypted)"}}
 
 	m, _ = egressUpdate(m, tcell.KeyRune, 'v')
 	if !m.Reveal {
@@ -133,14 +133,14 @@ func TestDrawInspect_MasksSecretUntilRevealed(t *testing.T) {
 func TestRunConsole_InspectEndToEnd(t *testing.T) {
 	s := simInit(t)
 	fi := &fakeInspector{view: model.InspectView{
-		Verdict:  "plaintext — readable (not encrypted)",
+		Verdict:  "plaintext, readable (not encrypted)",
 		Coverage: model.InspectPlaintext,
 		Sent:     "POST /steal\nAuthorization: Bearer tok_hunter2exfil_SECRET",
 	}}
 	sampler := fakeSampler{groups: []model.EgressGroup{eg("backuptool", model.Elevated, 900)}}
 	tick := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil) }()
+	go func() { done <- RunConsole(s, New(nil, nil), &fakeActor{}, sampler, fi, tick, nil, nil, "") }()
 
 	step := func() { time.Sleep(35 * time.Millisecond) }
 	s.InjectKey(tcell.KeyTab, 0, tcell.ModNone) // → Exfiltration (warm sample)
@@ -193,7 +193,7 @@ func TestDrawInspect_BothDirections(t *testing.T) {
 		target: inspectTarget{app: "claude", pid: 1, trust: "notarized",
 			conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 443}, Proto: "tcp"}},
 		view: model.InspectView{
-			Verdict:   "plaintext — readable (not encrypted)",
+			Verdict:   "plaintext, readable (not encrypted)",
 			Coverage:  model.InspectPlaintext,
 			Sent:      "GET /answer HTTP/1.1\n",
 			Received:  "HTTP/1.1 200 OK\n\nhere is the response body",
@@ -211,7 +211,7 @@ func TestDrawInspect_BothDirections(t *testing.T) {
 }
 
 // An encrypted (metadata-only) flow shows byte volume but no readable content. The pane must
-// explain WHY — the bytes are ciphertext, nothing to view — so the volume isn't a silent mystery,
+// explain WHY (the bytes are ciphertext, nothing to view) so the volume isn't a silent mystery,
 // and the footer must NOT offer a 'view' action there's nothing to act on.
 func TestDrawInspect_EncryptedExplainsWhyNoContent(t *testing.T) {
 	s := simInit(t)
@@ -269,7 +269,7 @@ func TestWrapText(t *testing.T) {
 	}
 }
 
-// T-15: a long SENT must not swallow the whole pane and silently hide RECEIVED — reserved space
+// T-15: a long SENT must not swallow the whole pane and silently hide RECEIVED; reserved space
 // keeps RECEIVED visible (its label and at least some content), even on a short terminal.
 func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
 	s := tcell.NewSimulationScreen("")
@@ -280,7 +280,7 @@ func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
 	insp := &inspection{
 		target: inspectTarget{app: "x", pid: 1, conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 80}, Proto: "tcp"}},
 		view: model.InspectView{
-			Verdict: "plaintext — readable (not encrypted)", Coverage: model.InspectPlaintext,
+			Verdict: "plaintext, readable (not encrypted)", Coverage: model.InspectPlaintext,
 			Sent: strings.Repeat("a line of sent data\n", 30), Received: "RECVMARKER body",
 		},
 	}
@@ -294,7 +294,7 @@ func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
 	}
 
 	// At the minimum height (h=6) with both directions, the split must not draw past the footer or
-	// panic — the footer hint must survive (cp-hk1 Antagonist F-1: sentMaxY capped at h-1).
+	// panic; the footer hint must survive (cp-hk1 Antagonist F-1: sentMaxY capped at h-1).
 	for _, h := range []int{6, 7, 8} {
 		s2 := tcell.NewSimulationScreen("")
 		if err := s2.Init(); err != nil {
@@ -303,7 +303,7 @@ func TestDrawInspect_ReceivedStaysVisibleUnderLongSent(t *testing.T) {
 		s2.SetSize(60, h)
 		insp2 := &inspection{
 			target: inspectTarget{app: "x", pid: 1, conn: model.Conn{Endpoint: model.Endpoint{IP: "1.2.3.4", Port: 80}, Proto: "tcp"}},
-			view:   model.InspectView{Verdict: "plaintext — readable", Coverage: model.InspectPlaintext, Sent: strings.Repeat("x\n", 20), Received: "y"},
+			view:   model.InspectView{Verdict: "plaintext, readable", Coverage: model.InspectPlaintext, Sent: strings.Repeat("x\n", 20), Received: "y"},
 		}
 		drawInspect(s2, insp2, true) // must not panic
 		s2.Show()

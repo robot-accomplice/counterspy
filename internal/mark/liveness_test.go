@@ -10,7 +10,7 @@ func ev(kind model.SignalKind, facts map[string]string) model.Evidence {
 	return model.Evidence{Kind: kind, Facts: facts}
 }
 
-// Classify no longer derives run-state — interpret does, storing it on Assessment.Liveness
+// Classify no longer derives run-state; interpret does, storing it on Assessment.Liveness
 // (issue #23). Classify only maps that value to a glyph and adds the socket mark, which is the
 // one thing it still reads from evidence. These assert that assembly + the ▸/◐/† mapping.
 func TestClassify(t *testing.T) {

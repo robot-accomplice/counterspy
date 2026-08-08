@@ -1,0 +1,171 @@
+{
+  "id": "v0-7-0-tls-intercept",
+  "version": "0.7.0",
+  "name": "Transparent TLS-intercepting decrypt mirror (Phase 2)",
+  "status": "in-progress",
+  "posture": "on-track",
+  "summary": "Phase 2 + 2.5 of the outbound-visibility program: an opt-in, consented, READ-ONLY TLS decrypt mirror. A local reversible CA mints per-SNI leaves; counterspy registers as the system HTTPS proxy and clients CONNECT through it, naming their destination; the proxy terminates their TLS, re-dials the verified upstream, relays byte-for-byte unmodified, and captures the decrypted plaintext (Redact-masked) as per-message InterceptedMessage events streamed to a unix socket and/or a rotating 0600 log, ingested via `console --intercept` into the console's Exfiltration view. Arm always disarms (exit/panic/signal/--uninstall). The originally approved pf rdr redirect was DISPROVED by the smoke test and replaced. Phase 2 core (CA + pump + teardown) was smoke-test verified 2026-07-16; the Phase 2.5 per-message pump + Exfiltration merge and the 2026-07-20/21 ABORT-review fixes were independently RE-VERIFIED GREEN on 2026-08-05: Self1 (daemon self-exclusion across install paths), the tree de-alias honesty gap, and decrypted-message retention were fixed, plus a pre-existing silent-drop of unattributed decrypted flows. L1/F1/F-A confirmed holding. Redact/block is Phase 3; a NetworkExtension transparent proxy is a later phase.",
+  "targetWindow": "Ready to cut: v0.7.0 ABORT re-review GREEN (2026-08-05); PR #48 marked ready-for-review; feature->develop->main->tag.",
+  "lastUpdated": "2026-08-05T00:00:00.000Z",
+  "updateSource": "swarm build cp-p2a..cp-p2j + smoke test 2026-07-16 + Phase 2.5 + v0.7.0 ABORT review & fixes 2026-07-20/21; 2026-08-05 ABORT re-review GREEN (Self1 + tree de-alias + retention + pre-existing silent-drop fixed; L1/F1/F-A hold), blockers resolved, ready to cut",
+  "scope": {
+    "required": [
+      {
+        "id": "intercept-core",
+        "title": "CA + TLS terminate/re-dial/relay pump + publish sinks",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "internal/intercept: reversible P-256 CA with a bounded, expiry-aware per-SNI leaf cache + 0600 persistence (LoadOrCreate, O_EXCL race-safe); the read-only MITM pump (GetCertificate per SNI, honest handshake classification decrypted/pinned/opaque/error, verified upstream re-dial, idle-timeout relay, bounded capture, DecodeCleartext+Redact before the flow exists); publish sinks (non-blocking socket with reader reaping + drop counter, rotating 0600 JSONL log, bounded/sanitized untrusted-input readers).",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [],
+        "evidence": [
+          "go test ./... -race; coverage ~87%",
+          "GOOS=linux build",
+          "cp-p2a..cp-p2d swarm-reviewed + remediated (conn-leak, socket stall, untrusted-input bounds, body-secret masking)"
+        ]
+      },
+      {
+        "id": "intercept-command",
+        "title": "intercept daemon + console --intercept view (consent + reliable teardown)",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "`counterspy intercept [--stream[=sock]] [--log[=path]] [--uninstall] [--yes]` (approved surface): consent -> arm trust + system proxy with the signal handler registered FIRST -> Proxy.Serve -> reverse-order teardown on exit/panic/signal, reporting revert failures and restoring each service's PRIOR proxy setting; --uninstall is non-minting + idempotent. `console --intercept[=path]` ingests the live socket (or a --log file) into the console's Exfiltration view, joining decrypted per-message events to apps by PID; the socket is chmod 0600 + chowned to the invoking user so a NON-root console can read a root daemon's stream.",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [
+          "intercept-core"
+        ],
+        "evidence": [
+          "root smoke test 2026-07-16: live decrypt of real system traffic (Proton Mail Sentry telemetry, iTunes commerce), pinned apps reported honestly, Cookie masked, proxy + trust restored on exit",
+          "cp-p2f/cp-p2g/cp-p2i/cp-p2j swarm-reviewed + remediated",
+          "seam-driven unit tests for ordering/teardown/consent/uninstall/CONNECT/TUI"
+        ]
+      },
+      {
+        "id": "intercept-routing-pivot",
+        "title": "Replace the pf rdr redirect with a CONNECT + system-proxy mechanism",
+        "kind": "bugfix",
+        "status": "complete",
+        "summary": "The approved transparent pf rdr redirect was disproved in the smoke test: pf translates only INBOUND packets, so a maximally permissive rule logged 27828 Evaluations / 0 Packets against local outbound traffic. Replaced with an HTTP CONNECT proxy registered via networksetup; pf_darwin.go, pfioc_natlook, DIOCNATLOOK and the anchor machinery deleted. Also fixed the silent-drop the test surfaced (an unresolvable connection now publishes FlowError instead of vanishing).",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [],
+        "evidence": [
+          "pfctl -a counterspy -s nat -v: Evaluations 27828 / Packets 0",
+          "cp-p2i",
+          "go test ./... -race"
+        ]
+      },
+      {
+        "id": "intercept-per-message-merge",
+        "title": "Phase 2.5: per-message pump + Exfiltration merge + ABORT-review fixes",
+        "kind": "feature",
+        "status": "complete",
+        "summary": "Per-message streaming pump (HTTP/1.1 framing, request↔response FIFO correlation via a channel, ALPN h2-only bypass) publishing InterceptedMessage events; merged into the console's Exfiltration view via `console --intercept`, joined to apps by PID, with honest empty states and a version-mismatch footer. The 2026-07-20/21 ABORT review drove fixes for L1/F1/F-A/Self1/W1; the 2026-08-05 ABORT re-review (independent red-team, reproduced-RED gate) verified L1/F1/F-A hold, and closed the remaining open findings: Self1 daemon self-exclusion now spans split installs; the tree de-alias honesty gap (armed destinations relabeled off the loopback proxy) is closed; decrypted-message retention is bounded by freeze-on-full (never evicting captured evidence) with a message-stream recycle guard; and a pre-existing silent-drop of unattributed decrypted flows was fixed (Rule 13). Remaining residuals are low-severity and documented in the ABORT artifact.",
+        "owner": "Project maintainers",
+        "workstreamId": "phase2",
+        "dependsOn": [
+          "intercept-core",
+          "intercept-command"
+        ],
+        "evidence": [
+          "go test ./... green; go vet + gofmt clean on the feature branch",
+          "2026-08-05 ABORT re-review: independent red-team verifiers, each reproducing RED before any claim; final verdict GO (fixes in 4900451, 1311ea6, e744ee3, 0e07819)",
+          "docs/releases/v0.7.0-tls-intercept-abort.md (review + re-run + 2026-08-05 re-review closure)",
+          "docs/superpowers/specs/2026-07-21-intercept-view-merge-design.md"
+        ]
+      }
+    ],
+    "planned": [],
+    "stretch": [],
+    "deferred": [
+      {
+        "id": "intercept-redact-block",
+        "title": "Redact / block outbound payloads (Phase 3)",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "Phase 2 is decrypt/visibility ONLY. Stripping sensitive data from outbound payloads or blocking transmission is deferred to Phase 3 (Rule 16: read-only first establishes the pump + trust model before mutating live traffic, which is higher-risk).",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "intercept-ipv6-origdest",
+        "title": "IPv6 original-destination recovery",
+        "kind": "chore",
+        "status": "deferred",
+        "summary": "OrigDest is IPv4-only; a v6 flow fails loud rather than mis-reporting. Deferred (Rule 16): the AF_INET6 DIOCNATLOOK path + a v6 rdr rule double the unverified ioctl surface, and v4 covers the smoke test.",
+        "owner": "Project maintainers"
+      },
+      {
+        "id": "intercept-netextension",
+        "title": "NetworkExtension transparent proxy (cover software that ignores the system proxy)",
+        "kind": "feature",
+        "status": "deferred",
+        "summary": "The CONNECT mechanism is COOPERATIVE: proxy-honoring apps are seen, evasive software is not. True transparent interception on macOS needs a NETransparentProxyProvider \u2014 a signed .app bundle, the networkextension entitlement, Developer Program membership and notarization. Deferred (Rule 16): that is a distribution change for a tool currently shipped as a single Go binary via curl|sh and Homebrew, and the cooperative path already covers the stated use case (a trusted app phoning home). User-approved sequencing: CONNECT now, NE later.",
+        "owner": "Project maintainers"
+      }
+    ]
+  },
+  "workstreams": [
+    {
+      "id": "phase2",
+      "name": "Outbound visibility Phase 2 (TLS intercept)",
+      "owner": "Project maintainers",
+      "status": "in-progress",
+      "posture": "on-track",
+      "summary": "Consented read-only TLS decrypt mirror, swarm-built across cp-p2a..cp-p2j with per-checkpoint fan-out review + remediation, smoke-test verified 2026-07-16 (which disproved the approved pf routing and drove the CONNECT pivot). Phase 2.5 (per-message pump + Exfiltration merge) and the v0.7.0 ABORT-review fixes passed an independent re-review GREEN on 2026-08-05; ready to cut.",
+      "progress": 100,
+      "itemIds": [
+        "intercept-core",
+        "intercept-command",
+        "intercept-routing-pivot",
+        "intercept-per-message-merge"
+      ],
+      "evidence": [
+        "go test ./... -race PASS; darwin + linux build",
+        "architext validate",
+        "root smoke test 2026-07-16: live decrypt + clean teardown"
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "smoke-test",
+      "label": "Root smoke test: system proxy + CONNECT decrypt + clean teardown (PASSED)",
+      "status": "complete",
+      "targetWindow": "maintainer-operated (sudo)",
+      "order": 1,
+      "itemIds": [
+        "intercept-command"
+      ]
+    },
+    {
+      "id": "cut-070",
+      "label": "v0.7.0 cut (feature\u2192develop\u2192main\u2192tag)",
+      "status": "planned",
+      "targetWindow": "main",
+      "order": 2,
+      "itemIds": [
+        "intercept-core",
+        "intercept-command",
+        "intercept-routing-pivot"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "evidence": [
+    {
+      "id": "gate-ci",
+      "label": "go test ./... -race + GOOS=linux build + architext validate (green on the feature branch)",
+      "kind": "test",
+      "status": "complete"
+    },
+    {
+      "id": "gate-smoke",
+      "label": "Root smoke test 2026-07-16: live decrypt of system traffic via the system HTTPS proxy; pinned apps honest; secrets masked; proxy + CA trust restored on exit (verified CSSMERR_TP_NOT_TRUSTED)",
+      "kind": "test",
+      "status": "complete"
+    }
+  ],
+  "blockers": []
+}

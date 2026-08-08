@@ -41,7 +41,7 @@ func TestToInspectView_CoverageMapping(t *testing.T) {
 	}
 }
 
-// A TLS-ciphertext direction is NOT surfaced (random noise) — even when the OTHER direction is
+// A TLS-ciphertext direction is NOT surfaced (random noise), even when the OTHER direction is
 // readable plaintext (§6: never dump ciphertext; the readable side still shows).
 func TestToInspectView_TLSCiphertextNotDumped(t *testing.T) {
 	r := inspect.Result{
@@ -61,7 +61,7 @@ func TestToInspectView_TLSCiphertextNotDumped(t *testing.T) {
 	}
 }
 
-// A CLEARTEXT binary payload (not TLS) must still be SHOWN — as a hexdump — not hidden. This is the
+// A CLEARTEXT binary payload (not TLS) must still be SHOWN, as a hexdump, not hidden. This is the
 // :80 case: the wire bytes are the real payload; the user needs to see them.
 func TestToInspectView_CleartextBinaryShownAsHex(t *testing.T) {
 	body := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0xfe, 0x01} // zip-ish binary, not text, not TLS
@@ -109,7 +109,7 @@ func TestSanitizeMultiline(t *testing.T) {
 	}
 }
 
-// A non-root capture failure (the common case — the monitor is unprivileged but /dev/bpf isn't)
+// A non-root capture failure (the common case, the monitor is unprivileged but /dev/bpf isn't)
 // must read as an actionable "relaunch with sudo", not a raw errno; other failures pass through.
 func TestCaptureFailVerdict(t *testing.T) {
 	perm := captureFailVerdict(syscall.EACCES)
