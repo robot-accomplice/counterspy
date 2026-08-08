@@ -37,6 +37,18 @@ func TestDestCell_RelabelsProxyButNotRealRemote(t *testing.T) {
 	}
 }
 
+// The armed relabel must keep the "+N" more-destinations hint (topDest emits "ip:port +N"), so the
+// collapsed row still tells the user the app has other destinations (ABORT re-review low-sev residual).
+func TestDestCell_PreservesMoreDestinationsHint(t *testing.T) {
+	label, isProxy := destCell("127.0.0.1:62443 +2", "127.0.0.1:62443", "127.0.0.1:62443")
+	if !isProxy || !strings.Contains(label, "proxy") || !strings.Contains(label, "+2") {
+		t.Fatalf("armed relabel must keep the +N more-destinations hint, got %q", label)
+	}
+	if strings.Contains(label, "127.0.0.1") {
+		t.Fatalf("armed relabel must not show the raw loopback IP, got %q", label)
+	}
+}
+
 func renderEgress(t *testing.T, m EgressModel, w, h int) string {
 	t.Helper()
 	s := tcell.NewSimulationScreen("")

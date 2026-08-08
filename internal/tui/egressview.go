@@ -537,9 +537,28 @@ func exfilTitle(armed bool) string {
 // the label and whether it is the proxy, so the caller can skip the port-encryption glyph.
 func destCell(dest, ep, proxyAddr string) (string, bool) {
 	if destProxied(ep, proxyAddr) {
-		return "⚿ intercept proxy", true
+		return "⚿ intercept proxy" + moreDestsSuffix(dest), true
 	}
 	return dest, false
+}
+
+// moreDestsSuffix returns a trailing " +N" more-destinations hint from a topDest label ("ip:port +N"),
+// so the armed relabel still tells the user the app has other destinations. "" when there is none.
+func moreDestsSuffix(dest string) string {
+	i := strings.LastIndex(dest, " +")
+	if i < 0 {
+		return ""
+	}
+	n := dest[i+2:]
+	if n == "" {
+		return ""
+	}
+	for _, c := range n {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return dest[i:]
 }
 
 func drawEgressRow(s tcell.Screen, cols egressCols, w, y int, row egressRow, selected bool, expanded map[string]bool, expandedPID map[int]bool, mode trendMode, peak int, proxyAddr string) {
