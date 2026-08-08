@@ -1,4 +1,4 @@
-# Phase 3 (MVP): Egress blocking (IP/port firewall, host-down reaction)
+# Phase 3 (MVP): Egress blocking (IP/port, unresponsive-sink reaction)
 
 - Date: 2026-08-08
 - Status: Design approved; awaiting spec review, then a feasibility smoke test (task 0), then an implementation plan
@@ -107,8 +107,9 @@ Explicitly out of scope:
   either the cooperative proxy (proxy-honoring HTTPS only) or a NetworkExtension
   content filter (entitlement); neither is in this MVP.
 - Content inspection or payload modification of any kind.
-- Stage-2 stealth hardening (making the drop indistinguishable from a real
-  outage beyond "no RST/ICMP"). The MVP aims for host-down; perfect
+- Stage-2 stealth hardening (making the block indistinguishable from a genuinely
+  unresponsive server beyond the basic no-RST/no-ICMP reaction, e.g. matching
+  natural timing). The MVP aims for the unresponsive-sink reaction; perfect
   indistinguishability is stage 2.
 - Robust name-based rules. Rules are IP/CIDR + port; a hostname maps to rotating
   IPs, so name convenience (resolve + refresh) is a later addition.
