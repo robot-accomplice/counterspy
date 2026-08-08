@@ -37,6 +37,22 @@ func TestParseLsofPorts_AttributesTheClientSide(t *testing.T) {
 
 // The proxy holds the OTHER end of every client socket, so an unfiltered sweep would attribute half the
 // flows to counterspy itself. Our own pid must be excluded.
+// IPv6 attribution regression: the CONNECT pivot replaced the IPv4-only pf `OrigDest`/DIOCNATLOOK path,
+// and owner attribution is now purely port-based. portOf reads the port after the FINAL colon, so a
+// bracketed IPv6 lsof line attributes correctly and a v6 flow is NOT left unattributed. This locks in
+// that the stale v0.7.0 "IPv6 original-destination" deferral is obsolete, not an open gap.
+func TestParseLsofPorts_AttributesIPv6ClientSide(t *testing.T) {
+	fixture := "p42000\ncchrome\nn[2001:db8::1]:55555->[2001:db8::2]:443\n"
+	m := parseLsofPorts(fixture, 85908)
+	e, ok := m[55555]
+	if !ok {
+		t.Fatalf("IPv6 client port not attributed (v6 flows would show unattributed): %v", m)
+	}
+	if e.pid != 42000 || e.name != "chrome" {
+		t.Fatalf("expected chrome/42000 for the v6 flow, got %+v", e)
+	}
+}
+
 func TestParseLsofPorts_ExcludesOurselves(t *testing.T) {
 	m := parseLsofPorts(lsofFixture, 85908)
 	for port, e := range m {

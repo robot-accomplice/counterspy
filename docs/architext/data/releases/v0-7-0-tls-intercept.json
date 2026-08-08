@@ -92,8 +92,8 @@
         "id": "intercept-ipv6-origdest",
         "title": "IPv6 original-destination recovery",
         "kind": "chore",
-        "status": "deferred",
-        "summary": "OrigDest is IPv4-only; a v6 flow fails loud rather than mis-reporting. Deferred (Rule 16): the AF_INET6 DIOCNATLOOK path + a v6 rdr rule double the unverified ioctl surface, and v4 covers the smoke test.",
+        "status": "complete",
+        "summary": "OBSOLETE (resolved by the CONNECT pivot): this deferral described the IPv4-only pf `OrigDest`/DIOCNATLOOK path, which was DELETED when the transparent pf rdr redirect was replaced by the CONNECT proxy. The destination now comes from the `CONNECT host:port` authority (net.SplitHostPort handles `[::1]:443`), owner attribution is port-based and protocol-agnostic (portOf reads the port after the final colon, so bracketed IPv6 attributes correctly), and the CA mints IPv6 IP SANs. No v6 gap remains; locked in by TestParseLsofPorts_AttributesIPv6ClientSide and the CA IPv6 tests.",
         "owner": "Project maintainers"
       },
       {
