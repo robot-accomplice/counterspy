@@ -35,6 +35,9 @@ In scope (MVP):
   mode (actually drop).
 - Every block and every audit would-block is logged and surfaced in the console.
   No silent drops.
+- Cooperative scope only: blocking reaches proxy-honoring HTTPS, not QUIC/UDP,
+  raw TCP, or proxy-ignoring apps. A rule is not an airtight firewall (see
+  "Scope limitation" below). Stated as an MVP boundary, not a defect.
 
 Explicitly out of scope (north star, documented below, not built):
 
@@ -142,10 +145,42 @@ case Block (audit mode):
 }
 ```
 
-The refusal replies to the client's CONNECT with an error status (403) and
-closes, so the app sees a visible, immediate failure rather than a hang or a
-silent black hole. The failure is the app's own error path (a failed HTTPS
-request), which is the honest, debuggable outcome of a firewall-style block.
+The refusal is at the proxy protocol layer, not the tunneled-content layer: the
+client reached us by speaking HTTP (`CONNECT host:443 HTTP/1.1`), so we refuse
+that CONNECT the proxy-protocol way, with a non-2xx status, and close. The block
+itself is content-agnostic: it happens before TLS termination, so it refuses the
+whole tunnel regardless of what would have flowed inside (HTTP/1.1, HTTP/2, gRPC,
+WebSocket, or any other protocol over TLS). The refusal makes the app see a
+visible, immediate failure rather than a hang or a silent black hole, and it
+becomes the app's own error path (a failed HTTPS request), the honest,
+debuggable outcome of a firewall-style block. The exact refusal form (a `403`
+CONNECT response, which most proxy stacks surface cleanly to the app, versus a
+bare TCP close, which is protocol-agnostic but reasonless) is a planning
+decision; both refuse at the CONNECT layer, neither inspects the tunnel.
+
+### Scope limitation: cooperative, proxy-honoring HTTPS only
+
+Blocking at the CONNECT gate only reaches traffic that uses the HTTP CONNECT
+proxy, which is HTTPS from proxy-honoring apps (CFNetwork/NSURLSession and other
+software that respects the system HTTPS proxy). It is the same cooperative
+limitation v0.7.0's intercept already carries, and it MUST be stated plainly
+because it matters more for blocking than for observing:
+
+- A block rule is NOT an airtight firewall. It refuses an `(app, dest)` flow only
+  when that flow goes through the system HTTPS proxy.
+- It does NOT block QUIC/HTTP-3 or any UDP transport, raw TCP that is not
+  CONNECT-tunneled, or apps that deliberately ignore the system proxy. An app
+  that switches from proxied TLS to QUIC evades a block, exactly as it evades
+  interception today.
+- The honest consequence: the tool must present a block as "refused via the
+  proxy," never as a guarantee the destination is unreachable. The console and
+  logs should make the cooperative scope legible, so an operator does not read a
+  block as watertight.
+
+Closing this gap is the same future as closing the interception gap: a
+NetworkExtension transparent proxy (roadmap item `intercept-netextension`), which
+would let blocking (and interception) cover proxy-ignoring and non-HTTP traffic.
+Out of scope for this MVP, which inherits the cooperative boundary on purpose.
 
 ### Modes, consent, reversibility
 
@@ -237,9 +272,10 @@ status generalizes to `redacted`/`filtered`, and the message pump already exists
 
 ## Open questions for implementation planning
 
-- Exact refusal status/response to the client CONNECT (403 vs 502 vs a plain
-  close). 403 is the current proposal; confirm during planning against what
-  CFNetwork/NSURLSession surface to the app most cleanly.
+- Exact refusal form for a blocked CONNECT: a `403` CONNECT response versus a
+  bare TCP close (both refuse at the CONNECT layer, neither inspects the tunnel;
+  see Mechanism). `403` is the current proposal; confirm during planning against
+  what CFNetwork/NSURLSession surface to the app most cleanly.
 - Whether `block.json` is watched for live reload or only read at arm time. MVP
   proposal: read at arm time only (a rule change means re-arm), for simplicity
   and to avoid mid-session policy flapping.
