@@ -280,9 +280,21 @@ func (f *framingReader) readChunkedBody() ([]byte, bool, string, error) {
 		if i := strings.Index(line, ";"); i >= 0 {
 			line = line[:i]
 		}
-		size, parseErr := strconv.ParseInt(strings.TrimSpace(line), 16, 64)
+		// RFC 7230 §4.1: chunk-size = 1*HEXDIG, no sign. strconv.ParseInt accepts a leading sign, so a
+		// "-0"/"+0" would parse as 0 and be treated as the terminal chunk, silently ending capture
+		// (truncated=false) while a peer hides every following byte from the sensor (issue #47). Reject
+		// any sign explicitly, and surface a reason rather than an empty (silent) one on any parse error.
+		sizeStr := strings.TrimSpace(line)
+		// Surface a malformed chunk size as an honest TRUNCATION (truncated + reason, err=nil), like a
+		// capture cap, rather than a silent complete or a discarded message: readRequest/readResponse
+		// drop the message on a body-reader error, which would hide the evasion. The desynced tail then
+		// fails the next head parse and capture stops for the connection on its own.
+		if sizeStr == "" || sizeStr[0] == '+' || sizeStr[0] == '-' {
+			return body, true, "malformed chunk size", nil
+		}
+		size, parseErr := strconv.ParseInt(sizeStr, 16, 64)
 		if parseErr != nil {
-			return body, true, "", parseErr
+			return body, true, "malformed chunk size", nil
 		}
 		if size == 0 {
 			// Trailer-part: read until blank line.
